@@ -33,7 +33,8 @@ jobs:
       - uses: actions/setup-node@v4 # TODO: pin to commit SHA
         with:
           node-version: '24'
-          cache: pnpm
+          # Don't use cache to avoid conflicts with locally installed Node 24
+          # cache: pnpm
       - run: pnpm install --frozen-lockfile
 
       - name: pnpm audit (advisory gate)
