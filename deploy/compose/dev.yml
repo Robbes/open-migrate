@@ -18,6 +18,8 @@ services:
       POSTGRES_USER: openmig
       POSTGRES_PASSWORD: openmig
       POSTGRES_INITDB_ARGS: -E UTF8
+    ports:
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U openmig -d openmig"]
       interval: 5s

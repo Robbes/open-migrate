@@ -5,7 +5,7 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;  -- gen_random_uuid()
 
 -- ========================= Tenancy & connections =========================
-CREATE TABLE tenant (
+CREATE TABLE IF NOT EXISTS tenant (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name        text NOT NULL,
   status      text NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended','deleting')),
@@ -14,7 +14,7 @@ CREATE TABLE tenant (
 );
 
 -- A source or target system. Secrets are NEVER stored here; secret_ref points to the vault.
-CREATE TABLE connection (
+CREATE TABLE IF NOT EXISTS connection (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id    uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   role         text NOT NULL CHECK (role IN ('source','target')),
@@ -27,11 +27,11 @@ CREATE TABLE connection (
   created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX ix_connection_tenant ON connection(tenant_id);
+CREATE INDEX IF NOT EXISTS ix_connection_tenant ON connection(tenant_id);
 
 -- ========================= Mailboxes & mappings =========================
 -- Mailboxes exist on both source and target connections.
-CREATE TABLE mailbox (
+CREATE TABLE IF NOT EXISTS mailbox (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id       uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   connection_id   uuid NOT NULL REFERENCES connection(id) ON DELETE CASCADE,
@@ -45,10 +45,10 @@ CREATE TABLE mailbox (
   updated_at      timestamptz NOT NULL DEFAULT now(),
   UNIQUE (connection_id, external_id)
 );
-CREATE INDEX ix_mailbox_tenant ON mailbox(tenant_id);
+CREATE INDEX IF NOT EXISTS ix_mailbox_tenant ON mailbox(tenant_id);
 
 -- Links a source mailbox to its target mailbox; carries mode and the shared-address pattern.
-CREATE TABLE mailbox_mapping (
+CREATE TABLE IF NOT EXISTS mailbox_mapping (
   id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id         uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   source_mailbox_id uuid NOT NULL REFERENCES mailbox(id) ON DELETE CASCADE,
@@ -62,10 +62,10 @@ CREATE TABLE mailbox_mapping (
   updated_at        timestamptz NOT NULL DEFAULT now(),
   UNIQUE (source_mailbox_id, target_mailbox_id)
 );
-CREATE INDEX ix_mapping_tenant ON mailbox_mapping(tenant_id);
+CREATE INDEX IF NOT EXISTS ix_mapping_tenant ON mailbox_mapping(tenant_id);
 
 -- Distribution list (Pattern D): definition + members; no message store to copy.
-CREATE TABLE group_def (
+CREATE TABLE IF NOT EXISTS group_def (
   id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id            uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   source_connection_id uuid NOT NULL REFERENCES connection(id) ON DELETE CASCADE,
@@ -76,10 +76,10 @@ CREATE TABLE group_def (
   created_at           timestamptz NOT NULL DEFAULT now(),
   updated_at           timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX ix_group_tenant ON group_def(tenant_id);
+CREATE INDEX IF NOT EXISTS ix_group_tenant ON group_def(tenant_id);
 
 -- ========================= Scope & collection mapping =========================
-CREATE TABLE scope_selection (
+CREATE TABLE IF NOT EXISTS scope_selection (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id  uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   mapping_id uuid NOT NULL REFERENCES mailbox_mapping(id) ON DELETE CASCADE,
@@ -91,7 +91,7 @@ CREATE TABLE scope_selection (
 );
 
 -- Special-use folder mapping (RFC 6154), e.g. "Sent Items" -> "Sent" (\Sent).
-CREATE TABLE collection_mapping (
+CREATE TABLE IF NOT EXISTS collection_mapping (
   id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id         uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   mapping_id        uuid NOT NULL REFERENCES mailbox_mapping(id) ON DELETE CASCADE,
@@ -105,14 +105,14 @@ CREATE TABLE collection_mapping (
 
 -- ========================= The idempotency ledger =========================
 -- One row per source item. The UNIQUE (tenant, mapping, natural_key_hash) is the idempotency anchor.
-CREATE TABLE item (
+CREATE TABLE IF NOT EXISTS item (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id        uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   mapping_id       uuid NOT NULL REFERENCES mailbox_mapping(id) ON DELETE CASCADE,
   domain           text NOT NULL CHECK (domain IN ('email','calendar','contact','file')),
   collection       text NOT NULL,               -- folder path / calendar id / addressbook id / drive root
   natural_key      text NOT NULL,               -- Message-ID / iCal UID(+RECURRENCE-ID) / vCard UID / file path
-  natural_key_hash bytea NOT NULL,              -- sha-256 of (domain | collection | natural_key)
+  natural_key_hash text NOT NULL,               -- sha-256 hex of (domain | collection | natural_key)
   content_hash     text,                        -- change detection
   size_bytes       bigint,
   source_ref       jsonb NOT NULL DEFAULT '{}', -- {graphId, imapUid, uidValidity, etag, driveItemId, ...}
@@ -126,13 +126,13 @@ CREATE TABLE item (
   updated_at       timestamptz NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, mapping_id, natural_key_hash)
 );
-CREATE INDEX ix_item_status      ON item(tenant_id, mapping_id, status);
-CREATE INDEX ix_item_collection  ON item(tenant_id, mapping_id, domain, collection);
-CREATE INDEX ix_item_content     ON item(content_hash);
+CREATE INDEX IF NOT EXISTS ix_item_status      ON item(tenant_id, mapping_id, status);
+CREATE INDEX IF NOT EXISTS ix_item_collection  ON item(tenant_id, mapping_id, domain, collection);
+CREATE INDEX IF NOT EXISTS ix_item_content     ON item(content_hash);
 -- For very large mailboxes, consider partitioning `item` by mapping_id (future).
 
 -- ========================= Sync checkpoints (delta state) =========================
-CREATE TABLE sync_checkpoint (
+CREATE TABLE IF NOT EXISTS sync_checkpoint (
   id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id         uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   mapping_id        uuid NOT NULL REFERENCES mailbox_mapping(id) ON DELETE CASCADE,
@@ -146,7 +146,7 @@ CREATE TABLE sync_checkpoint (
 );
 
 -- ========================= Runs / orchestration =========================
-CREATE TABLE run (
+CREATE TABLE IF NOT EXISTS run (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id        uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   mapping_id       uuid REFERENCES mailbox_mapping(id) ON DELETE SET NULL,  -- NULL = tenant-wide
@@ -159,10 +159,10 @@ CREATE TABLE run (
   finished_at      timestamptz,
   created_at       timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX ix_run_tenant  ON run(tenant_id, created_at DESC);
-CREATE INDEX ix_run_mapping ON run(mapping_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_run_tenant  ON run(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_run_mapping ON run(mapping_id, created_at DESC);
 
-CREATE TABLE run_event (
+CREATE TABLE IF NOT EXISTS run_event (
   id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   run_id    uuid NOT NULL REFERENCES run(id) ON DELETE CASCADE,
@@ -171,10 +171,10 @@ CREATE TABLE run_event (
   detail    jsonb,
   at        timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX ix_run_event_run ON run_event(run_id, at);
+CREATE INDEX IF NOT EXISTS ix_run_event_run ON run_event(run_id, at);
 
 -- ========================= Discovery / decision queue (§11.1/§11.2) =========================
-CREATE TABLE decision (
+CREATE TABLE IF NOT EXISTS decision (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id        uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   mapping_id       uuid REFERENCES mailbox_mapping(id) ON DELETE CASCADE,
@@ -190,9 +190,9 @@ CREATE TABLE decision (
   resolved_at      timestamptz,
   resolved_by      text
 );
-CREATE INDEX ix_decision_pending ON decision(tenant_id, status) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS ix_decision_pending ON decision(tenant_id, status) WHERE status = 'pending';
 
-CREATE TABLE policy_preset (
+CREATE TABLE IF NOT EXISTS policy_preset (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id  uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   category   text NOT NULL,
@@ -203,7 +203,7 @@ CREATE TABLE policy_preset (
 );
 
 -- ========================= Verification & cutover =========================
-CREATE TABLE verification (
+CREATE TABLE IF NOT EXISTS verification (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id           uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   mapping_id          uuid NOT NULL REFERENCES mailbox_mapping(id) ON DELETE CASCADE,
@@ -219,9 +219,9 @@ CREATE TABLE verification (
   status              text NOT NULL CHECK (status IN ('pass','warn','fail')),
   created_at          timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX ix_verif_mapping ON verification(mapping_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_verif_mapping ON verification(mapping_id, created_at DESC);
 
-CREATE TABLE cutover (
+CREATE TABLE IF NOT EXISTS cutover (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id      uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   mapping_id     uuid REFERENCES mailbox_mapping(id) ON DELETE CASCADE,
@@ -235,7 +235,7 @@ CREATE TABLE cutover (
 );
 
 -- ========================= Optional user-controlled extra backup (ADR-0015) =========================
-CREATE TABLE backup_target (
+CREATE TABLE IF NOT EXISTS backup_target (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id   uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   mapping_id  uuid REFERENCES mailbox_mapping(id) ON DELETE CASCADE,   -- NULL = tenant-wide
@@ -248,7 +248,7 @@ CREATE TABLE backup_target (
 );
 
 -- ========================= Audit =========================
-CREATE TABLE audit_log (
+CREATE TABLE IF NOT EXISTS audit_log (
   id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   actor     text,            -- user id / 'system'
@@ -258,15 +258,20 @@ CREATE TABLE audit_log (
   detail    jsonb,
   at        timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX ix_audit_tenant ON audit_log(tenant_id, at DESC);
+CREATE INDEX IF NOT EXISTS ix_audit_tenant ON audit_log(tenant_id, at DESC);
 
--- ========================= Row-Level Security (managed/Postgres only) =========================
+-- ========================= IMAP/DAV cursors (incremental sync state) =========================
+-- IMAP: {uidValidity, uidNext, highestModSeq} | CalDAV/CardDAV: {syncToken} | WebDAV: {ctag}
+CREATE TABLE IF NOT EXISTS cursor (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id    uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
+  mapping_id   uuid NOT NULL REFERENCES mailbox_mapping(id) ON DELETE CASCADE,
+  folder_path  text NOT NULL,
+  cursor_value jsonb NOT NULL DEFAULT '{}',  -- domain-specific cursor structure
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, mapping_id, folder_path)
+);
+CREATE INDEX IF NOT EXISTS ix_cursor_tenant_mapping ON cursor(tenant_id, mapping_id);
+
+-- Note: Row-Level Security (RLS) is enabled in managed deployments only.
 -- Self-host/SQLite: skip RLS (single tenant; still always filter by tenant_id in queries).
--- Managed: enable RLS on every tenant-scoped table and SET app.current_tenant per session/request.
--- Pattern shown for `item`; apply identically to all tenant-scoped tables:
-ALTER TABLE item ENABLE ROW LEVEL SECURITY;
-CREATE POLICY item_tenant_isolation ON item
-  USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
--- Repeat ENABLE + POLICY for: connection, mailbox, mailbox_mapping, group_def, scope_selection,
--- collection_mapping, sync_checkpoint, run, run_event, decision, policy_preset, verification,
--- cutover, backup_target, audit_log.
