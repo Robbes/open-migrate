@@ -1,0 +1,40 @@
+{
+  "creates": [
+    {
+      "object": "Domain",
+      "id": "dev-local",
+      "fields": {
+        "name": "dev.local",
+        "isEnabled": true
+      }
+    },
+    {
+      "object": "Account/User",
+      "id": "source",
+      "fields": {
+        "name": "source",
+        "domainId": "dev-local",
+        "credentials": [
+          {
+            "@type": "Password",
+            "secret": "source_password"
+          }
+        ]
+      }
+    },
+    {
+      "object": "Account/User",
+      "id": "target",
+      "fields": {
+        "name": "target",
+        "domainId": "dev-local",
+        "credentials": [
+          {
+            "@type": "Password",
+            "secret": "target_password"
+          }
+        ]
+      }
+    }
+  ]
+}
