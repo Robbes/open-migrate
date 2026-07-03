@@ -4,25 +4,20 @@ import {
   type TenantId,
   type MappingId,
 } from '@openmig/shared';
-import type { PgDatabase } from './db';
-import { eq, and, sql } from 'drizzle-orm';
-import * as schemaPg from './schema-pg';
+import type { SqliteDatabase } from './db';
+import { eq, and } from 'drizzle-orm';
+import * as schemaSqlite from './schema-sqlite';
 
 /**
- * SQL-backed idempotency ledger for PostgreSQL — workplan 0001, T0.
- * Backed by PostgreSQL via Drizzle; see
- * `packages/ledger/migrations/0001_init.sql` and schema-pg.ts.
+ * SQL-backed idempotency ledger for SQLite — workplan 0001, T0.
+ * Backed by SQLite via Drizzle; see
+ * `packages/ledger/migrations/0001_init.sql` and schema-sqlite.ts.
  * Idempotency anchor: UNIQUE(tenant_id, mapping_id, natural_key_hash). Non-destructive.
- *
- * The ledger is a fast CACHE + audit log of a fact that ALSO lives on the target (the natural
- * key — Message-ID / iCal UID / vCard UID / file path). If it is ever lost (e.g. a fresh
- * reinstall with no backup) it is rebuilt by reindexing the target rather than re-copying
- * everything; correctness does not depend on it surviving. See ADR-0020 and workplan T9.
  */
-export class PgLedger implements Ledger {
-  private readonly db: PgDatabase;
+export class SqliteLedger implements Ledger {
+  private readonly db: SqliteDatabase;
 
-  constructor(db: PgDatabase) {
+  constructor(db: SqliteDatabase) {
     this.db = db;
   }
 
@@ -33,12 +28,12 @@ export class PgLedger implements Ledger {
   ): Promise<LedgerRecord | undefined> {
     const result = await this.db
       .select()
-      .from(schemaPg.item)
+      .from(schemaSqlite.item)
       .where(
         and(
-          eq(schemaPg.item.tenantId, tenantId),
-          eq(schemaPg.item.mappingId, mappingId),
-          eq(schemaPg.item.naturalKeyHash, naturalKeyHash),
+          eq(schemaSqlite.item.tenantId, tenantId),
+          eq(schemaSqlite.item.mappingId, mappingId),
+          eq(schemaSqlite.item.naturalKeyHash, naturalKeyHash),
         ),
       )
       .limit(1);
@@ -54,20 +49,20 @@ export class PgLedger implements Ledger {
   async recordIfAbsent(record: LedgerRecord): Promise<LedgerRecord> {
     // Try to insert; if conflict, return existing row
     const inserted = await this.db
-      .insert(schemaPg.item)
+      .insert(schemaSqlite.item)
       .values({
-        id: sql`gen_random_uuid()`,
+        id: crypto.randomUUID(),
         tenantId: record.tenantId,
         mappingId: record.mappingId,
-        domain: 'email', // Default for now; can be parameterized
-        collection: '', // Default for now
-        naturalKey: '', // Will be set by caller if needed
+        domain: 'email',
+        collection: '',
+        naturalKey: '',
         naturalKeyHash: record.naturalKeyHash,
-        contentHash: record.contentHash,
+        contentHash: record.contentHash || null,
         status: 'copied',
         targetRef: JSON.stringify({ id: record.targetId }),
-        firstSeenAt: sql`now()`,
-        updatedAt: sql`now()`,
+        firstSeenAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       })
       .onConflictDoNothing()
       .returning();
@@ -86,16 +81,21 @@ export class PgLedger implements Ledger {
     return this.mapRowToRecord(inserted[0]!);
   }
 
-  private mapRowToRecord(row: typeof schemaPg.item.$inferSelect): LedgerRecord {
+  private mapRowToRecord(row: typeof schemaSqlite.item.$inferSelect): LedgerRecord {
     return {
       tenantId: row.tenantId as TenantId,
       mappingId: row.mappingId as MappingId,
       naturalKeyHash: row.naturalKeyHash,
       contentHash: row.contentHash ?? '',
-      targetId: (row.targetRef as { id?: string })?.id ?? '',
-      createdAt: row.firstSeenAt instanceof Date 
-        ? row.firstSeenAt.toISOString() 
-        : (row.firstSeenAt ?? ''),
+      targetId: (() => {
+        try {
+          const ref = JSON.parse(row.targetRef as string);
+          return ref?.id ?? '';
+        } catch {
+          return '';
+        }
+      })(),
+      createdAt: row.firstSeenAt ?? '',
     };
   }
 }

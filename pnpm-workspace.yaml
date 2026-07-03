@@ -9,4 +9,5 @@ verifyDepsBeforeRun: false
 autoInstallPeers: true
 strictPeerDependencies: false
 allowBuilds:
+  better-sqlite3: true
   esbuild: true
