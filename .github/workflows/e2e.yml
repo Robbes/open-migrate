@@ -1,0 +1,77 @@
+name: E2E (self-hosted)
+
+# ==============================================================================
+# Intentionally SEPARATE from CI (ci.yml: docs-hygiene -> lint -> unit -> integration).
+# Manual-trigger only: it needs the self-hosted Spark runner + the docker-compose
+# stack (Postgres + test mailserver + Nextcloud) and runs the full migration slice
+# incl. the idempotency property test. Do NOT add to the automated chain.
+# Adapted from the team's Java e2e pattern: tooling differs (Drizzle, not Liquibase;
+# `docker compose` v2; a fresh DB volume via `down -v` instead of manual table drops).
+# ==============================================================================
+on:
+  workflow_dispatch:
+
+# Don't cancel in progress - e2e runs long and should complete
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  COMPOSE_FILE: deploy/compose/dev.yml
+  COMPOSE_NETWORK: openmig_dev-network
+  RUNNER_CONTAINER: gha-runner-spark   # the Spark self-hosted runner container; adjust if named differently
+  DATABASE_URL: postgres://openmig:openmig@postgres:5432/openmig
+  JMAP_BASE_URL: http://stalwart:8080        # primary target family (JMAP); session at /.well-known/jmap
+  IMAP_HOST: stalwart                         # same server also serves IMAP/CalDAV/CardDAV/WebDAV (second family)
+  NEXTCLOUD_URL: http://nextcloud:80          # secondary DAV/files target
+
+jobs:
+  e2e:
+    runs-on: [self-hosted, linux, arm64]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
+      - uses: pnpm/action-setup@v4 # TODO: pin to commit SHA
+      - uses: actions/setup-node@v4 # TODO: pin to commit SHA
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Clean up previous stack (fresh volumes)
+        run: docker compose -f "$COMPOSE_FILE" down -v --remove-orphans 2>/dev/null || true
+
+      - name: Start services
+        run: |
+          docker compose -f "$COMPOSE_FILE" up -d --wait
+          docker compose -f "$COMPOSE_FILE" ps
+
+      - name: Attach runner to compose network
+        run: docker network connect "$COMPOSE_NETWORK" "$RUNNER_CONTAINER" || true
+
+      - name: Wait for target server (Stalwart JMAP/IMAP/DAV)
+        run: |
+          for i in $(seq 1 90); do
+            if (echo > /dev/tcp/stalwart/8080) >/dev/null 2>&1; then echo "Stalwart HTTP/JMAP ready"; break; fi
+            [ "$i" -eq 90 ] && { echo "Stalwart not ready"; docker compose -f "$COMPOSE_FILE" logs stalwart; exit 1; }
+            sleep 2
+          done
+
+      - name: Apply ledger migrations (Drizzle) to fresh DB
+        run: pnpm db:migrate   # drizzle-kit migrate against $DATABASE_URL (postgres service on the attached network)
+
+      - name: Run E2E (incl. idempotency property test)
+        run: pnpm test:e2e     # runs the O365 -> mailserver/Nextcloud slice + asserts a second run converges
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.0
+        with:
+          name: e2e-reports
+          path: '**/reports/'
+          retention-days: 7
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker network disconnect "$COMPOSE_NETWORK" "$RUNNER_CONTAINER" || true
+          docker compose -f "$COMPOSE_FILE" down -v --remove-orphans

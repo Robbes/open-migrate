@@ -1,0 +1,72 @@
+# Security scanning — Node/TS equivalent of OWASP Dependency-Check + CycloneDX.
+# Trivy (dependency/filesystem) -> SARIF, plus a CycloneDX SBOM; SBOM attached to release tags.
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'   # weekly, Monday 06:00 UTC, to catch newly disclosed CVEs
+  workflow_dispatch:
+
+concurrency:
+  group: security-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  security-scan:
+    name: security-scan
+    runs-on: self-hosted
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
+      - uses: pnpm/action-setup@v4 # TODO: pin to commit SHA
+      - uses: actions/setup-node@v4 # TODO: pin to commit SHA
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: pnpm audit (advisory gate)
+        run: pnpm audit --audit-level=high || echo "::warning::pnpm audit reported advisories"
+
+      - name: Trivy filesystem/dependency scan (SARIF)
+        uses: aquasecurity/trivy-action@master # TODO: pin to commit SHA
+        with:
+          scan-type: fs
+          format: sarif
+          output: trivy.sarif
+          severity: HIGH,CRITICAL
+        continue-on-error: true
+
+      - name: Upload SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3 # TODO: pin to commit SHA
+        with:
+          sarif_file: trivy.sarif
+
+      - name: Generate CycloneDX SBOM
+        run: pnpm dlx @cyclonedx/cyclonedx-npm --output-format JSON --output-file bom.json
+
+      - name: Upload SBOM artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.0
+        with:
+          name: sbom-${{ github.sha }}
+          path: bom.json
+          retention-days: 90
+
+      - name: Attach SBOM to GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2 # TODO: pin to commit SHA
+        with:
+          files: bom.json

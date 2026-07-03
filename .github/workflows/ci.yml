@@ -1,0 +1,138 @@
+# Unified CI — TypeScript/Node (pnpm). Mirrors the team convention:
+#   detect-changes -> docs-hygiene (parallel) -> lint -> unit-tests -> integration-tests
+# E2E is a SEPARATE, manual workflow (e2e.yml). Runs on the self-hosted (Spark) runner.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect-changes:
+    name: detect-changes
+    runs-on: self-hosted
+    outputs:
+      any_changed: ${{ steps.filter.outputs.any_changed }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
+      - name: Get changed files
+        id: filter
+        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v44.5.7
+        with:
+          # Docs-only changes (docs/**, **.md) skip lint/tests
+          files: |
+            **.ts
+            **.tsx
+            **.js
+            **.sql
+            **.yml
+            **.yaml
+            **.json
+            package.json
+            pnpm-lock.yaml
+            packages/**
+            apps/**
+            deploy/**
+
+  docs-hygiene:
+    name: docs-hygiene
+    runs-on: self-hosted
+    # Quality gate for all changes (incl. docs-only)
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
+      - name: Verify only allowed markdown files at repo root
+        run: |
+          set -e
+          allowed="README.md AGENTS.md CLAUDE.md CONTRIBUTING.md CHANGELOG.md SECURITY.md CODE_OF_CONDUCT.md LICENSE.md"
+          violations=0
+          for f in $(find . -maxdepth 1 -type f -name "*.md" -printf "%f\n"); do
+            if ! echo "$allowed" | tr ' ' '\n' | grep -qx "$f"; then
+              echo "::error file=$f::Unexpected markdown file at repo root: $f"
+              echo "Root-level .md files are restricted per CONTRIBUTING.md. Allowed: $allowed"
+              violations=$((violations + 1))
+            fi
+          done
+          [ "$violations" -gt 0 ] && { echo "Move it under docs/ or update CONTRIBUTING.md."; exit 1; } || true
+          echo "Root markdown allowlist OK."
+      - name: Verify canonical docs exist
+        run: |
+          set -e
+          expected="docs/architecture/solution-architecture.md docs/testing.md docs/deployment.md docs/adr/0000-template.md"
+          missing=0
+          for f in $expected; do
+            [ -f "$f" ] || { echo "::error file=$f::Canonical doc missing: $f"; missing=$((missing + 1)); }
+          done
+          [ "$missing" -gt 0 ] && { echo "Canonical docs are the source of truth; removing one requires an ADR."; exit 1; } || true
+          echo "Canonical docs present."
+
+  lint:
+    name: lint
+    runs-on: self-hosted
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.any_changed == 'true' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
+      - uses: pnpm/action-setup@v4 # TODO: pin to commit SHA per security policy
+      - uses: actions/setup-node@v4 # TODO: pin to commit SHA per security policy
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Lint & typecheck
+        run: |
+          pnpm lint
+          pnpm typecheck   # tsc --noEmit across the workspace
+
+  unit-tests:
+    name: unit-tests
+    runs-on: self-hosted
+    needs: lint
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
+      - uses: pnpm/action-setup@v4 # TODO: pin to commit SHA
+      - uses: actions/setup-node@v4 # TODO: pin to commit SHA
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run unit tests (vitest; excludes integration/e2e)
+        run: pnpm test -- --coverage
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.0
+        with:
+          name: coverage-report
+          path: '**/coverage/'
+          retention-days: 7
+
+  integration-tests:
+    name: integration-tests
+    runs-on: self-hosted
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
+      - uses: pnpm/action-setup@v4 # TODO: pin to commit SHA
+      - uses: actions/setup-node@v4 # TODO: pin to commit SHA
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Verify Docker is available
+        run: |
+          docker --version
+          docker compose version
+      - name: Run integration tests (Testcontainers spins up Postgres/Stalwart/Nextcloud)
+        run: pnpm test:integration
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.0
+        with:
+          name: integration-reports
+          path: '**/reports/'
+          retention-days: 7

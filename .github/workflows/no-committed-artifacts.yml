@@ -1,0 +1,32 @@
+# Guard: block accidentally committed build/dependency/secret artifacts.
+# Node/TS analogue of the team's no-maven-cache.yml.
+name: No Committed Artifacts
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  check-artifacts:
+    name: Check for committed artifacts
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
+        with:
+          fetch-depth: 0
+      - name: Check added files
+        run: |
+          ADDED_FILES=$(git diff --name-only --diff-filter=A origin/${{ github.base_ref }}...HEAD)
+          # These should never be committed (build outputs, deps, local DBs, secrets, tsbuild info)
+          BAD_PATTERN='(^|/)(node_modules|dist|build|coverage|\.next|\.turbo)/|\.tsbuildinfo$|\.sqlite3?$|(^|/)\.env(\.local|\.development|\.production)?$'
+          violations=0
+          for file in $ADDED_FILES; do
+            # allow the committed template
+            if [ "$file" = ".env.example" ]; then continue; fi
+            if echo "$file" | grep -qE "$BAD_PATTERN"; then
+              echo "::error file=$file::Artifact must not be committed: $file"
+              echo "Add it to .gitignore and run 'git rm -r --cached <path>'."
+              violations=$((violations + 1))
+            fi
+          done
+          [ "$violations" -gt 0 ] && exit 1 || echo "✅ No committed artifacts detected."
