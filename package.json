@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@11.8.0",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "scripts": {
     "lint": "eslint .",
@@ -20,7 +20,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9",
-    "@types/node": "^22",
+    "@types/node": "^24",
     "@types/pg": "^8",
     "@vitest/coverage-v8": "^3",
     "drizzle-kit": "^0.30",
