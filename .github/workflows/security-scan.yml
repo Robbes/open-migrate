@@ -29,10 +29,11 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
-      - uses: pnpm/action-setup@v4
       # Node.js 24 is pre-installed on the self-hosted runner via apt
-      # Skip actions/setup-node to avoid download/cache issues
-      - name: Verify Node version
+      # Install pnpm globally since it's not pre-installed
+      - name: Install pnpm
+        run: npm install -g pnpm
+      - name: Verify versions
         run: |
           echo "Node version: $(node --version)"
           echo "pnpm version: $(pnpm --version)"
