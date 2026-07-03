@@ -13,9 +13,14 @@ import path from 'path';
 import type { PgDatabase } from './db';
 
 // Use Docker network hostname for integration tests
+// Note: When running tests from the host, use localhost with mapped ports.
+// When running from within Docker, use Docker service names.
+const isRunningInDocker = !!process.env.RUNNING_IN_DOCKER;
+const host = isRunningInDocker ? 'postgres' : 'localhost';
+
 const PG_CONNECTION_STRING =
   process.env.TEST_DATABASE_URL ??
-  'postgres://openmig:openmig@host.docker.internal:5433/openmig';
+  `postgres://openmig:openmig@${host}:5432/openmig`;
 
 // Fixed UUIDs for testing (valid UUID format)
 const TEST_TENANT_ID = asTenantId('550e8400-e29b-41d4-a716-446655440001' as never);

@@ -39,6 +39,10 @@ services:
       STALWART_HOSTNAME: "stalwart"
     volumes:
       - stalwart-data:/opt/stalwart
+    ports:
+      - "8180:8080"  # JMAP/DAV HTTP API (host:container)
+      - "143:143"    # IMAP (plain)
+      - "993:993"    # IMAPS (TLS)
     healthcheck:
       disable: true
     networks: [dev-network]

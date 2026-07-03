@@ -267,7 +267,7 @@ CREATE TABLE IF NOT EXISTS cursor (
   tenant_id    uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   mapping_id   uuid NOT NULL REFERENCES mailbox_mapping(id) ON DELETE CASCADE,
   folder_path  text NOT NULL,
-  cursor_value jsonb NOT NULL DEFAULT '{}',  -- domain-specific cursor structure
+  cursor_value text NOT NULL DEFAULT '',  -- domain-specific cursor structure
   updated_at   timestamptz NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, mapping_id, folder_path)
 );
