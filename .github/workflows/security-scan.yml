@@ -63,7 +63,7 @@ jobs:
           sarif_file: trivy.sarif
 
       - name: Generate CycloneDX SBOM
-        run: pnpm dlx @cyclonedx/cyclonedx-npm --output-format JSON --output-file bom.json --exclude-dev
+        run: pnpm dlx @cyclonedx/cyclonedx-npm --output-format JSON --output-file bom.json -i pnpm-lock.yaml
 
       - name: Upload SBOM artifact
         if: always()
