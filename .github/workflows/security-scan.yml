@@ -34,6 +34,7 @@ jobs:
           node-version: '24'
           # Force use of locally installed Node.js
           check-latest: false
+      - run: pnpm install --frozen-lockfile
 
       - name: pnpm audit (advisory gate)
         run: pnpm audit --audit-level=high || echo "::warning::pnpm audit reported advisories"
