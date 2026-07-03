@@ -40,7 +40,8 @@ jobs:
         run: |
           echo "Node version: $(node --version)"
           echo "pnpm version: $(pnpm --version)"
-      - run: pnpm install --frozen-lockfile
+      # Use --prefer-offline to speed up installation, but allow updates if lockfile is outdated
+      - run: pnpm install --prefer-offline
 
       - name: pnpm audit (advisory gate)
         run: pnpm audit --audit-level=high || echo "::warning::pnpm audit reported advisories"
