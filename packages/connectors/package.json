@@ -4,5 +4,12 @@
   "private": true,
   "type": "module",
   "main": "src/index.ts",
-  "exports": { ".": "./src/index.ts" }
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@openmig/shared": "workspace:*",
+    "imap-simple": "^5.1.0",
+    "jmap-jam": "^0.13.2"
+  }
 }
