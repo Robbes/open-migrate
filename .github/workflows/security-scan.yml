@@ -29,13 +29,11 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
-      - uses: pnpm/action-setup@v4 # TODO: pin to commit SHA
-      # Use locally installed Node.js 24 on self-hosted runner
-      # Skip actions/setup-node to avoid version conflicts
-      - run: |
-          node --version
-          pnpm --version
-      - run: pnpm install --frozen-lockfile
+      - uses: actions/setup-node@v4 # TODO: pin to commit SHA
+        with:
+          node-version: '24'
+          # Force use of locally installed Node.js
+          check-latest: false
 
       - name: pnpm audit (advisory gate)
         run: pnpm audit --audit-level=high || echo "::warning::pnpm audit reported advisories"
