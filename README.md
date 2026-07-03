@@ -1,6 +1,6 @@
-# Sovereign Migration Stack
+# Open Migration Stack
 
-Low-maintenance, open-source stack to migrate families and small/medium businesses off US cloud (Microsoft 365, Google, Dropbox) to EU/CH sovereign platforms — starting with **O365 → Soverin / Nextcloud** (Proton later).
+Low-maintenance, open-source stack to migrate families and small/medium businesses off US cloud (Microsoft 365, Google, Dropbox) to EU sovereign platforms — starting with **O365 → Soverin / Nextcloud** (Proton later).
 
 - **Idempotent** transfers (re-run safely; no duplicates).
 - **Shadow-run** old and new in parallel for as long as you want, then cut over on your schedule.
