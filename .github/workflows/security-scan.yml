@@ -30,9 +30,12 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
       # Node.js 24 is pre-installed on the self-hosted runner via apt
-      # Install pnpm globally since it's not pre-installed
+      # Install pnpm using the standalone installer
       - name: Install pnpm
-        run: npm install -g pnpm
+        run: |
+          curl -fsSL https://get.pnpm.io/install.sh | sh -
+          echo "$HOME/.local/share/pnpm" >> $GITHUB_PATH
+          echo "PATH=$PATH:$HOME/.local/share/pnpm" >> $GITHUB_ENV
       - name: Verify versions
         run: |
           echo "Node version: $(node --version)"
