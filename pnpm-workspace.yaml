@@ -1,0 +1,10 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+
+# pnpm 11 reads settings here (no longer from .npmrc or package.json "pnpm" field)
+onlyBuiltDependencies:
+  - esbuild
+verifyDepsBeforeRun: false
+autoInstallPeers: true
+strictPeerDependencies: false

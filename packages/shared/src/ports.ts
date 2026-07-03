@@ -1,0 +1,188 @@
+import type { TenantId, MappingId } from './ids';
+import type { MailFolder, MailItem, RawMessage, MailKeyword } from './mail';
+
+/** Opaque, source-defined cursor for incremental listing (e.g. UIDVALIDITY+UIDNEXT). */
+export interface SyncCursor {
+  readonly value: string;
+}
+
+/**
+ * Persists per-folder incremental cursors so steady-state passes list only changed items.
+ * Cursors are NON-AUTHORITATIVE (ADR-0020): a lost or malformed cursor merely forces a full,
+ * still-idempotent re-scan. Backed by the ledger DB (a `cursors` table) in the real impl.
+ */
+export interface CursorStore {
+  get(tenantId: TenantId, mappingId: MappingId, folderPath: string): Promise<SyncCursor | undefined>;
+  set(tenantId: TenantId, mappingId: MappingId, folderPath: string, cursor: SyncCursor): Promise<void>;
+}
+
+/** A source mailbox the engine reads from. READ-ONLY. */
+export interface SourceConnector {
+  /** Enumerate folders with special-use detection (RFC 6154). */
+  listFolders(): Promise<ReadonlyArray<MailFolder>>;
+  /**
+   * List items in `folder` changed since `cursor` (or all if undefined),
+   * returning the items plus the next cursor to persist.
+   */
+  listSince(
+    folder: MailFolder,
+    cursor?: SyncCursor,
+  ): Promise<{ items: ReadonlyArray<MailItem>; nextCursor: SyncCursor }>;
+  /** Fetch the full RFC822 bytes for an item. */
+  fetch(item: MailItem): Promise<RawMessage>;
+}
+
+/** Result of upserting one message into a target. */
+export interface UpsertResult {
+  /** Target-side id (e.g. a JMAP Email id). */
+  readonly targetId: string;
+  /** True if a new item was created; false if it already existed (idempotent skip). */
+  readonly created: boolean;
+}
+
+/** A target mailbox store the engine writes to. NEVER deletes or overwrites (non-destructive). */
+export interface TargetWriter {
+  /** Ensure a mailbox exists for the given folder/role; return its target id. */
+  ensureMailbox(folder: MailFolder): Promise<string>;
+  /**
+   * Idempotently write a message into the target mailbox: **create-if-absent keyed on the
+   * natural key**. The implementation SHOULD verify existence on the target itself (JMAP
+   * `Email/query` on header `Message-ID`; IMAP `SEARCH HEADER Message-ID`) in addition to the
+   * ledger fast-path, so even an empty ledger never produces duplicates. Keywords and the
+   * original receivedAt are preserved. See ADR-0020 (the ledger is a rebuildable cache).
+   */
+  upsertEmail(
+    mailboxId: string,
+    raw: RawMessage,
+    keywords: ReadonlyArray<MailKeyword>,
+  ): Promise<UpsertResult>;
+  /**
+   * Existence check for create-if-absent (ADR-0020): return the target id of an item already
+   * present in `mailboxId` with this natural key (JMAP `Email/query` on header `Message-ID`;
+   * IMAP `SEARCH HEADER Message-ID`), or `undefined`. `upsertEmail` relies on this so an empty
+   * ledger never causes duplicates.
+   */
+  findByNaturalKey(mailboxId: string, naturalKey: string): Promise<string | undefined>;
+}
+
+/** One existing item discovered on the target during reindex/adoption (ADR-0020). */
+export interface TargetEntry {
+  /** Natural key as stored on the target (e.g. Message-ID). */
+  readonly naturalKey: string;
+  /** Target-side id (e.g. a JMAP Email id). */
+  readonly targetId: string;
+  /** Mailbox/folder the item lives in on the target. */
+  readonly mailboxId: string;
+  /** Content hash, if cheaply available from the listing; used as a fallback key. */
+  readonly contentHash?: string;
+}
+
+/**
+ * Reads existing items off the target to rebuild idempotency state (ADR-0020, workplan T9).
+ * Used when the ledger is empty but the target is non-empty (a fresh reinstall), and on demand.
+ * Enumeration is header/metadata-only (Message-ID / UID / path) and may be large — implementations
+ * SHOULD page; the async iterable lets callers stream without loading everything into memory.
+ */
+export interface TargetReindexer {
+  /** Stream every existing item's natural key + target id (optionally scoped to one mailbox). */
+  listEntries(mailboxId?: string): AsyncIterable<TargetEntry>;
+}
+
+/** One row of idempotency state. */
+export interface LedgerRecord {
+  readonly tenantId: TenantId;
+  readonly mappingId: MappingId;
+  readonly naturalKeyHash: string;
+  readonly contentHash: string;
+  readonly targetId: string;
+  /** ISO 8601 timestamp the row was first recorded. */
+  readonly createdAt: string;
+}
+
+/** Idempotency ledger. UNIQUE(tenantId, mappingId, naturalKeyHash). Non-destructive. */
+export interface Ledger {
+  /** Look up an existing record by natural key. */
+  find(
+    tenantId: TenantId,
+    mappingId: MappingId,
+    naturalKeyHash: string,
+  ): Promise<LedgerRecord | undefined>;
+  /**
+   * Record a mapping if absent. If a row with the same
+   * (tenantId, mappingId, naturalKeyHash) exists, return it unchanged (no-op);
+   * otherwise insert and return the new row.
+   */
+  recordIfAbsent(record: LedgerRecord): Promise<LedgerRecord>;
+}
+
+/** Handle to a scheduled job; calling stop() cancels future runs. */
+export interface ScheduleHandle {
+  stop(): void;
+}
+
+/**
+ * Orchestration seam. The self-host edition implements this in-process (croner);
+ * the managed edition swaps a Trigger.dev-backed impl. Implementations MUST be
+ * single-flight per jobId (no overlapping runs — coalesce).
+ */
+export interface Scheduler {
+  /** Run `task` on a cron expression; coalesce overlapping runs. */
+  schedule(jobId: string, cron: string, task: () => Promise<void>): ScheduleHandle;
+  /** Run `task` once, now. */
+  runOnce(jobId: string, task: () => Promise<void>): Promise<void>;
+}
+
+/** Dependency bundle for one mapping's shadow pass (DI for the T4 reconcile loop). */
+export interface ReconcileDeps {
+  readonly tenantId: TenantId;
+  readonly mappingId: MappingId;
+  readonly source: SourceConnector;
+  readonly target: TargetWriter;
+  readonly ledger: Ledger;
+  /**
+   * Optional cursor persistence: when provided, each folder pass lists only items changed since
+   * the stored cursor and persists the new cursor after the folder completes. Absent -> full scan
+   * (always correct via the ledger, just more work).
+   */
+  readonly cursors?: CursorStore;
+  /** Max messages processed in parallel per folder (default 4). Bounds throughput and peak memory. */
+  readonly concurrency?: number;
+}
+
+/** Summary of a single shadow pass. */
+export interface ReconcileResult {
+  readonly scanned: number;
+  readonly created: number;
+  readonly skipped: number;
+  /** Source items absent on a later pass (potential deletions) — logged, never propagated. */
+  readonly drift: number;
+}
+
+/**
+ * Signature of the one-way, non-destructive shadow pass (implemented in @openmig/core, T4).
+ * Runs a mapping to convergence; a second run yields `created === 0`.
+ */
+export type RunShadowPass = (deps: ReconcileDeps) => Promise<ReconcileResult>;
+
+/** Dependency bundle for a reindex/adopt pass (DI for the T9 routine). */
+export interface ReindexDeps {
+  readonly tenantId: TenantId;
+  readonly mappingId: MappingId;
+  readonly reindexer: TargetReindexer;
+  readonly ledger: Ledger;
+}
+
+/** Summary of a reindex/adopt pass. */
+export interface ReindexResult {
+  readonly scanned: number;
+  /** Rows newly written to the ledger (adopted from the target). */
+  readonly adopted: number;
+  /** Entries already present in the ledger. */
+  readonly alreadyKnown: number;
+}
+
+/**
+ * Signature of the reindex/adopt routine (implemented in @openmig/core, T9): rebuilds ledger state
+ * from the target's existing items so a fresh install does not re-copy what is already there.
+ */
+export type RunReindex = (deps: ReindexDeps) => Promise<ReindexResult>;

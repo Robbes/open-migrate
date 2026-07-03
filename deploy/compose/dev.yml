@@ -1,0 +1,60 @@
+# Dev / e2e stack for the migration core.
+# Target-protocol strategy: JMAP FIRST, IMAP/CalDAV/CardDAV/WebDAV (DAV) second — both in MVP.
+#
+# Stalwart is the reference TARGET: it speaks JMAP *and* IMAP/SMTP/CalDAV/CardDAV/WebDAV,
+# so one server exercises both target families. The O365 SOURCE is separate and uses
+# IMAP+OAuth2/Graph (Microsoft has no JMAP), so it is not part of this local stack.
+# Nextcloud is a second, DAV-only target (files + CalDAV/CardDAV) for heterogeneity tests.
+#
+# Trigger.dev is NOT here (heavy; the in-process scheduler drives the first slice; added later
+# from github.com/triggerdotdev/docker). Images pinned and arm64-friendly (the Spark is arm64);
+# base OS is current in every case (Alpine 3.x / Debian 13 "Trixie").
+services:
+  # Ledger database
+  postgres:
+    image: postgres:18-alpine            # multi-arch (arm64); base: Alpine 3.x (current)
+    environment:
+      POSTGRES_DB: openmig
+      POSTGRES_USER: openmig
+      POSTGRES_PASSWORD: openmig
+      POSTGRES_INITDB_ARGS: -E UTF8
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openmig -d openmig"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [dev-network]
+
+  # Reference target: JMAP + IMAP/SMTP + CalDAV/CardDAV/WebDAV (Rust; base debian:trixie-slim; multi-arch incl. arm64).
+  # Bootstrap: a recovery admin is pinned via env to avoid the random first-run password.
+  # The image's built-in healthcheck targets TLS/443; disabled here for plain-HTTP dev — the
+  # e2e workflow polls readiness instead. JMAP session + DAV are served over the HTTP API (8080); IMAP on 143.
+  stalwart:
+    image: stalwartlabs/stalwart:v0.16.10 # pinned; v0.17+ renames bootstrap env (STALWART_PUBLIC_URL) — re-verify before bumping
+    environment:
+      STALWART_RECOVERY_MODE: "true"
+      STALWART_RECOVERY_ADMIN: "admin:admin_dev_pw"
+      STALWART_HOSTNAME: "stalwart"
+    volumes:
+      - stalwart-data:/opt/stalwart
+    healthcheck:
+      disable: true
+    networks: [dev-network]
+
+  # Secondary DAV target: files (WebDAV) + CalDAV/CardDAV. SQLite keeps dev light.
+  nextcloud:
+    image: nextcloud:34-apache            # official multi-arch (arm64); base: Debian 13 "Trixie" via php image
+    environment:
+      SQLITE_DATABASE: nextcloud
+      NEXTCLOUD_ADMIN_USER: admin
+      NEXTCLOUD_ADMIN_PASSWORD: admin_dev_pw
+      NEXTCLOUD_TRUSTED_DOMAINS: "localhost nextcloud"
+    networks: [dev-network]
+
+volumes:
+  stalwart-data:
+
+networks:
+  dev-network:
+    name: openmig_dev-network
+    driver: bridge

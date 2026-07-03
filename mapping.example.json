@@ -1,0 +1,19 @@
+{
+  "tenantId": "REPLACE_ME",
+  "mappingId": "inbox-mail",
+  "source": {
+    "type": "imap-oauth2",
+    "host": "outlook.office365.com",
+    "port": 993,
+    "user": "user@example.onmicrosoft.com",
+    "auth": { "kind": "xoauth2", "tokenFromEnv": "O365_ACCESS_TOKEN" }
+  },
+  "target": {
+    "type": "jmap",
+    "baseUrl": "http://stalwart:8080",
+    "user": "target@dev.local",
+    "auth": { "kind": "basic", "passwordFromEnv": "TARGET_PASSWORD" }
+  },
+  "schedule": { "cron": "*/15 * * * *" },
+  "_note": "Placeholders only. Never commit real credentials; secrets are read from the named env vars."
+}
