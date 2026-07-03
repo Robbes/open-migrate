@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
       # Node.js 24 is pre-installed on the self-hosted runner via apt
-      # Install pnpm using the standalone installer
+      # Install pnpm using the standalone installer with specific version
       - name: Install pnpm
         run: |
           curl -fsSL https://get.pnpm.io/install.sh | sh -
@@ -40,8 +40,7 @@ jobs:
         run: |
           echo "Node version: $(node --version)"
           echo "pnpm version: $(pnpm --version)"
-      # Use --prefer-offline to speed up installation, but allow updates if lockfile is outdated
-      - run: pnpm install --prefer-offline
+      - run: pnpm install
 
       - name: pnpm audit (advisory gate)
         run: pnpm audit --audit-level=high || echo "::warning::pnpm audit reported advisories"
