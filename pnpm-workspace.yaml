@@ -1,10 +1,12 @@
 packages:
   - "packages/*"
   - "apps/*"
-
-# pnpm 11 reads settings here (no longer from .npmrc or package.json "pnpm" field)
-onlyBuiltDependencies:
-  - esbuild
+# pnpm 11 reads settings here (no longer from .npmrc or the package.json "pnpm" field).
+# Build-script approval: pnpm 11 uses the allowBuilds map below (package -> true/false).
+# The older onlyBuiltDependencies list is parsed but NO LONGER authorizes builds on its own —
+# without allowBuilds, a fresh install exits 1 with ERR_PNPM_IGNORED_BUILDS.
 verifyDepsBeforeRun: false
 autoInstallPeers: true
 strictPeerDependencies: false
+allowBuilds:
+  esbuild: true
