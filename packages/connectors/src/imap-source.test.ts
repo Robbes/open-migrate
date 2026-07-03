@@ -1,7 +1,7 @@
 // Copyright 2026 OpenHands Agent (Apache-2.0)
 // Unit tests for IMAP source connector.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   ImapSource,
   type ImapSourceConfig,
