@@ -30,11 +30,11 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
       - uses: pnpm/action-setup@v4 # TODO: pin to commit SHA
-      - uses: actions/setup-node@v4 # TODO: pin to commit SHA
-        with:
-          node-version: '24'
-          # Don't use cache to avoid conflicts with locally installed Node 24
-          # cache: pnpm
+      # Use locally installed Node.js 24 on self-hosted runner
+      # Skip actions/setup-node to avoid version conflicts
+      - run: |
+          node --version
+          pnpm --version
       - run: pnpm install --frozen-lockfile
 
       - name: pnpm audit (advisory gate)
