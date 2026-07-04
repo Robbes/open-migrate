@@ -15,6 +15,7 @@ export default defineConfig({
   },
   test: {
     coverage: { provider: 'v8', reportsDirectory: './coverage' },
+    globalSetup: './vitest.global-setup.ts',
     projects: [
       {
         test: {

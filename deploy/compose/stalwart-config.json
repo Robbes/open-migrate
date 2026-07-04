@@ -1,4 +1,63 @@
 {
-  "@type": "RocksDb",
-  "path": "/opt/stalwart/data"
+  "dataStore": {
+    "@type": "RocksDb",
+    "path": "/var/lib/stalwart/data"
+  },
+  "http": {
+    "listeners": {
+      "default": {
+        "address": "0.0.0.0:8080",
+        "protocols": ["jmap", "admin"]
+      }
+    }
+  },
+  "imap": {
+    "listeners": {
+      "default": {
+        "address": "0.0.0.0:143"
+      }
+    }
+  },
+  "directory": {
+    "internal": {}
+  },
+  "accessControl": {
+    "principals": {
+      "admin": {
+        "type": "Individual",
+        "permissions": ["admin"],
+        "credentials": [
+          {
+            "@type": "Password",
+            "secret": "devadmin123"
+          }
+        ]
+      }
+    }
+  },
+  "domains": {
+    "dev.local": {
+      "isEnabled": true
+    }
+  },
+  "accounts": {
+    "source": {
+      "domainId": "dev-local",
+      "credentials": [
+        {
+          "@type": "Password",
+          "secret": "source_password"
+        }
+      ]
+    },
+    "target": {
+      "domainId": "dev-local",
+      "credentials": [
+        {
+          "@type": "Password",
+          "secret": "target_password"
+        }
+      ]
+    }
+  }
 }

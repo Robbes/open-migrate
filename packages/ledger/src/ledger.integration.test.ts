@@ -1,7 +1,6 @@
 // Copyright 2026 OpenHands Agent (Apache-2.0)
 // Integration tests for the SQL-backed ledger against PostgreSQL.
 
-import { readFileSync } from 'fs';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { createPgDb } from './db';
@@ -9,77 +8,23 @@ import { PgLedger } from './ledger';
 import { PgCursorStore } from './cursor-store';
 import type { LedgerRecord } from '@openmig/shared';
 import { asTenantId, asMappingId } from '@openmig/shared';
-import path from 'path';
 import type { PgDatabase } from './db';
 
-// Use Docker network hostname for integration tests
-// Note: When running tests from the host, use localhost with mapped ports.
-// When running from within Docker, use Docker service names.
-const isRunningInDocker = !!process.env.RUNNING_IN_DOCKER;
-const host = isRunningInDocker ? 'postgres' : 'localhost';
-
-const PG_CONNECTION_STRING =
-  process.env.TEST_DATABASE_URL ??
-  `postgres://openmig:openmig@${host}:5432/openmig`;
+// Connection string from Testcontainers (set by vitest.global-setup.ts)
+// Fails loudly if TEST_DATABASE_URL is not set, rather than silently using wrong defaults.
+const PG_CONNECTION_STRING = process.env.TEST_DATABASE_URL;
+if (!PG_CONNECTION_STRING) {
+  throw new Error(
+    'TEST_DATABASE_URL is not set. Integration tests require Testcontainers to be running. ' +
+    'Run: pnpm test:integration'
+  );
+}
 
 // Fixed UUIDs for testing (valid UUID format)
 const TEST_TENANT_ID = asTenantId('550e8400-e29b-41d4-a716-446655440001' as never);
 const TEST_MAPPING_ID = asMappingId('550e8400-e29b-41d4-a716-446655440002' as never);
 const TEST_TENANT_2_ID = asTenantId('550e8400-e29b-41d4-a716-446655440003' as never);
 const TEST_MAPPING_2_ID = asMappingId('550e8400-e29b-41d4-a716-446655440004' as never);
-
-/**
- * Execute a multi-statement SQL migration.
- * Properly handles comments and semicolons inside strings.
- */
-async function executeMigration(db: PgDatabase, sqlContent: string): Promise<void> {
-  // Remove single-line comments (-- ...)
-  const cleaned = sqlContent.replace(/--[^\n]*/g, '');
-  
-  // Split by semicolons outside of strings
-  const statements: string[] = [];
-  let current = '';
-  let inString = false;
-  let stringChar = '';
-  
-  for (let i = 0; i < cleaned.length; i++) {
-    const char = cleaned[i];
-    const nextChar = cleaned[i + 1];
-    
-    if (!inString && (char === "'" || char === '"')) {
-      inString = true;
-      stringChar = char;
-      current += char;
-    } else if (inString && char === stringChar && nextChar === stringChar) {
-      // Escaped quote
-      current += char + nextChar;
-      i++;
-    } else if (inString && char === stringChar) {
-      inString = false;
-      stringChar = '';
-      current += char;
-    } else if (!inString && char === ';') {
-      const trimmed = current.trim();
-      if (trimmed.length > 0) {
-        statements.push(trimmed);
-      }
-      current = '';
-    } else {
-      current += char;
-    }
-  }
-  
-  // Don't forget the last statement
-  const trimmed = current.trim();
-  if (trimmed.length > 0) {
-    statements.push(trimmed);
-  }
-
-  // Execute each statement
-  for (const stmt of statements) {
-    await db.execute(sql.raw(stmt));
-  }
-}
 
 describe('PgLedger (integration)', () => {
   let ledger: PgLedger;
@@ -88,13 +33,6 @@ describe('PgLedger (integration)', () => {
   beforeAll(async () => {
     db = createPgDb(PG_CONNECTION_STRING);
     ledger = new PgLedger(db);
-
-    // Run the migration to create all tables
-    const migrationSql = readFileSync(
-      path.join(process.cwd(), 'packages/ledger/migrations/0001_init.sql'),
-      'utf-8',
-    );
-    await executeMigration(db, migrationSql);
 
     // Create test data (tenant, connection, mailbox, mapping)
     // Insert tenant
@@ -279,13 +217,6 @@ describe('PgCursorStore (integration)', () => {
   beforeAll(async () => {
     db = createPgDb(PG_CONNECTION_STRING);
     cursorStore = new PgCursorStore(db);
-
-    // Run the migration to create all tables (including cursor table)
-    const migrationSql = readFileSync(
-      path.join(process.cwd(), 'packages/ledger/migrations/0001_init.sql'),
-      'utf-8',
-    );
-    await executeMigration(db, migrationSql);
 
     // Create test data (tenant, connection, mailbox, mapping)
     // Insert tenant

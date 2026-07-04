@@ -2,11 +2,10 @@
 // Integration tests for the shadow pass (T4) against real IMAP source + JMAP target + SQL ledger.
 // Tests idempotency: running twice creates 0 duplicates; delta: adding one message creates exactly 1.
 
-import { readFileSync } from 'node:fs';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { sql } from 'drizzle-orm';
-import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import type { ImapSimpleOptions } from 'imap-simple';
 import { createPgDb } from './db.js';
 import { PgLedger } from './ledger.js';
@@ -15,6 +14,10 @@ import { ImapSource } from '../../connectors/src/imap-source.js';
 import { JmapTargetWriter } from '../../connectors/src/jmap-target.js';
 import { runShadowPass } from '../../core/src/reconcile.js';
 import { asTenantId, asMappingId } from '@openmig/shared';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const CONFIG_DIR = join(__dirname, '..', 'test-data');
 
 /**
  * Append options for IMAP append operation.
@@ -29,87 +32,94 @@ interface AppendOptions {
   date?: Date;
 }
 
-// Get the directory name
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Connection string from Testcontainers (set by vitest.global-setup.ts)
+// Fails loudly if TEST_DATABASE_URL is not set, rather than silently using wrong defaults.
+const PG_CONNECTION_STRING = process.env.TEST_DATABASE_URL;
+if (!PG_CONNECTION_STRING) {
+  throw new Error(
+    'TEST_DATABASE_URL is not set. Integration tests require Testcontainers to be running. ' +
+    'Run: pnpm test:integration'
+  );
+}
 
-// Test configuration - matches dev stack
-// Note: When running tests from the host, use localhost with mapped ports.
-// When running from within Docker, use Docker service names.
-const isRunningInDocker = !!process.env.RUNNING_IN_DOCKER;
-const host = isRunningInDocker ? 'stalwart' : 'localhost';
+// Stalwart configuration from Testcontainers (set by vitest.global-setup.ts)
+// Stalwart is a REQUIRED dependency for shadow pass tests
+const STALWART_IMAP_HOST = process.env.STALWART_IMAP_HOST;
+const STALWART_IMAP_PORT = parseInt(process.env.STALWART_IMAP_PORT || '143', 10);
+const STALWART_JMAP_URL = process.env.STALWART_JMAP_URL;
+const STALWART_JMAP_USERNAME = process.env.STALWART_JMAP_USERNAME || 'target@dev.local';
+const STALWART_JMAP_PASSWORD = process.env.STALWART_JMAP_PASSWORD || 'target_password';
 
-const PG_CONNECTION_STRING =
-  process.env.TEST_DATABASE_URL ??
-  `postgres://openmig:openmig@${isRunningInDocker ? 'postgres' : 'localhost'}:5432/openmig`;
+if (!STALWART_IMAP_HOST || !STALWART_JMAP_URL) {
+  throw new Error(
+    'Stalwart is a required dependency for shadow pass tests. ' +
+    'Set STALWART_IMAP_HOST and STALWART_JMAP_URL environment variables. ' +
+    'Run: pnpm test:integration'
+  );
+}
 
-const STALWART_IMAP_HOST = host;
-const STALWART_IMAP_PORT = 143;
-const STALWART_JMAP_URL = `http://${host}:8080`; // Use internal port 8080
-const STALWART_JMAP_USERNAME = 'target@dev.local';
-const STALWART_JMAP_PASSWORD = 'change-me-immediately';
+// Test accounts - must match the accounts provisioned in testcontainers-setup.ts
+const SOURCE_ACCOUNT = 'source';
+const SOURCE_PASSWORD = 'source_password';
 
-// Test accounts
-const SOURCE_ACCOUNT = 'source@dev.local';
-const SOURCE_PASSWORD = 'change-me-immediately';
+// Target account
+const TARGET_ACCOUNT = 'target';
+const TARGET_PASSWORD = 'target_password';
+
+// Admin account for provisioning (not used in tests)
+const ADMIN_ACCOUNT = 'admin';
+
+// Retry configuration for IMAP connection
+const MAX_RETRIES = 10;
+const RETRY_DELAY_MS = 2000;
+
+/**
+ * Wait for IMAP server to be available with retry logic.
+ */
+async function waitForImap(host: string, port: number): Promise<void> {
+  const net = await import('node:net');
+  
+  for (let i = 0; i < MAX_RETRIES; i++) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const client = new net.Socket();
+        const timeout = setTimeout(() => {
+          client.destroy();
+          reject(new Error('Connection timeout'));
+        }, 5000);
+        
+        client.connect(port, host, () => {
+          clearTimeout(timeout);
+          client.destroy();
+          resolve();
+        });
+        
+        client.on('error', (err) => {
+          clearTimeout(timeout);
+          reject(err);
+        });
+      });
+      // Success - IMAP is available
+      return;
+    } catch (err) {
+      if (i < MAX_RETRIES - 1) {
+        console.log(`[IMAP] Connection attempt ${i + 1}/${MAX_RETRIES} failed, retrying in ${RETRY_DELAY_MS}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
 
 // Fixed UUIDs for testing
 const TEST_TENANT_ID = asTenantId('550e8400-e29b-41d4-a716-446655440001' as never);
 const TEST_MAPPING_ID = asMappingId('550e8400-e29b-41d4-a716-446655440002' as never);
 
 /**
- * Database type for migration execution.
- * Using a more flexible type that matches the actual drizzle database object.
+ * Database type for drizzle.
  */
 type DbClient = ReturnType<typeof createPgDb>;
-
-/**
- * Execute a multi-statement SQL migration.
- */
-async function executeMigration(db: DbClient, sqlContent: string): Promise<void> {
-  // Remove single-line comments
-  const cleaned = sqlContent.replace(/--[^\n]*/g, '');
-  
-  // Split by semicolons outside of strings
-  const statements: string[] = [];
-  let current = '';
-  let inString = false;
-  let stringChar = '';
-  
-  for (let i = 0; i < cleaned.length; i++) {
-    const char = cleaned[i];
-    const nextChar = cleaned[i + 1];
-    
-    if (!inString && (char === "'" || char === '"')) {
-      inString = true;
-      stringChar = char;
-      current += char;
-    } else if (inString && char === stringChar && nextChar === stringChar) {
-      current += char + nextChar;
-      i++;
-    } else if (inString && char === stringChar) {
-      inString = false;
-      stringChar = '';
-      current += char;
-    } else if (!inString && char === ';') {
-      const trimmed = current.trim();
-      if (trimmed.length > 0) {
-        statements.push(trimmed);
-      }
-      current = '';
-    } else {
-      current += char;
-    }
-  }
-  
-  const trimmed = current.trim();
-  if (trimmed.length > 0) {
-    statements.push(trimmed);
-  }
-
-  for (const stmt of statements) {
-    await db.execute(sql.raw(stmt));
-  }
-}
 
 /**
  * Seed test messages into the source IMAP account.
@@ -173,6 +183,7 @@ ${msg.body}
   }
 }
 
+// Shadow pass tests require Stalwart (JMAP/IMAP)
 describe('Shadow Pass Integration (T4)', () => {
   let db: DbClient;
   let ledger: PgLedger;
@@ -181,15 +192,13 @@ describe('Shadow Pass Integration (T4)', () => {
   let target: JmapTargetWriter;
 
   beforeAll(async () => {
+    // Wait for IMAP server to be available
+    console.log('[ShadowPass] Waiting for IMAP server...');
+    await waitForImap(STALWART_IMAP_HOST, STALWART_IMAP_PORT);
+    console.log('[ShadowPass] IMAP server is ready');
+    
     // Setup database
     db = createPgDb(PG_CONNECTION_STRING);
-    
-    // Run migrations
-    const migrationSql = readFileSync(
-      path.join(__dirname, '../migrations/0001_init.sql'),
-      'utf-8',
-    );
-    await executeMigration(db, migrationSql);
     
     ledger = new PgLedger(db);
     cursorStore = new PgCursorStore(db);
@@ -215,7 +224,7 @@ describe('Shadow Pass Integration (T4)', () => {
     // Connect target
     await target.connect();
     
-    // Seed source messages
+    // Seed source messages (accounts are already provisioned by testcontainers setup)
     await seedSourceMessages();
     
     // Create test data (tenant, connection, mailbox, mapping)
