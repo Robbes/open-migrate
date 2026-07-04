@@ -7,6 +7,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { sql } from 'drizzle-orm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { ImapSimpleOptions } from 'imap-simple';
 import { createPgDb } from './db.js';
 import { PgLedger } from './ledger.js';
 import { PgCursorStore } from './cursor-store.js';
@@ -14,6 +15,19 @@ import { ImapSource } from '../../connectors/src/imap-source.js';
 import { JmapTargetWriter } from '../../connectors/src/jmap-target.js';
 import { runShadowPass } from '../../core/src/reconcile.js';
 import { asTenantId, asMappingId } from '@openmig/shared';
+
+/**
+ * Append options for IMAP append operation.
+ * Defined locally to avoid direct dependency on @types/imap.
+ */
+interface AppendOptions {
+  /** The name of the mailbox to append the message to. Default: the currently open mailbox */
+  mailbox?: string;
+  /** A single flag (e.g. 'Seen') or an array of flags (e.g. ['Seen', 'Flagged']) to append to the message. Default: (no flags) */
+  flags?: string | string[];
+  /** What to use for message arrival date/time. Default: (current date/time) */
+  date?: Date;
+}
 
 // Get the directory name
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -30,23 +44,28 @@ const PG_CONNECTION_STRING =
 
 const STALWART_IMAP_HOST = host;
 const STALWART_IMAP_PORT = 143;
-const STALWART_JMAP_URL = `http://${host}:8080`;  // Use internal port 8080
+const STALWART_JMAP_URL = `http://${host}:8080`; // Use internal port 8080
 const STALWART_JMAP_USERNAME = 'target@dev.local';
 const STALWART_JMAP_PASSWORD = 'change-me-immediately';
 
 // Test accounts
 const SOURCE_ACCOUNT = 'source@dev.local';
 const SOURCE_PASSWORD = 'change-me-immediately';
-const TARGET_ACCOUNT = 'target@dev.local';
 
 // Fixed UUIDs for testing
 const TEST_TENANT_ID = asTenantId('550e8400-e29b-41d4-a716-446655440001' as never);
 const TEST_MAPPING_ID = asMappingId('550e8400-e29b-41d4-a716-446655440002' as never);
 
 /**
+ * Database type for migration execution.
+ * Using a more flexible type that matches the actual drizzle database object.
+ */
+type DbClient = ReturnType<typeof createPgDb>;
+
+/**
  * Execute a multi-statement SQL migration.
  */
-async function executeMigration(db: any, sqlContent: string): Promise<void> {
+async function executeMigration(db: DbClient, sqlContent: string): Promise<void> {
   // Remove single-line comments
   const cleaned = sqlContent.replace(/--[^\n]*/g, '');
   
@@ -97,8 +116,8 @@ async function executeMigration(db: any, sqlContent: string): Promise<void> {
  */
 async function seedSourceMessages(): Promise<void> {
   const imap = await import('imap-simple');
-  
-  const config: imap.ImapSimpleOptions = {
+
+  const config: ImapSimpleOptions = {
     imap: {
       user: SOURCE_ACCOUNT,
       password: SOURCE_PASSWORD,
@@ -110,11 +129,11 @@ async function seedSourceMessages(): Promise<void> {
   };
 
   const conn = await imap.connect(config);
-  
+
   try {
     // Open INBOX
     await conn.openBox('INBOX');
-    
+
     // Seed test messages with known Message-IDs
     const testMessages = [
       {
@@ -144,11 +163,10 @@ Content-Type: text/plain; charset=utf-8
 
 ${msg.body}
 `;
-      
+
       await conn.append(rfc822, {
         mailbox: 'INBOX',
-        options: [],
-      });
+      } as AppendOptions);
     }
   } finally {
     conn.end();
@@ -156,7 +174,7 @@ ${msg.body}
 }
 
 describe('Shadow Pass Integration (T4)', () => {
-  let db: any;
+  let db: DbClient;
   let ledger: PgLedger;
   let cursorStore: PgCursorStore;
   let source: ImapSource;
@@ -295,8 +313,8 @@ describe('Shadow Pass Integration (T4)', () => {
   it('should handle delta correctly (adding one message creates exactly 1)', async () => {
     // Seed one more message
     const imap = await import('imap-simple');
-    
-    const config: imap.ImapSimpleOptions = {
+
+    const config: ImapSimpleOptions = {
       imap: {
         user: SOURCE_ACCOUNT,
         password: SOURCE_PASSWORD,
@@ -308,7 +326,7 @@ describe('Shadow Pass Integration (T4)', () => {
     };
 
     const conn = await imap.connect(config);
-    
+
     try {
       const newMessage = `From: source@dev.local
 To: target@dev.local
@@ -319,11 +337,10 @@ Content-Type: text/plain; charset=utf-8
 
 This is the fourth test message for delta testing.
 `;
-      
+
       await conn.append(newMessage, {
         mailbox: 'INBOX',
-        options: [],
-      });
+      } as AppendOptions);
     } finally {
       conn.end();
     }
