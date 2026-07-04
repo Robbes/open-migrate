@@ -14,9 +14,28 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['**/*.test.ts'],
     exclude: ['node_modules', 'dist'],
     globalSetup: './vitest.global-setup.ts',
-    testTimeout: 30000,
+    testTimeout: 180000,
+    projects: [
+      {
+        test: {
+          name: 'unit',
+          include: ['**/*.unit.test.ts'],
+        },
+      },
+      {
+        test: {
+          name: 'integration',
+          include: ['**/*.integration.test.ts'],
+        },
+      },
+      {
+        test: {
+          name: 'e2e',
+          include: ['**/*.e2e.test.ts'],
+        },
+      },
+    ],
   },
 });

@@ -2,14 +2,47 @@
 // Testcontainers setup for integration tests.
 // Spins up Postgres and Stalwart programmatically.
 //
-// Stalwart v0.16.x requires a complete configuration file to enable JMAP/IMAP listeners.
-// Without config, it starts in bootstrap mode which requires web UI setup.
+// IMPORTANT: Stalwart v0.16.10 requires a two-phase startup:
+//   Phase 1: Recovery mode container - provisions accounts via stalwart-cli
+//   Phase 2: Normal mode container - starts with mail listeners enabled
+// Both phases share the same data directory (host bind-mount).
 
 import { GenericContainer, Wait, Network } from 'testcontainers';
-import type { StartedTestContainer } from 'testcontainers';
-import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import type { StartedTestContainer, StoppedTestContainer } from 'testcontainers';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+
+// Path to stalwart-cli binary (installed via installer script)
+const STALWART_CLI_PATH = '/home/openhands/.cargo/bin/stalwart-cli';
+
+/**
+ * Wait for an HTTP endpoint to become available using manual polling.
+ * This is more reliable than testcontainers' built-in HttpWaitStrategy for Stalwart.
+ */
+async function waitForHttpEndpoint(
+  url: string,
+  maxAttempts: number = 60,
+  intervalMs: number = 3000
+): Promise<void> {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) {
+        console.log(`[WaitForHttp] Endpoint ready after ${i + 1} attempts`);
+        return;
+      }
+    } catch (err: any) {
+      // Ignore connection errors and keep trying
+    }
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`Endpoint ${url} not available after ${maxAttempts} attempts`);
+}
 
 export interface TestEnvironment {
   postgres: {
@@ -29,31 +62,42 @@ export interface TestEnvironment {
 }
 
 /**
- * Create a minimal Stalwart configuration file.
- * 
- * Note: Stalwart v0.16.x uses a minimal JSON config that only specifies the DataStore.
- * All other configuration is done through the JMAP API after startup.
- * Based on Stalwart documentation: https://stalw.art/docs/install/configuration
+ * Create the Stalwart configuration file.
+ * Stalwart v0.16 config.json contains DataStore at ROOT level + listen configurations.
+ * Format for normal mode:
+ * {
+ *   "@type": "RocksDb",
+ *   "path": "/opt/stalwart/data",
+ *   "listen": {
+ *     "http": "0.0.0.0:8080",
+ *     "imap": "0.0.0.0:143",
+ *     "jmap": "0.0.0.0:8080"
+ *   }
+ * }
  */
-function createStalwartConfig(configPath: string): void {
-  // Create the config directory if it doesn't exist
-  const configDir = path.dirname(configPath);
-  mkdirSync(configDir, { recursive: true });
-
-  // Minimal JSON configuration for Stalwart v0.16.x
-  // Only specifies the DataStore location - all other config via JMAP API
-  const config = {
-    '@type': 'RocksDb',
-    path: '/var/lib/stalwart/data',
+function createStalwartConfig(configPath: string, normalMode: boolean = false): void {
+  const config: any = {
+    '@type': 'RocksDb' as const,
+    path: '/opt/stalwart/data',
   };
-
-  writeFileSync(configPath, JSON.stringify(config));
+  
+  // Add listen configurations for normal mode (not recovery mode)
+  if (normalMode) {
+    config.listen = {
+      http: '0.0.0.0:8080',
+      imap: '0.0.0.0:143',
+      jmap: '0.0.0.0:8080',
+    };
+  }
+  
+  writeFileSync(configPath, JSON.stringify(config, null, 2));
   console.log(`[StalwartSetup] Config written to ${configPath}`);
 }
 
 /**
- * Start Stalwart with proper configuration.
- * Creates accounts via stalwart-cli after startup.
+ * Start Stalwart in two phases:
+ *   Phase 1: Recovery mode - provision accounts via stalwart-cli
+ *   Phase 2: Normal mode - start with mail listeners enabled
  */
 async function startStalwart(): Promise<{
   jmapUrl: string;
@@ -62,52 +106,190 @@ async function startStalwart(): Promise<{
   container: StartedTestContainer;
 }> {
   // Create a host-bind mount directory for Stalwart data
+  // This persists between container A (provisioning) and container B (production)
   const dataDir = mkdtempSync(path.join(tmpdir(), 'stalwart-data-'));
   console.log(`[StalwartSetup] Data directory: ${dataDir}`);
 
-  // Create configuration file (minimal JSON for Stalwart v0.16.x)
-  // Based on Stalwart documentation: only DataStore config is needed
-  const configDir = path.join(dataDir, 'config');
-  const configPath = path.join(configDir, 'config.json');
-  createStalwartConfig(configPath);
+  // Generate recovery admin credentials
+  const recoveryPassword = 'provision_' + Math.random().toString(36).slice(2, 10);
+  const provisionAdmin = `admin:${recoveryPassword}`;
+  const [adminUser, adminPass] = provisionAdmin.split(':');
 
-  // Create config object for copy to container
-  const config = {
+  console.log('[StalwartSetup] Phase 1: Starting recovery mode container...');
+
+  // Phase 1: Provisioning container in recovery mode
+  // Recovery mode uses minimal config (no listen directives needed)
+  const configContent = JSON.stringify({
     '@type': 'RocksDb',
-    path: '/var/lib/stalwart/data',
-  };
-
-  console.log('[StalwartSetup] Starting Stalwart container with configuration...');
-
-  // Start Stalwart with explicit --config argument
-  // Note: Stalwart v0.16.x uses minimal JSON config (only DataStore)
-  // Based on Dockerfile: CMD ["--config", "/etc/stalwart/config.json"]
-  // IMPORTANT: Must run as root to avoid bind mount permission issues
-  // The stalwart user (UID 2000) cannot write to host bind-mounted directories
-  // due to UID translation in Docker. Running as root bypasses this issue.
-  const container = await new GenericContainer('stalwartlabs/stalwart:v0.16.10')
-    .withCopyContentToContainer([
-      { content: JSON.stringify(config), target: '/etc/stalwart/config.json' },
-    ])
+    path: '/opt/stalwart/data',
+  });
+  const containerA = await new GenericContainer('stalwartlabs/stalwart:v0.16.10')
     .withBindMounts([
-      { source: dataDir, target: '/var/lib/stalwart/data' },
+      { source: dataDir, target: '/opt/stalwart/data' },
     ])
-    .withCommand(['--config', '/etc/stalwart/config.json'])
-    .withExposedPorts(8080, 143)
+    .withCopyContentToContainer([{ content: configContent, target: '/opt/stalwart/config.json' }])
     .withUser('root')
+    .withCommand(['--config', '/opt/stalwart/config.json'])
+    .withEnvironment({
+      STALWART_HOSTNAME: 'mail.stalwart.local',
+      STALWART_RECOVERY_MODE: '1',
+      STALWART_RECOVERY_ADMIN: provisionAdmin,
+    })
+    .withExposedPorts(8080)
+    .withWaitStrategy(Wait.forLogMessage(/Server started in recovery mode/).withStartupTimeout(120000))
     .withStartupTimeout(120000)
-    .withWaitStrategy(Wait.forHttp('/healthz/ready', 8080))
     .start();
 
-  const mgmtPort = container.getMappedPort(8080);
-  const mgmtHost = container.getHost();
+  const mgmtPort = containerA.getMappedPort(8080);
+  const mgmtHost = containerA.getHost();
 
-  console.log(`[StalwartSetup] Stalwart started at http://${mgmtHost}:${mgmtPort}`);
+  console.log(`[StalwartSetup] Recovery listener ready at http://${mgmtHost}:${mgmtPort}`);
 
-  // For integration tests, we'll use IMAP directly since JMAP requires bootstrap completion
-  const stalwartHost = container.getHost();
-  const imapPort = container.getMappedPort(143);
-  const jmapUrl = `http://${mgmtHost}:${mgmtPort}`;
+  // Wait a moment for recovery listener to be fully ready
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+
+  console.log('[StalwartSetup] Provisioning accounts via stalwart-cli...');
+  
+  // Stalwart v0.16.x account format - account ID is used as username for IMAP
+  const plan = [
+    { '@type': 'upsert', object: 'Domain', matchOn: ['name'], value: { 'dom-a': { name: 'dev.local' } } },
+    { '@type': 'upsert', object: 'Account', matchOn: ['name'], value: { 'source': {
+        '@type': 'User', name: 'source', domainId: '#dom-a',
+        credentials: { '0': { '@type': 'Password', secret: 'source_password' } },
+        roles: { '@type': 'User' }, permissions: { '@type': 'Inherit' }, encryptionAtRest: { '@type': 'Disabled' },
+    } } },
+    { '@type': 'upsert', object: 'Account', matchOn: ['name'], value: { 'target': {
+        '@type': 'User', name: 'target', domainId: '#dom-a',
+        credentials: { '0': { '@type': 'Password', secret: 'target_password' } },
+        roles: { '@type': 'User' }, permissions: { '@type': 'Inherit' }, encryptionAtRest: { '@type': 'Disabled' },
+    } } },
+  ].map((op) => JSON.stringify(op)).join('\n');
+
+  try {
+    // Use host-level stalwart-cli binary to provision accounts
+    // This avoids Docker networking issues and container lifecycle problems
+    console.log('[StalwartSetup] STALWART_URL:', `http://${mgmtHost}:${mgmtPort}`);
+    
+    // Write plan to temp file
+    const planFile = path.join(tmpdir(), `stalwart-plan-${Date.now()}.jsonl`);
+    writeFileSync(planFile, plan);
+    console.log('[StalwartSetup] Plan written to:', planFile);
+    
+    console.log('[StalwartSetup] Running stalwart-cli...');
+    const { stdout, stderr } = await execFileAsync(
+      STALWART_CLI_PATH,
+      ['apply', '--file', planFile],
+      {
+        env: {
+          STALWART_URL: `http://${mgmtHost}:${mgmtPort}`,
+          STALWART_USER: adminUser,
+          STALWART_PASSWORD: adminPass,
+        },
+        timeout: 30000, // 30 second timeout to prevent hanging
+        maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+      }
+    );
+    
+    console.log('[StalwartSetup] stalwart-cli completed successfully');
+    if (stderr) console.log('[StalwartSetup] Output:', stderr);
+    if (stdout) console.log('[StalwartSetup] Stdout:', stdout);
+    
+  } catch (err: any) {
+    console.error('[StalwartSetup] stalwart-cli failed:', err.message);
+    console.error('[StalwartSetup] Exit code:', err.code);
+    console.error('[StalwartSetup] Signal:', err.signal);
+    if (err.stdout) console.error('[StalwartSetup] Stdout:', err.stdout);
+    if (err.stderr) console.error('[StalwartSetup] Stderr:', err.stderr);
+    await containerA.stop();
+    throw new Error(`Failed to provision accounts: ${err.message}`);
+  }
+
+  // Verify accounts were created using host-level CLI
+  console.log('[StalwartSetup] Verifying accounts...');
+  try {
+    const { stdout: verifyOutput } = await execFileAsync(
+      STALWART_CLI_PATH,
+      ['get', 'Account', 'src'],
+      {
+        env: {
+          STALWART_URL: `http://${mgmtHost}:${mgmtPort}`,
+          STALWART_USER: adminUser,
+          STALWART_PASSWORD: adminPass,
+        },
+        timeout: 10000,
+      }
+    );
+    console.log('[StalwartSetup] Source account verified:', verifyOutput ? 'found' : 'not found');
+  } catch (err: any) {
+    console.warn('[StalwartSetup] Warning: Could not verify source account:', err.message);
+  }
+
+  // Stop provisioning container
+  console.log('[StalwartSetup] Stopping recovery container...');
+  await containerA.stop();
+
+  console.log('[StalwartSetup] Phase 2: Starting normal mode container with provisioned data...');
+
+  // Phase 2: Production container with full configuration for JMAP/IMAP
+  // REUSE the same data directory from Phase 1 (contains provisioned accounts)
+  const dataDir2 = dataDir; // Use the same data directory
+  console.log('[StalwartSetup] Phase 2 data directory:', dataDir2);
+
+  // Create a complete config with all necessary sections for normal mode
+  // Note: Stalwart uses the accounts provisioned via stalwart-cli for authentication
+  // The 'auth' section is for JMAP token auth; IMAP uses the account credentials directly
+  const normalConfig = {
+    '@type': 'RocksDb',
+    path: '/opt/stalwart/data',
+    // Enable HTTP/JMAP server
+    http: {
+      '@type': 'http',
+      listen: '0.0.0.0:8080',
+    },
+    // Enable IMAP server  
+    imap: {
+      '@type': 'imap',
+      listen: '0.0.0.0:143',
+    },
+    // JMAP settings
+    jmap: {
+      '@type': 'jmap',
+    },
+    // Authentication for JMAP (IMAP uses account credentials directly)
+    auth: {
+      '@type': 'jwt',
+      secret: 'test-secret-for-integration-tests-only',
+    },
+  };
+  
+  const normalConfigPath = path.join(dataDir2, 'config.json');
+  writeFileSync(normalConfigPath, JSON.stringify(normalConfig, null, 2));
+  console.log('[StalwartSetup] Normal mode config written');
+
+  const containerB = await new GenericContainer('stalwartlabs/stalwart:v0.16.10')
+    .withBindMounts([
+      { source: dataDir2, target: '/opt/stalwart/data' },
+    ])
+    .withUser('root')
+    .withCommand(['--config', '/opt/stalwart/data/config.json'])
+    .withEnvironment({
+      STALWART_HOSTNAME: 'mail.stalwart.local',
+    })
+    .withExposedPorts(8080, 143)
+    .withStartupTimeout(180000)
+    .start();
+
+  console.log('[StalwartSetup] Container started, waiting for JMAP endpoint...');
+  const stalwartHost = containerB.getHost();
+  const imapPort = containerB.getMappedPort(143);
+  const jmapPort = containerB.getMappedPort(8080);
+  const jmapUrl = `http://${stalwartHost}:${jmapPort}`;
+  
+  // Use manual polling instead of testcontainers' wait strategy
+  await waitForHttpEndpoint(`${jmapUrl}/.well-known/jmap`);
+  
+  console.log('[StalwartSetup] JMAP endpoint ready at:', jmapUrl);
+  console.log('[StalwartSetup] IMAP available at:', `${stalwartHost}:${imapPort}`);
 
   console.log(`[StalwartSetup] Stalwart ready - JMAP: ${jmapUrl}, IMAP: ${stalwartHost}:${imapPort}`);
 
@@ -115,13 +297,13 @@ async function startStalwart(): Promise<{
     jmapUrl,
     imapHost: stalwartHost,
     imapPort,
-    container,
+    container: containerB,
   };
 }
 
 /**
  * Start the test environment using Testcontainers.
- * Spins up Postgres and Stalwart containers.
+ * Spins up Postgres and Stalwart (two-phase startup) containers.
  */
 export async function startTestEnvironment(): Promise<TestEnvironment> {
   console.log('[Testcontainers] Starting test environment...');
@@ -151,7 +333,7 @@ export async function startTestEnvironment(): Promise<TestEnvironment> {
 
   console.log(`[Testcontainers] Postgres ready at ${postgresConnectionString}`);
 
-  // Start Stalwart
+  // Start Stalwart (two-phase: provision then run)
   const stalwart = await startStalwart();
 
   const stalwartEnv: TestEnvironment['stalwart'] = {
