@@ -5,20 +5,50 @@
 // IMPORTANT: Stalwart v0.16.10 requires a two-phase startup:
 //   Phase 1: Recovery mode container - provisions accounts via stalwart-cli
 //   Phase 2: Normal mode container - starts with mail listeners enabled
-// Both phases share the same data directory (host bind-mount).
+// Both phases share the same Docker named volume for data persistence.
+//
+// NOTE: Bind mounts to host directories do not sync data in this Docker-in-Docker environment.
+//       We use Docker named volumes instead, which work reliably.
 
 import { GenericContainer, Wait, Network } from 'testcontainers';
 import type { StartedTestContainer, StoppedTestContainer } from 'testcontainers';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
 // Path to stalwart-cli binary (installed via installer script)
 const STALWART_CLI_PATH = '/home/openhands/.cargo/bin/stalwart-cli';
+
+// Docker named volume for Stalwart data persistence
+// Bind mounts don't work in this DinD environment, so we use Docker volumes
+const STALWART_DATA_VOLUME = 'stalwart-test-data';
+
+/**
+ * Ensure the Docker volume exists.
+ */
+function ensureVolume(): void {
+  try {
+    execFileSync('docker', ['volume', 'inspect', STALWART_DATA_VOLUME], { stdio: 'ignore' });
+  } catch {
+    execFileSync('docker', ['volume', 'create', STALWART_DATA_VOLUME]);
+  }
+}
+
+/**
+ * Get the host path for a Docker volume.
+ * This is needed for testcontainers bind mounts.
+ */
+function getVolumeMountpoint(volumeName: string): string {
+  const stdout = execFileSync('docker', ['volume', 'inspect', volumeName], {
+    encoding: 'utf8',
+  });
+  const data = JSON.parse(stdout);
+  return data[0]?.Mountpoint || '/var/lib/docker/volumes/' + volumeName + '/_data';
+}
 
 /**
  * Wait for an HTTP endpoint to become available using manual polling.
@@ -65,6 +95,7 @@ export interface TestEnvironment {
  * Start Stalwart in two phases:
  *   Phase 1: Recovery mode - provision accounts via stalwart-cli
  *   Phase 2: Normal mode - start with mail listeners enabled
+ * Both phases share the same Docker named volume for data persistence.
  */
 async function startStalwart(): Promise<{
   jmapUrl: string;
@@ -72,10 +103,10 @@ async function startStalwart(): Promise<{
   imapPort: number;
   container: StartedTestContainer;
 }> {
-  // Create a host-bind mount directory for Stalwart data
-  // This persists between container A (provisioning) and container B (production)
-  const dataDir = mkdtempSync(path.join(tmpdir(), 'stalwart-data-'));
-  console.log(`[StalwartSetup] Data directory: ${dataDir}`);
+  // Ensure Docker volume exists for data persistence
+  ensureVolume();
+  const volumeMountpoint = getVolumeMountpoint(STALWART_DATA_VOLUME);
+  console.log(`[StalwartSetup] Using Docker volume at: ${volumeMountpoint}`);
 
   // Generate recovery admin credentials
   const recoveryPassword = 'provision_' + Math.random().toString(36).slice(2, 10);
@@ -87,16 +118,16 @@ async function startStalwart(): Promise<{
   // Minimal config.json for Stalwart - just the data store settings
   // This prevents bootstrap mode and allows recovery mode to work properly
   // Format MUST be valid JSON (not JS object notation)
-  // Path must match the bind mount target
+  // Path must match the volume mount target
   // NOTE: Config is baked into the custom image to ensure it's available at startup
-  const configJson = '{"@type":"RocksDb","path":"/opt/stalwart/data/"}';
+  const configJson = '{"@type":"RocksDb","path":"/opt/stalwart/data"}';
 
   // Phase 1: Provisioning container in recovery mode
   // Uses custom image with config.json baked in (stalwart-test-custom)
   // Runs as root to allow writing to the mounted data directory
   const containerA = await new GenericContainer('stalwart-test-custom:latest')
     .withBindMounts([
-      { source: dataDir, target: '/opt/stalwart/data' },
+      { source: volumeMountpoint, target: '/opt/stalwart/data' },
     ])
     .withEnvironment({
       STALWART_HOSTNAME: 'mail.stalwart.local',
@@ -205,9 +236,8 @@ async function startStalwart(): Promise<{
   console.log('[StalwartSetup] Phase 2: Starting normal mode container with provisioned data...');
 
   // Phase 2: Production container with MINIMAL config
-  // REUSE the same data directory from Phase 1 (contains provisioned accounts in DB)
-  const dataDir2 = dataDir; // Use the same data directory
-  console.log('[StalwartSetup] Phase 2 data directory:', dataDir2);
+  // REUSE the same Docker volume from Phase 1 (contains provisioned accounts in DB)
+  console.log('[StalwartSetup] Phase 2 using same volume:', volumeMountpoint);
 
   // MINIMAL config per FIXED TRUTH: only DataStore, no http/imap/listeners/accounts/domains
   // Accounts/domains are in the DB from Phase 1 provisioning
@@ -217,7 +247,7 @@ async function startStalwart(): Promise<{
 
   const containerB = await new GenericContainer('stalwart-test-custom:latest')
     .withBindMounts([
-      { source: dataDir2, target: '/opt/stalwart/data' },
+      { source: volumeMountpoint, target: '/opt/stalwart/data' },
     ])
     .withEnvironment({
       STALWART_HOSTNAME: 'mail.stalwart.local',
