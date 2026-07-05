@@ -140,6 +140,7 @@ async function startStalwart(): Promise<{
     .withExposedPorts(8080)
     .withStartupTimeout(120000)
     .withUser('root')
+    .withCommand(['--config', '/etc/stalwart/config.json'])
     .withWaitStrategy(Wait.forLogMessage('Network listener started'))
     .start();
 
@@ -237,30 +238,63 @@ async function startStalwart(): Promise<{
   await containerA.stop();
   
   // CRITICAL: Wait for RocksDB lock to be released
-  // containerA.stop() may return before the process fully releases the lock file
-  // We need to ensure the container is completely gone before starting Phase 2
+  // containerA.stop() may return before the Stalwart process fully releases the lock file
+  // We need to ensure the LOCK file is actually gone before starting Phase 2
   console.log('[StalwartSetup] Waiting for Phase 1 container to fully terminate...');
   const stopContainerId = containerA.getId();
   let attempts = 0;
   const maxAttempts = 30; // 30 seconds total
+  
+  // Step 1: Wait for container to disappear from docker ps
   while (attempts < maxAttempts) {
     try {
       const { stdout } = await execFileAsync('docker', ['ps', '-q', '--filter', `id=${stopContainerId}`]);
       if (!stdout.trim()) {
-        // Container is gone - lock should be released
-        console.log('[StalwartSetup] Phase 1 container fully terminated, lock released.');
+        console.log('[StalwartSetup] Phase 1 container no longer in docker ps.');
         break;
       }
     } catch {
-      // Container might already be gone
       break;
     }
     await new Promise(resolve => setTimeout(resolve, 1000));
     attempts++;
   }
+  
   if (attempts >= maxAttempts) {
-    console.warn('[StalwartSetup] Warning: Container may still be running, forcing cleanup...');
+    console.warn('[StalwartSetup] Container still appearing, forcing removal...');
     await execFileAsync('docker', ['rm', '-f', stopContainerId]).catch(() => {});
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+
+  // Step 2: Wait for LOCK file to actually be gone (not just container stopped)
+  console.log('[StalwartSetup] Waiting for LOCK file to be released...');
+  attempts = 0;
+  while (attempts < 30) {
+    try {
+      const { stdout } = await execFileAsync('docker', [
+        'run', '--rm', '-v', `${STALWART_DATA_VOLUME}:/data`, 'alpine',
+        'test', '-f', '/data/LOCK'
+      ]);
+      // LOCK file still exists - wait a bit more
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      attempts++;
+    } catch (err: any) {
+      // LOCK file does not exist (test command failed) - this is what we want
+      console.log('[StalwartSetup] LOCK file released after', attempts, 'attempts.');
+      break;
+    }
+  }
+  
+  if (attempts >= 30) {
+    console.warn('[StalwartSetup] Warning: LOCK file still present after 30s, forcing removal...');
+    try {
+      await execFileAsync('docker', [
+        'run', '--rm', '-v', `${STALWART_DATA_VOLUME}:/data`, 'alpine',
+        'rm', '-f', '/data/LOCK'
+      ]);
+    } catch (e: any) {
+      console.warn('[StalwartSetup] Could not force-remove LOCK file:', e.message);
+    }
     await new Promise(resolve => setTimeout(resolve, 2000));
   }
 
@@ -270,25 +304,8 @@ async function startStalwart(): Promise<{
   // REUSE the same Docker volume from Phase 1 (contains provisioned accounts in DB)
   console.log('[StalwartSetup] Phase 2 using same volume:', volumeMountpoint);
 
-  // CRITICAL: Remove stale LOCK file from Phase 1 before starting Phase 2
-  // RocksDB creates a LOCK file that persists even after the container stops.
-  // If not removed, Phase 2 will fail with "LOCK: Resource temporarily unavailable"
-  console.log('[StalwartSetup] Cleaning up stale LOCK file...');
-  try {
-    const result = execFileSync('docker', [
-      'run', '--rm', '-v', `${STALWART_DATA_VOLUME}:/data`, 'alpine',
-      'rm', '-f', '/data/LOCK'
-    ], { encoding: 'utf8' });
-    console.log('[StalwartSetup] LOCK file removal output:', result);
-    // Verify removal
-    const verifyResult = execFileSync('docker', [
-      'run', '--rm', '-v', `${STALWART_DATA_VOLUME}:/data`, 'alpine',
-      'ls', '-la', '/data/LOCK'
-    ], { encoding: 'utf8' });
-    console.log('[StalwartSetup] LOCK file verification:', verifyResult);
-  } catch (err: any) {
-    console.warn('[StalwartSetup] Warning: Could not remove LOCK file:', err.message);
-  }
+  // LOCK file should already be released by the wait loop above
+  // No need to force-remove it here
 
   // MINIMAL config per FIXED TRUTH: only DataStore, no http/imap/listeners/accounts/domains
   // Accounts/domains are in the DB from Phase 1 provisioning
@@ -376,6 +393,7 @@ async function startStalwart(): Promise<{
     .withExposedPorts(8080, 143)
     .withStartupTimeout(180000)
     .withUser('root')
+    .withCommand(['--config', '/etc/stalwart/config.json'])
     .withWaitStrategy(customWaitStrategy)
     .start();
 
