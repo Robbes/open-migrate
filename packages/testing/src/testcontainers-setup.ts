@@ -301,24 +301,36 @@ async function startStalwart(): Promise<{
       const timeout = 180000;
       const startTime = Date.now();
       
+      // Get container ID for manual inspection
+      const containerId = container.getId ? container.getId() : 'unknown';
+      console.log(`[StalwartSetup] Phase 2 container ID: ${containerId}`);
+      
       while (Date.now() - startTime < timeout) {
         // Check if ports are bound
         const inspect = await container.inspect();
-        const running = inspect.State.Running;
-        const exited = inspect.State.Running === false && inspect.State.Status === 'exited';
+        const state = inspect.State;
+        const running = state.Running;
+        const status = state.Status;
+        const exited = !running && status === 'exited';
+        const dead = status === 'dead';
         
-        if (exited) {
-          const logs = await container.logs({ stdout: true, stderr: true, tail: 100 });
-          console.error('[StalwartSetup] Container exited! Logs:', logs.toString());
-          throw new Error('Stalwart container exited unexpectedly');
+        console.log(`[StalwartSetup] Container state: running=${running}, status=${status}, exited=${exited}, dead=${dead}`);
+        
+        if (exited || dead) {
+          const logs = await container.logs({ stdout: true, stderr: true, tail: 100, timestamps: true });
+          console.error('[StalwartSetup] Container exited! Last logs:', logs.toString().substring(0, 2000));
+          throw new Error(`Stalwart container exited with status: ${status}`);
         }
         
         if (running) {
           // Try to connect to port 8080
           try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 2000);
             const response = await fetch(`http://${container.getHost()}:${container.getMappedPort(8080)}/.well-known/jmap`, {
-              timeout: 2000
+              signal: controller.signal
             });
+            clearTimeout(timeoutId);
             if (response.ok || response.status === 404) {
               console.log('[StalwartSetup] Port 8080 is listening');
               return;
