@@ -12,13 +12,164 @@
 
 import { GenericContainer, Wait, Network } from 'testcontainers';
 import type { StartedTestContainer, StoppedTestContainer } from 'testcontainers';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Test logs directory - created once at module load
+ */
+const TEST_LOGS_DIR = path.join(process.cwd(), 'test-logs');
+
+/**
+ * Ensure the test-logs directory exists
+ */
+function ensureTestLogsDir(): void {
+  if (!existsSync(TEST_LOGS_DIR)) {
+    mkdirSync(TEST_LOGS_DIR, { recursive: true });
+    console.log(`[TestLogs] Created directory: ${TEST_LOGS_DIR}`);
+  }
+}
+
+/**
+ * Stream container logs to a file from container start.
+ * This is different from polling - it attaches a log consumer that streams
+ * each line as it's produced.
+ */
+async function streamContainerLogs(
+  container: any,
+  logFileName: string,
+  options: { includeTimestamps?: boolean } = {}
+): Promise<void> {
+  ensureTestLogsDir();
+  const logFilePath = path.join(TEST_LOGS_DIR, logFileName);
+  const includeTimestamps = options.includeTimestamps ?? true;
+  
+  console.log(`[TestLogs] Starting log stream to: ${logFilePath}`);
+  
+  // Clear/create the log file
+  try {
+    appendFileSync(logFilePath, `\n=== ${logFileName} started at ${new Date().toISOString()} ===\n`);
+  } catch (err: any) {
+    console.warn(`[TestLogs] Warning: Could not initialize log file: ${err.message}`);
+    return;
+  }
+  
+  // Use testcontainers' log consumer to stream logs
+  try {
+    const logStream = container.logs();
+    logStream.on('data', (line: string) => {
+      try {
+        appendFileSync(logFilePath, line + '\n');
+      } catch (err: any) {
+        // Ignore write errors - container might be shutting down
+      }
+    });
+    logStream.on('err', (line: string) => {
+      try {
+        appendFileSync(logFilePath, `[ERR] ${line}\n`);
+      } catch (err: any) {
+        // Ignore write errors
+      }
+    });
+    logStream.on('end', () => {
+      try {
+        appendFileSync(logFilePath, `\n=== ${logFileName} ended ===\n`);
+      } catch (err: any) {
+        // Ignore
+      }
+      console.log(`[TestLogs] Log stream ended for: ${logFileName}`);
+    });
+  } catch (err: any) {
+    console.warn(`[TestLogs] Warning: Could not attach log stream for ${logFileName}: ${err.message}`);
+  }
+}
+
+/**
+ * Capture final diagnostics for a container including docker logs,
+ * internal logs, and network state.
+ */
+async function captureContainerDiagnostics(
+  container: any,
+  containerName: string,
+  extraChecks: string[] = []
+): Promise<void> {
+  ensureTestLogsDir();
+  const diagnosticsFile = path.join(TEST_LOGS_DIR, `diagnostics-${containerName}.txt`);
+  
+  console.log(`[TestLogs] Capturing diagnostics for ${containerName}...`);
+  
+  try {
+    const containerId = container.getId ? container.getId() : 'unknown';
+    
+    // Get Docker logs
+    let dockerLogs = '';
+    try {
+      const { stdout } = await execFileAsync('docker', ['logs', '--tail', '200', containerId]);
+      dockerLogs = stdout || 'No docker logs available';
+    } catch (err: any) {
+      dockerLogs = `Error getting docker logs: ${err.message}`;
+    }
+    
+    // Get container's internal /opt/stalwart/data/LOG if it exists
+    let stalwartDbLog = '';
+    try {
+      const { stdout } = await execFileAsync('docker', [
+        'exec', containerId, 'cat', '/opt/stalwart/data/LOG'
+      ]);
+      stalwartDbLog = stdout || 'No RocksDB LOG found';
+    } catch (err: any) {
+      stalwartDbLog = `Could not read RocksDB LOG: ${err.message}`;
+    }
+    
+    // Get network state from inside container
+    let networkState = '';
+    try {
+      const { stdout } = await execFileAsync('docker', [
+        'exec', containerId, 'sh', '-c', 'ss -ltn || netstat -ltn || cat /proc/net/tcp'
+      ]);
+      networkState = stdout || 'No network state available';
+    } catch (err: any) {
+      networkState = `Could not get network state: ${err.message}`;
+    }
+    
+    // Get docker ps -a for this container
+    let dockerPs = '';
+    try {
+      const { stdout } = await execFileAsync('docker', ['ps', '-a', '--filter', `id=${containerId}`, '--no-trunc']);
+      dockerPs = stdout || 'No container found in docker ps -a';
+    } catch (err: any) {
+      dockerPs = `Error: ${err.message}`;
+    }
+    
+    // Write all diagnostics
+    const header = `=== Diagnostics for ${containerName} (Container ID: ${containerId}) ===\n`;
+    const dockerLogsSection = `\n=== Docker Logs (last 200 lines) ===\n${dockerLogs}\n`;
+    const dbLogSection = `\n=== Stalwart RocksDB LOG ===\n${stalwartDbLog}\n`;
+    const networkSection = `\n=== Network State ===\n${networkState}\n`;
+    const psSection = `\n=== Docker ps -a ===\n${dockerPs}\n`;
+    
+    appendFileSync(diagnosticsFile, header + dockerLogsSection + dbLogSection + networkSection + psSection);
+    
+    // Run any extra checks
+    for (const check of extraChecks) {
+      try {
+        const { stdout } = await execFileAsync('docker', ['exec', containerId, 'sh', '-c', check]);
+        appendFileSync(diagnosticsFile, `\n=== ${check} ===\n${stdout}\n`);
+      } catch (err: any) {
+        appendFileSync(diagnosticsFile, `\n=== ${check} ===\nError: ${err.message}\n`);
+      }
+    }
+    
+    console.log(`[TestLogs] Diagnostics saved to: ${diagnosticsFile}`);
+  } catch (err: any) {
+    console.warn(`[TestLogs] Warning: Could not capture diagnostics for ${containerName}: ${err.message}`);
+  }
+}
 
 // Path to stalwart-cli binary (installed via installer script)
 const STALWART_CLI_PATH = '/home/openhands/.cargo/bin/stalwart-cli';
@@ -143,6 +294,9 @@ async function startStalwart(): Promise<{
     .withCommand(['--config', '/etc/stalwart/config.json'])
     .withWaitStrategy(Wait.forLogMessage('Network listener started'))
     .start();
+
+  // Attach log stream for Phase 1 - streams continuously from container start
+  await streamContainerLogs(containerA, 'stalwart-phase1.log');
 
   const mgmtPort = containerA.getMappedPort(8080);
   const mgmtHost = containerA.getHost();
@@ -419,6 +573,9 @@ async function startStalwart(): Promise<{
     .withWaitStrategy(customWaitStrategy)
     .start();
 
+  // Attach log stream for Phase 2 - streams continuously from container start
+  await streamContainerLogs(containerB, 'stalwart-phase2.log');
+
   console.log('[StalwartSetup] Container started, waiting for JMAP endpoint...');
   const stalwartHost = containerB.getHost();
   const imapPort = containerB.getMappedPort(143);
@@ -498,11 +655,36 @@ export async function startTestEnvironment(): Promise<TestEnvironment> {
 
 /**
  * Stop the test environment and clean up all containers.
+ * Also captures diagnostics on failure or during teardown.
  */
 export async function stopTestEnvironment(env: TestEnvironment): Promise<void> {
   console.log('[Testcontainers] Stopping containers...');
-  await env.postgres.container.stop();
-  await env.stalwart.container.stop();
+  
+  // Attach log stream for Postgres
+  await streamContainerLogs(env.postgres.container, 'postgres.log');
+  
+  try {
+    await env.postgres.container.stop();
+    console.log('[Testcontainers] Postgres stopped.');
+  } catch (err: any) {
+    console.error('[Testcontainers] Error stopping Postgres:', err.message);
+    // Capture diagnostics on error
+    await captureContainerDiagnostics(env.postgres.container, 'postgres', ['ps aux', 'df -h']);
+  }
+  
+  try {
+    await env.stalwart.container.stop();
+    console.log('[Testcontainers] Stalwart stopped.');
+  } catch (err: any) {
+    console.error('[Testcontainers] Error stopping Stalwart:', err.message);
+    // Capture full diagnostics on Stalwart failure
+    await captureContainerDiagnostics(
+      env.stalwart.container,
+      'stalwart-phase2',
+      ['ps aux', 'df -h', 'cat /etc/stalwart/config.json 2>/dev/null || echo "no config"', 'ls -la /opt/stalwart/data/']
+    );
+  }
+  
   console.log('[Testcontainers] All containers stopped.');
   
   // Clean up the Stalwart data volume to prevent stale locks for next run

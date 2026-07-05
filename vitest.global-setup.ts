@@ -2,6 +2,7 @@ import { startTestEnvironment, stopTestEnvironment } from './packages/testing/sr
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -61,8 +62,26 @@ export default async function () {
     console.log(`  - STALWART_IMAP: ${testEnv.stalwart.imapHost}:${testEnv.stalwart.imapPort}`);
   }
 
-  return async () => {
+  return async (error?: Error) => {
     console.log('[Vitest Global Teardown] Cleaning up Testcontainers...');
+    
+    // Capture diagnostics if there was an error
+    if (error) {
+      console.error('[Vitest Global Teardown] Test failed with error:', error.message);
+      console.error('[Vitest Global Teardown] Capturing diagnostics...');
+      try {
+        // Capture Stalwart diagnostics
+        const { captureContainerDiagnostics } = await import('./packages/testing/src/testcontainers-setup.js');
+        await captureContainerDiagnostics(
+          testEnv.stalwart.container,
+          'stalwart-phase2-error',
+          ['ps aux', 'df -h', 'cat /etc/stalwart/config.json 2>/dev/null || echo "no config"', 'ls -la /opt/stalwart/data/']
+        );
+      } catch (diagErr: any) {
+        console.warn('[Vitest Global Teardown] Could not capture diagnostics:', diagErr.message);
+      }
+    }
+    
     await stopTestEnvironment(testEnv);
     console.log('[Vitest Global Teardown] Cleanup complete.');
   };

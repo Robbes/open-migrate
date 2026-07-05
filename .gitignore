@@ -32,6 +32,9 @@ Thumbs.db
 coverage/
 .nyc_output/
 
+# Test logs (durable failure diagnostics)
+test-logs/
+
 # Temporary files
 tmp/
 temp/

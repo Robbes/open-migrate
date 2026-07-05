@@ -128,7 +128,15 @@ jobs:
           docker --version
           docker compose version
       - name: Run integration tests (Testcontainers spins up Postgres/Stalwart/Nextcloud)
+        id: integration-tests
         run: pnpm test:integration
+      - name: Upload integration logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.0
+        with:
+          name: integration-logs-${{ github.run_id }}
+          path: test-logs/
+          retention-days: 14
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.0
