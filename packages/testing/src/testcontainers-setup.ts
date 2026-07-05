@@ -328,6 +328,14 @@ async function startStalwart(): Promise<{
       const containerId = container.getId ? container.getId() : 'unknown';
       console.log(`[StalwartSetup] Phase 2 container ID: ${containerId}`);
       
+      // Get initial logs
+      try {
+        const initialLogs = await container.logs({ stdout: true, stderr: true, tail: 50, timestamps: true });
+        console.log('[StalwartSetup] Initial container logs:', initialLogs.toString().substring(0, 1000));
+      } catch (e: any) {
+        console.log('[StalwartSetup] Could not get initial logs:', e.message);
+      }
+      
       while (Date.now() - startTime < timeout) {
         // Check if ports are bound
         const inspect = await container.inspect();
@@ -377,6 +385,14 @@ async function startStalwart(): Promise<{
         }
         
         await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+      
+      // Final attempt to get logs before timeout
+      try {
+        const finalLogs = await container.logs({ stdout: true, stderr: true, tail: 100, timestamps: true });
+        console.error('[StalwartSetup] Final logs before timeout:', finalLogs.toString().substring(0, 2000));
+      } catch (e: any) {
+        console.error('[StalwartSetup] Could not get final logs:', e.message);
       }
       
       throw new Error('Stalwart did not start within timeout');
