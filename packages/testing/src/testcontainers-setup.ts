@@ -263,39 +263,45 @@ async function startStalwart(): Promise<{
   if (attempts >= maxAttempts) {
     console.warn('[StalwartSetup] Container still appearing, forcing removal...');
     await execFileAsync('docker', ['rm', '-f', stopContainerId]).catch(() => {});
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 3000));
   }
 
-  // Step 2: Wait for LOCK file to actually be gone (not just container stopped)
-  console.log('[StalwartSetup] Waiting for LOCK file to be released...');
+  // Step 2: Force-remove LOCK file and verify it's gone
+  // The LOCK file may persist due to Docker volume caching or delayed cleanup
+  console.log('[StalwartSetup] Forcing LOCK file removal...');
+  try {
+    await execFileAsync('docker', [
+      'run', '--rm', '-v', `${STALWART_DATA_VOLUME}:/data`, 'alpine',
+      'rm', '-f', '/data/LOCK'
+    ]);
+    console.log('[StalwartSetup] LOCK file removal command executed.');
+  } catch (e: any) {
+    console.warn('[StalwartSetup] Warning: Could not remove LOCK file:', e.message);
+  }
+  
+  // Step 3: Verify LOCK file is actually gone (wait up to 10 seconds)
+  console.log('[StalwartSetup] Verifying LOCK file is gone...');
   attempts = 0;
-  while (attempts < 30) {
+  while (attempts < 10) {
     try {
-      const { stdout } = await execFileAsync('docker', [
+      await execFileAsync('docker', [
         'run', '--rm', '-v', `${STALWART_DATA_VOLUME}:/data`, 'alpine',
         'test', '-f', '/data/LOCK'
       ]);
-      // LOCK file still exists - wait a bit more
+      // LOCK file still exists
       await new Promise(resolve => setTimeout(resolve, 1000));
       attempts++;
     } catch (err: any) {
-      // LOCK file does not exist (test command failed) - this is what we want
-      console.log('[StalwartSetup] LOCK file released after', attempts, 'attempts.');
+      // LOCK file does not exist - this is what we want
+      console.log('[StalwartSetup] LOCK file confirmed gone after', attempts, 'verification attempts.');
       break;
     }
   }
   
-  if (attempts >= 30) {
-    console.warn('[StalwartSetup] Warning: LOCK file still present after 30s, forcing removal...');
-    try {
-      await execFileAsync('docker', [
-        'run', '--rm', '-v', `${STALWART_DATA_VOLUME}:/data`, 'alpine',
-        'rm', '-f', '/data/LOCK'
-      ]);
-    } catch (e: any) {
-      console.warn('[StalwartSetup] Could not force-remove LOCK file:', e.message);
-    }
-    await new Promise(resolve => setTimeout(resolve, 2000));
+  if (attempts >= 10) {
+    console.error('[StalwartSetup] ERROR: LOCK file still present after forced removal!');
+    console.error('[StalwartSetup] This indicates a persistent lock issue - aborting Phase 2.');
+    throw new Error('LOCK file could not be removed - RocksDB may still be in use');
   }
 
   console.log('[StalwartSetup] Phase 2: Starting normal mode container with provisioned data...');
