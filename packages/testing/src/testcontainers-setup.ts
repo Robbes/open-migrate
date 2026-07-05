@@ -87,6 +87,7 @@ async function startStalwart(): Promise<{
   // Minimal config.json for Stalwart - just the data store settings
   // This prevents bootstrap mode and allows recovery mode to work properly
   // Format MUST be valid JSON (not JS object notation)
+  // Path must match the bind mount target
   const configJson = '{"@type":"RocksDb","path":"/opt/stalwart/data/"}';
 
   // Phase 1: Provisioning container in recovery mode
@@ -107,13 +108,6 @@ async function startStalwart(): Promise<{
     })
     .withExposedPorts(8080)
     .withStartupTimeout(120000)
-    .withHealthCheck({
-      Test: ['CMD-SHELL', 'curl -fs http://localhost:8080/.well-known/jmap || exit 1'],
-      Interval: 5000000000, // 5 seconds
-      Timeout: 3000000000, // 3 seconds
-      Retries: 10,
-      StartPeriod: 10000000000, // 10 seconds
-    })
     .start();
 
   const mgmtPort = containerA.getMappedPort(8080);
