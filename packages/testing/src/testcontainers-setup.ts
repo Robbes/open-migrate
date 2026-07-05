@@ -415,7 +415,7 @@ async function startStalwart(): Promise<{
     .withExposedPorts(8080, 143)
     .withStartupTimeout(180000)
     .withUser('root')
-    .withCommand(['--config', '/etc/stalwart/config.json'])
+    // Use default command from image (already includes --config /etc/stalwart/config.json)
     .withWaitStrategy(customWaitStrategy)
     .start();
 
