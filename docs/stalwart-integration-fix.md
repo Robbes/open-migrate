@@ -1,221 +1,53 @@
-# Stalwart Integration Fix Summary
+# Stalwart v0.16.10 Testcontainers Integration — Authoritative Reference
 
-## Problem Diagnosis
+DO NOT deviate from this. DO NOT change the pinned version. DO NOT put accounts/domains/listeners
+in config.json. DO NOT skip the shadow-pass tests. Prior sessions repeatedly re-fabricated the
+config below; this file is the corrected ground truth.
 
-The integration tests were failing with `ECONNREFUSED` errors when trying to connect to Stalwart's IMAP and JMAP ports.
+## config.json — the ENTIRE file, both phases, nothing else
+{"@type": "RocksDb", "path": "/opt/stalwart/data"}
 
-### Root Cause
+The root IS the DataStore object. There is NO dataStore wrapper key. There are NO http / imap /
+directory / accessControl / domains / accounts sections. Accounts, domains, and listeners live in
+the database and are provisioned via stalwart-cli — never in config.json. Mail listeners
+(IMAP/JMAP) start AUTOMATICALLY in normal mode; you do not configure or "create" listener objects.
 
-**Stalwart was running in Recovery Mode** (`STALWART_RECOVERY_MODE=1`), which **suspends all protocol listeners** (JMAP, IMAP, SMTP, CalDAV, CardDAV, WebDAV). Only the HTTP recovery admin API on port 8080 was accessible.
+## Delivery
+- config.json: via withCopyContentToContainer (content = the JSON string above, target
+  /etc/stalwart/config.json). NEVER a bind mount (bind-mounting a file creates a directory →
+  "Is a directory (os error 21)").
+- Data dir: a named Docker volume mounted at /var/lib/stalwart (or /opt/stalwart) — a DIFFERENT
+  path from the config file. Prefer a named volume over a host bind mount (UID/userns permission
+  wall).
 
-### Key Finding
+## Two-phase startup (required — provisioning and serving cannot share one process)
+Phase 1 (provisioning): image stalwartlabs/stalwart:v0.16.10, config.json mounted, data volume,
+  STALWART_RECOVERY_MODE=1 + STALWART_RECOVERY_ADMIN=admin:<pw>. Recovery mode exposes only the
+  management API (mail listeners suspended). Provision via stalwart-cli, then STOP the container.
+Phase 2 (serving): new container, SAME config.json, SAME data volume, NO recovery env vars →
+  normal mode → IMAP/JMAP listeners start automatically with the provisioned accounts present.
 
-From Stalwart's documentation and behavior:
-- **Recovery mode** is designed for disaster recovery and data migration
-- It **disables all service listeners** to prevent data corruption during recovery operations
-- The comment in `dev.yml` explicitly stated: *"Recovery mode suspends JMAP/IMAP listeners - they only start in normal operation mode"*
+## Provisioning (stalwart-cli as a HOST binary, not a container)
+Install: curl --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/stalwartlabs/cli/releases/latest/download/stalwart-cli-installer.sh | sh
+Run via child_process.execFile against the container's HOST-MAPPED 8080 port, with an explicit
+timeout. stalwart-cli speaks only JMAP; there is no /auth/login or /api/v1/* REST API.
 
-## Solution
+apply plan (NDJSON, one object per line, piped to `stalwart-cli apply` via stdin):
+{"@type":"upsert","object":"Domain","matchOn":["name"],"value":{"dom-a":{"name":"dev.local"}}}
+{"@type":"upsert","object":"Account","matchOn":["name"],"value":{"src":{"@type":"User","name":"source","domainId":"#dom-a","credentials":{"0":{"@type":"Password","secret":"source_password"}},"roles":{"@type":"User"},"permissions":{"@type":"Inherit"},"encryptionAtRest":{"@type":"Disabled"}}}}
+{"@type":"upsert","object":"Account","matchOn":["name"],"value":{"tgt":{"@type":"User","name":"target","domainId":"#dom-a","credentials":{"0":{"@type":"Password","secret":"target_password"}},"roles":{"@type":"User"},"permissions":{"@type":"Inherit"},"encryptionAtRest":{"@type":"Disabled"}}}}
 
-### 1. Removed Recovery Mode
+Rules: credentials is a MAP keyed by client id, NEVER an array. Credential @type is "Password",
+never "AccountPassword". roles/permissions/encryptionAtRest are required. matchOn is ["name"],
+never ["emailAddress"]. Cross-refs use "#id" strings. Use upsert (idempotent), never create.
 
-**File: `packages/testing/src/testcontainers-setup.ts`**
+## Postgres
+Run the schema migration EXACTLY ONCE in vitest.global-setup.ts (per-file parallel migration causes
+23505 catalog unique-violation races).
 
-```typescript
-// REMOVED these environment variables:
-// STALWART_RECOVERY_MODE: 'true',
-// STALWART_RECOVERY_ADMIN: 'admin:devadmin123',
-// STALWART_HOSTNAME: 'mail.stalwart.local',
-```
-
-### 2. Added Declarative JSON Configuration
-
-**File: `packages/testing/src/testcontainers-setup.ts`**
-
-Created a complete JSON configuration that defines:
-
-```typescript
-const STALWART_CONFIG = {
-  dataStore: {
-    '@type': 'RocksDb',
-    path: '/var/lib/stalwart/data',
-  },
-  http: {
-    listeners: {
-      default: {
-        address: '0.0.0.0:8080',
-        protocols: ['jmap', 'admin'],
-      },
-    },
-  },
-  imap: {
-    listeners: {
-      default: {
-        address: '0.0.0.0:143',
-      },
-    },
-  },
-  directory: {
-    internal: {},
-  },
-  accessControl: {
-    principals: {
-      admin: {
-        type: 'Individual',
-        permissions: ['admin'],
-        credentials: [
-          {
-            '@type': 'Password',
-            secret: 'devadmin123',
-          },
-        ],
-      },
-    },
-  },
-  domains: {
-    'dev.local': {
-      isEnabled: true,
-    },
-  },
-  accounts: {
-    source: {
-      domainId: 'dev-local',
-      credentials: [
-        {
-          '@type': 'Password',
-          secret: 'source_password',
-        },
-      ],
-    },
-    target: {
-      domainId: 'dev-local',
-      credentials: [
-        {
-          '@type': 'Password',
-          secret: 'target_password',
-        },
-      ],
-    },
-  },
-};
-```
-
-### 3. Updated Container Configuration
-
-```typescript
-const stalwartContainer = await new GenericContainer('stalwartlabs/stalwart:v0.16.10')
-  .withExposedPorts(8080, 143)
-  .withCopyContentToContainer([
-    {
-      content: JSON.stringify(STALWART_CONFIG, null, 2),
-      target: '/etc/stalwart/config.json',
-    },
-  ])
-  .withCommand(['--config', '/etc/stalwart/config.json'])
-  .withWaitStrategy(Wait.forHttp('/healthz/live', 8080))
-  // ... rest of configuration
-```
-
-### 4. Updated Docker Compose Configuration
-
-**File: `deploy/compose/dev.yml`**
-
-Removed the recovery mode environment variable and updated comments:
-
-```yaml
-stalwart:
-  build:
-    context: .
-    dockerfile: Dockerfile.stalwart-config
-  image: stalwart-custom:config
-  # No STALWART_RECOVERY_MODE - run in normal operation mode with listeners enabled
-  tmpfs:
-    - /opt/stalwart/data:mode=777
-  ports:
-    - "8180:8080"  # JMAP/DAV HTTP API
-    - "143:143"    # IMAP (plain)
-    - "993:993"    # IMAPS (TLS)
-```
-
-### 5. Updated Static Configuration File
-
-**File: `deploy/compose/stalwart-config.json`**
-
-Updated with complete configuration including listeners, domains, and accounts (see full file above).
-
-## Configuration Format Notes
-
-### Stalwart v0.16 Configuration
-
-- **Format**: JSON (NOT TOML as incorrectly stated in some documentation)
-- **Schema**: Declarative configuration with nested objects
-- **Key sections**:
-  - `dataStore`: Storage backend configuration
-  - `http`: HTTP server listeners
-  - `imap`: IMAP server listeners  
-  - `directory`: Authentication directory configuration
-  - `accessControl`: User/role permissions
-  - `domains`: Domain definitions
-  - `accounts`: User account definitions
-
-### Credential Schema
-
-Accounts use this structure:
-
-```json
-{
-  "accounts": {
-    "username": {
-      "domainId": "domain-name",
-      "credentials": [
-        {
-          "@type": "Password",
-          "secret": "plain-text-password"
-        }
-      ]
-    }
-  }
-}
-```
-
-## Testing
-
-After these changes, Stalwart should:
-1. Start in normal operation mode (not recovery mode)
-2. Have IMAP listener active on port 143
-3. Have JMAP listener active on port 8080
-4. Have pre-configured domains and accounts available
-5. Accept connections from integration tests without `ECONNREFUSED` errors
-
-## Files Modified
-
-1. `packages/testing/src/testcontainers-setup.ts` - Main testcontainers setup
-2. `deploy/compose/stalwart-config.json` - Static config for docker-compose
-3. `deploy/compose/dev.yml` - Docker Compose stack definition
-
-## Verification Steps
-
-To verify the fix works:
-
-```bash
-# Start the test environment
-docker compose -f deploy/compose/dev.yml up -d
-
-# Check that Stalwart is running
-docker ps | grep stalwart
-
-# Test IMAP connectivity
-nc -zv localhost 143
-
-# Test JMAP/HTTP connectivity
-curl http://localhost:8180/healthz/live
-
-# Run integration tests
-pnpm test:integration
-```
-
-## References
-
-- Stalwart GitHub: https://github.com/stalwartlabs/stalwart
-- Stalwart Documentation: https://stalw.art/docs
-- ADR-0018: JMAP primary target / IMAP/DAV second / both MVP
+## Open item (the ONLY real remaining work)
+IMAP auth succeeds but the connection drops after auth, during commands — a test-client TLS-mode or
+APPEND-literal mismatch. Diagnose with `nc` and `openssl s_client -starttls imap`, align the client
+(APPEND literal needs \r\n endings + exact octet count; match the server's advertised CAPABILITY).
+Do NOT change config.json for this — listeners need no config.
