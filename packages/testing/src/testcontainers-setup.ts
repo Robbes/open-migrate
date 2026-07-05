@@ -82,9 +82,8 @@ function createStalwartConfig(configPath: string, normalMode: boolean = false): 
 }
 
 /**
- * Start Stalwart in two phases:
- *   Phase 1: Recovery mode - provision accounts via stalwart-cli
- *   Phase 2: Normal mode - start with mail listeners enabled
+ * Start Stalwart in normal mode and provision accounts.
+ * For testing, we use recovery mode to create accounts, then restart in normal mode.
  */
 async function startStalwart(): Promise<{
   jmapUrl: string;
@@ -93,11 +92,10 @@ async function startStalwart(): Promise<{
   container: StartedTestContainer;
 }> {
   // Create a host-bind mount directory for Stalwart data
-  // This persists between container A (provisioning) and container B (production)
   const dataDir = mkdtempSync(path.join(tmpdir(), 'stalwart-data-'));
   console.log(`[StalwartSetup] Data directory: ${dataDir}`);
 
-  // Generate recovery admin credentials
+  // Generate admin credentials for recovery mode
   const recoveryPassword = 'provision_' + Math.random().toString(36).slice(2, 10);
   const provisionAdmin = `admin:${recoveryPassword}`;
   const [adminUser, adminPass] = provisionAdmin.split(':');
@@ -105,24 +103,22 @@ async function startStalwart(): Promise<{
   console.log('[StalwartSetup] Phase 1: Starting recovery mode container...');
 
   // Phase 1: Provisioning container in recovery mode
-  // Recovery mode uses minimal config (no listen directives needed)
   const configContent = JSON.stringify({
     '@type': 'RocksDb',
     path: '/opt/stalwart/data',
   });
+  
   const containerA = await new GenericContainer('stalwartlabs/stalwart:v0.16.10')
     .withBindMounts([
       { source: dataDir, target: '/opt/stalwart/data' },
     ])
-    .withCopyContentToContainer([{ content: configContent, target: '/etc/stalwart/config.json' }])
-    .withCommand(['--config', '/etc/stalwart/config.json'])
     .withEnvironment({
       STALWART_HOSTNAME: 'mail.stalwart.local',
       STALWART_RECOVERY_MODE: '1',
       STALWART_RECOVERY_ADMIN: provisionAdmin,
     })
     .withExposedPorts(8080)
-    .withWaitStrategy(Wait.forHttp('/healthz/live', 8080).withStartupTimeout(120000))
+    .withWaitStrategy(Wait.forLogMessage(/Network listener started.*http-recovery/).withStartupTimeout(120000))
     .withStartupTimeout(120000)
     .start();
 
@@ -134,9 +130,65 @@ async function startStalwart(): Promise<{
   // Wait a moment for recovery listener to be fully ready
   await new Promise((resolve) => setTimeout(resolve, 3000));
 
-  console.log('[StalwartSetup] Provisioning accounts via stalwart-cli...');
+  // Get the container's internal IP address via docker inspect
+  const containerId = containerA.getId();
+  console.log(`[StalwartSetup] Container ID: ${containerId}`);
   
-  // Stalwart v0.16.x account format - account ID is used as username for IMAP
+  let containerAIp: string;
+  try {
+    const { stdout } = await execFileAsync('docker', [
+      'inspect', containerId,
+      '--format', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+    ]);
+    containerAIp = stdout.trim();
+    console.log(`[StalwartSetup] Container internal IP: ${containerAIp}`);
+  } catch (err: any) {
+    console.error('[StalwartSetup] Failed to get container IP:', err.message);
+    await containerA.stop();
+    throw new Error(`Failed to get container IP: ${err.message}`);
+  }
+
+  console.log('[StalwartSetup] Bootstrapping server...');
+  
+  // Step 1: Bootstrap the server (required before creating other objects)
+  const bootstrapPlan = [
+    { '@type': 'update', object: 'Bootstrap', id: 'singleton', value: {} },
+  ].map((op) => JSON.stringify(op)).join('\n');
+  
+  const bootstrapFile = path.join(tmpdir(), `stalwart-bootstrap-${Date.now()}.jsonl`);
+  writeFileSync(bootstrapFile, bootstrapPlan);
+  
+  try {
+    // Use curl directly instead of stalwart-cli for better control
+    const { stdout: bootstrapOutput } = await execFileAsync(
+      'curl',
+      [
+        '-s', '-X', 'POST',
+        '-u', `${adminUser}:${adminPass}`,
+        `http://${containerAIp}:8080/`,
+        '-H', 'Content-Type: application/json',
+        '-d', bootstrapPlan
+      ],
+      {
+        timeout: 30000,
+        maxBuffer: 10 * 1024 * 1024,
+      }
+    );
+    console.log('[StalwartSetup] Bootstrap completed:', bootstrapOutput?.trim() || 'ok');
+  } catch (err: any) {
+    console.error('[StalwartSetup] Bootstrap failed:', err.message);
+    if (err.stderr) console.error('[StalwartSetup] Stderr:', err.stderr);
+    await containerA.stop();
+    throw new Error(`Failed to bootstrap server: ${err.message}`);
+  }
+  
+  // Wait for Bootstrap to be fully persisted
+  console.log('[StalwartSetup] Waiting for Bootstrap to persist...');
+  await new Promise((resolve) => setTimeout(resolve, 5000));
+  
+  // Step 2: Create accounts and domains
+  console.log('[StalwartSetup] Creating accounts and domains...');
+  
   const plan = [
     { '@type': 'upsert', object: 'Domain', matchOn: ['name'], value: { 'dom-a': { name: 'dev.local' } } },
     { '@type': 'upsert', object: 'Account', matchOn: ['name'], value: { 'source': {
@@ -152,72 +204,41 @@ async function startStalwart(): Promise<{
   ].map((op) => JSON.stringify(op)).join('\n');
 
   try {
-    // Use host-level stalwart-cli binary to provision accounts
-    // This avoids Docker networking issues and container lifecycle problems
-    console.log('[StalwartSetup] STALWART_URL:', `http://${mgmtHost}:${mgmtPort}`);
-    
-    // Write plan to temp file
-    const planFile = path.join(tmpdir(), `stalwart-plan-${Date.now()}.jsonl`);
-    writeFileSync(planFile, plan);
-    console.log('[StalwartSetup] Plan written to:', planFile);
-    
-    console.log('[StalwartSetup] Running stalwart-cli...');
+    // Use curl directly to create accounts
     const { stdout, stderr } = await execFileAsync(
-      STALWART_CLI_PATH,
-      ['apply', '--file', planFile],
+      'curl',
+      [
+        '-s', '-X', 'POST',
+        '-u', `${adminUser}:${adminPass}`,
+        `http://${containerAIp}:8080/`,
+        '-H', 'Content-Type: application/json',
+        '-d', plan
+      ],
       {
-        env: {
-          STALWART_URL: `http://${mgmtHost}:${mgmtPort}`,
-          STALWART_USER: adminUser,
-          STALWART_PASSWORD: adminPass,
-        },
-        timeout: 30000, // 30 second timeout to prevent hanging
-        maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+        timeout: 30000,
+        maxBuffer: 10 * 1024 * 1024,
       }
     );
     
-    console.log('[StalwartSetup] stalwart-cli completed successfully');
+    console.log('[StalwartSetup] Accounts created successfully');
     if (stderr) console.log('[StalwartSetup] Output:', stderr);
     if (stdout) console.log('[StalwartSetup] Stdout:', stdout);
     
   } catch (err: any) {
-    console.error('[StalwartSetup] stalwart-cli failed:', err.message);
-    console.error('[StalwartSetup] Exit code:', err.code);
-    console.error('[StalwartSetup] Signal:', err.signal);
-    if (err.stdout) console.error('[StalwartSetup] Stdout:', err.stdout);
+    console.error('[StalwartSetup] Failed to create accounts:', err.message);
     if (err.stderr) console.error('[StalwartSetup] Stderr:', err.stderr);
     await containerA.stop();
-    throw new Error(`Failed to provision accounts: ${err.message}`);
+    throw new Error(`Failed to create accounts: ${err.message}`);
   }
-
-  // Verify accounts were created using host-level CLI
-  console.log('[StalwartSetup] Verifying accounts...');
-  try {
-    const { stdout: verifyOutput } = await execFileAsync(
-      STALWART_CLI_PATH,
-      ['get', 'Account', 'source'],
-      {
-        env: {
-          STALWART_URL: `http://${mgmtHost}:${mgmtPort}`,
-          STALWART_USER: adminUser,
-          STALWART_PASSWORD: adminPass,
-        },
-        timeout: 10000,
-      }
-    );
-    console.log('[StalwartSetup] Source account verified:', verifyOutput ? 'found' : 'not found');
-  } catch (err: any) {
-    console.warn('[StalwartSetup] Warning: Could not verify source account:', err.message);
-  }
-
-  // Stop provisioning container
-  console.log('[StalwartSetup] Stopping recovery container...');
+  
+  // Now restart in normal mode
+  console.log('[StalwartSetup] Stopping recovery container to restart in normal mode...');
   await containerA.stop();
 
-  console.log('[StalwartSetup] Phase 2: Starting normal mode container with provisioned data...');
+  console.log('[StalwartSetup] Phase 2: Starting normal mode container...');
 
-  // Phase 2: Normal mode - same minimal config as Phase 1.
-  // Listeners auto-start in normal mode; accounts/domains persist from Phase 1.
+  // Phase 2: Normal mode - start with the same data directory
+  // Stalwart will read the Bootstrap and other objects from the database
   const containerB = await new GenericContainer('stalwartlabs/stalwart:v0.16.10')
     .withBindMounts([
       { source: dataDir, target: '/opt/stalwart/data' },
@@ -226,29 +247,30 @@ async function startStalwart(): Promise<{
       content: JSON.stringify({
         '@type': 'RocksDb',
         path: '/opt/stalwart/data',
-      }),
+      }, null, 2),
       target: '/etc/stalwart/config.json',
     }])
+    .withEnvironment({
+      STALWART_HOSTNAME: 'mail.stalwart.local',
+    })
     .withCommand(['--config', '/etc/stalwart/config.json'])
-    .withExposedPorts(8080, 143)
-    .withStartupTimeout(180000)
+    .withExposedPorts(8080, 143, 993)
+    .withWaitStrategy(Wait.forLogMessage(/Network listener started.*http/).withStartupTimeout(120000))
+    .withStartupTimeout(120000)
     .start();
 
-  const containerId = containerB.containerId;
-  console.log('[StalwartSetup] Container ID:', containerId);
-  console.log('[StalwartSetup] Container started, waiting for JMAP endpoint...');
   const stalwartHost = containerB.getHost();
   const imapPort = containerB.getMappedPort(143);
   const jmapPort = containerB.getMappedPort(8080);
   const jmapUrl = `http://${stalwartHost}:${jmapPort}`;
   
-  // Use manual polling instead of testcontainers' wait strategy
+  console.log(`[StalwartSetup] Waiting for JMAP endpoint at ${jmapUrl}/.well-known/jmap...`);
+  
+  // Use manual polling for JMAP endpoint
   await waitForHttpEndpoint(`${jmapUrl}/.well-known/jmap`);
   
   console.log('[StalwartSetup] JMAP endpoint ready at:', jmapUrl);
   console.log('[StalwartSetup] IMAP available at:', `${stalwartHost}:${imapPort}`);
-
-  console.log(`[StalwartSetup] Stalwart ready - JMAP: ${jmapUrl}, IMAP: ${stalwartHost}:${imapPort}`);
 
   return {
     jmapUrl,

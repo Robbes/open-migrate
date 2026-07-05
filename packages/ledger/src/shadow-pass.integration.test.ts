@@ -134,7 +134,6 @@ async function seedSourceMessages(): Promise<void> {
       host: STALWART_IMAP_HOST,
       port: STALWART_IMAP_PORT,
       tls: false,
-      tlsOptions: { rejectUnauthorized: false },
     },
   };
 
@@ -207,7 +206,7 @@ describe('Shadow Pass Integration (T4)', () => {
     source = new ImapSource({
       host: STALWART_IMAP_HOST,
       port: STALWART_IMAP_PORT,
-      tls: false,
+      tls: true,
       auth: {
         user: SOURCE_ACCOUNT,
         password: SOURCE_PASSWORD,
@@ -329,7 +328,7 @@ describe('Shadow Pass Integration (T4)', () => {
         password: SOURCE_PASSWORD,
         host: STALWART_IMAP_HOST,
         port: STALWART_IMAP_PORT,
-        tls: false,
+        tls: true,
         tlsOptions: { rejectUnauthorized: false },
       },
     };
