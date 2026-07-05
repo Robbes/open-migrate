@@ -85,12 +85,17 @@ async function startStalwart(): Promise<{
   console.log('[StalwartSetup] Phase 1: Starting recovery mode container...');
 
   // Phase 1: Provisioning container in recovery mode
-  // Recovery mode uses minimal config - no config file needed, uses defaults
+  // Recovery mode uses minimal config - config.json specifies RocksDB data store
+  const configContent = JSON.stringify({
+    '@type': 'RocksDb',
+    path: '/opt/stalwart/data',
+  });
   const containerA = await new GenericContainer('stalwartlabs/stalwart:v0.16.10')
     .withBindMounts([
       { source: dataDir, target: '/opt/stalwart/data' },
     ])
-    .withCommand([])
+    .withCopyContentToContainer([{ content: configContent, target: '/etc/stalwart/config.json' }])
+    .withCommand(['--config', '/etc/stalwart/config.json'])
     .withEnvironment({
       STALWART_HOSTNAME: 'mail.stalwart.local',
       STALWART_RECOVERY_MODE: '1',
