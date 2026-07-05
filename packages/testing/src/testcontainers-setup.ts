@@ -111,11 +111,13 @@ async function startStalwart(): Promise<{
   console.log('[StalwartSetup] Provisioning accounts via stalwart-cli...');
   
   // Stalwart v0.16.x account format - account ID is used as username for IMAP
-  // IMPORTANT: Must create Bootstrap object FIRST to complete bootstrap mode
-  // Bootstrap is a singleton - try using 'create' operation
+  // IMPORTANT: Bootstrap object must be created to complete bootstrap mode
+  // Based on Stalwart docs, Bootstrap collects server setup info
   const plan = [
-    // Step 1: Create Bootstrap object to complete bootstrap mode
-    { '@type': 'create', object: 'Bootstrap', value: {} },
+    // Step 1: Create Bootstrap object with basic server configuration
+    { '@type': 'update', object: 'Bootstrap', value: {
+      hostname: 'dev.local',
+    } },
     // Step 2: Create Domain
     { '@type': 'upsert', object: 'Domain', matchOn: ['name'], value: { 'dom-a': { name: 'dev.local' } } },
     // Step 3: Create source account
