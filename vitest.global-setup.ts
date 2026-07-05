@@ -2,7 +2,6 @@ import { startTestEnvironment, stopTestEnvironment } from './packages/testing/sr
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { execFileSync } from 'node:child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -77,8 +76,9 @@ export default async function () {
           'stalwart-phase2-error',
           ['ps aux', 'df -h', 'cat /etc/stalwart/config.json 2>/dev/null || echo "no config"', 'ls -la /opt/stalwart/data/']
         );
-      } catch (diagErr: any) {
-        console.warn('[Vitest Global Teardown] Could not capture diagnostics:', diagErr.message);
+      } catch (diagErr) {
+        const msg = diagErr instanceof Error ? diagErr.message : String(diagErr);
+        console.warn('[Vitest Global Teardown] Could not capture diagnostics:', msg);
       }
     }
     

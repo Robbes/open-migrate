@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import type { ImapSimpleOptions } from 'imap-simple';
 import { createPgDb } from './db.js';
 import { PgLedger } from './ledger.js';
@@ -17,7 +17,6 @@ import { asTenantId, asMappingId } from '@openmig/shared';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const CONFIG_DIR = join(__dirname, '..', 'test-data');
 
 /**
  * Append options for IMAP append operation.
@@ -61,13 +60,6 @@ if (!STALWART_IMAP_HOST || !STALWART_JMAP_URL) {
 // Test accounts - must match the accounts provisioned in testcontainers-setup.ts
 const SOURCE_ACCOUNT = 'source';
 const SOURCE_PASSWORD = 'source_password';
-
-// Target account
-const TARGET_ACCOUNT = 'target';
-const TARGET_PASSWORD = 'target_password';
-
-// Admin account for provisioning (not used in tests)
-const ADMIN_ACCOUNT = 'admin';
 
 // Retry configuration for IMAP connection
 const MAX_RETRIES = 10;

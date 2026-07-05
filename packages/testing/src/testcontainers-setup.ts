@@ -11,8 +11,8 @@
 //       We use Docker named volumes instead, which work reliably.
 
 import { GenericContainer, Wait, Network } from 'testcontainers';
-import type { StartedTestContainer, StoppedTestContainer } from 'testcontainers';
-import { mkdtempSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs';
+import type { StartedTestContainer } from 'testcontainers';
+import { writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
@@ -41,51 +41,51 @@ function ensureTestLogsDir(): void {
  * each line as it's produced.
  */
 async function streamContainerLogs(
-  container: any,
-  logFileName: string,
-  options: { includeTimestamps?: boolean } = {}
+  container: StartedTestContainer,
+  logFileName: string
 ): Promise<void> {
   ensureTestLogsDir();
   const logFilePath = path.join(TEST_LOGS_DIR, logFileName);
-  const includeTimestamps = options.includeTimestamps ?? true;
   
   console.log(`[TestLogs] Starting log stream to: ${logFilePath}`);
   
   // Clear/create the log file
   try {
     appendFileSync(logFilePath, `\n=== ${logFileName} started at ${new Date().toISOString()} ===\n`);
-  } catch (err: any) {
-    console.warn(`[TestLogs] Warning: Could not initialize log file: ${err.message}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[TestLogs] Warning: Could not initialize log file: ${msg}`);
     return;
   }
   
   // Use testcontainers' log consumer to stream logs
   try {
-    const logStream = container.logs();
+    const logStream = await container.logs();
     logStream.on('data', (line: string) => {
       try {
         appendFileSync(logFilePath, line + '\n');
-      } catch (err: any) {
+      } catch {
         // Ignore write errors - container might be shutting down
       }
     });
     logStream.on('err', (line: string) => {
       try {
         appendFileSync(logFilePath, `[ERR] ${line}\n`);
-      } catch (err: any) {
+      } catch {
         // Ignore write errors
       }
     });
     logStream.on('end', () => {
       try {
         appendFileSync(logFilePath, `\n=== ${logFileName} ended ===\n`);
-      } catch (err: any) {
+      } catch {
         // Ignore
       }
       console.log(`[TestLogs] Log stream ended for: ${logFileName}`);
     });
-  } catch (err: any) {
-    console.warn(`[TestLogs] Warning: Could not attach log stream for ${logFileName}: ${err.message}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[TestLogs] Warning: Could not attach log stream for ${logFileName}: ${msg}`);
   }
 }
 
@@ -94,7 +94,7 @@ async function streamContainerLogs(
  * internal logs, and network state.
  */
 async function captureContainerDiagnostics(
-  container: any,
+  container: StartedTestContainer,
   containerName: string,
   extraChecks: string[] = []
 ): Promise<void> {
@@ -104,15 +104,16 @@ async function captureContainerDiagnostics(
   console.log(`[TestLogs] Capturing diagnostics for ${containerName}...`);
   
   try {
-    const containerId = container.getId ? container.getId() : 'unknown';
+    const containerId = container.getId();
     
     // Get Docker logs
     let dockerLogs = '';
     try {
       const { stdout } = await execFileAsync('docker', ['logs', '--tail', '200', containerId]);
       dockerLogs = stdout || 'No docker logs available';
-    } catch (err: any) {
-      dockerLogs = `Error getting docker logs: ${err.message}`;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      dockerLogs = `Error getting docker logs: ${msg}`;
     }
     
     // Get container's internal /opt/stalwart/data/LOG if it exists
@@ -122,8 +123,9 @@ async function captureContainerDiagnostics(
         'exec', containerId, 'cat', '/opt/stalwart/data/LOG'
       ]);
       stalwartDbLog = stdout || 'No RocksDB LOG found';
-    } catch (err: any) {
-      stalwartDbLog = `Could not read RocksDB LOG: ${err.message}`;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      stalwartDbLog = `Could not read RocksDB LOG: ${msg}`;
     }
     
     // Get network state from inside container
@@ -133,8 +135,9 @@ async function captureContainerDiagnostics(
         'exec', containerId, 'sh', '-c', 'ss -ltn || netstat -ltn || cat /proc/net/tcp'
       ]);
       networkState = stdout || 'No network state available';
-    } catch (err: any) {
-      networkState = `Could not get network state: ${err.message}`;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      networkState = `Could not get network state: ${msg}`;
     }
     
     // Get docker ps -a for this container
@@ -142,8 +145,9 @@ async function captureContainerDiagnostics(
     try {
       const { stdout } = await execFileAsync('docker', ['ps', '-a', '--filter', `id=${containerId}`, '--no-trunc']);
       dockerPs = stdout || 'No container found in docker ps -a';
-    } catch (err: any) {
-      dockerPs = `Error: ${err.message}`;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      dockerPs = `Error: ${msg}`;
     }
     
     // Write all diagnostics
@@ -160,14 +164,16 @@ async function captureContainerDiagnostics(
       try {
         const { stdout } = await execFileAsync('docker', ['exec', containerId, 'sh', '-c', check]);
         appendFileSync(diagnosticsFile, `\n=== ${check} ===\n${stdout}\n`);
-      } catch (err: any) {
-        appendFileSync(diagnosticsFile, `\n=== ${check} ===\nError: ${err.message}\n`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        appendFileSync(diagnosticsFile, `\n=== ${check} ===\nError: ${msg}\n`);
       }
     }
     
     console.log(`[TestLogs] Diagnostics saved to: ${diagnosticsFile}`);
-  } catch (err: any) {
-    console.warn(`[TestLogs] Warning: Could not capture diagnostics for ${containerName}: ${err.message}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[TestLogs] Warning: Could not capture diagnostics for ${containerName}: ${msg}`);
   }
 }
 
@@ -219,7 +225,7 @@ async function waitForHttpEndpoint(
         console.log(`[WaitForHttp] Endpoint ready after ${i + 1} attempts`);
         return;
       }
-    } catch (err: any) {
+    } catch {
       // Ignore connection errors and keep trying
     }
     await new Promise(resolve => setTimeout(resolve, intervalMs));
@@ -357,14 +363,19 @@ async function startStalwart(): Promise<{
     if (stderr) console.log('[StalwartSetup] Output:', stderr);
     if (stdout) console.log('[StalwartSetup] Stdout:', stdout);
     
-  } catch (err: any) {
-    console.error('[StalwartSetup] stalwart-cli failed:', err.message);
-    console.error('[StalwartSetup] Exit code:', err.code);
-    console.error('[StalwartSetup] Signal:', err.signal);
-    if (err.stdout) console.error('[StalwartSetup] Stdout:', err.stdout);
-    if (err.stderr) console.error('[StalwartSetup] Stderr:', err.stderr);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[StalwartSetup] stalwart-cli failed:', msg);
+    const code = err && typeof err === 'object' && 'code' in err ? (err.code as string | undefined) : undefined;
+    const signal = err && typeof err === 'object' && 'signal' in err ? (err.signal as string | undefined) : undefined;
+    const stdoutVal = err && typeof err === 'object' && 'stdout' in err ? err.stdout : undefined;
+    const stderrVal = err && typeof err === 'object' && 'stderr' in err ? err.stderr : undefined;
+    console.error('[StalwartSetup] Exit code:', code);
+    console.error('[StalwartSetup] Signal:', signal);
+    if (stdoutVal) console.error('[StalwartSetup] Stdout:', stdoutVal);
+    if (stderrVal) console.error('[StalwartSetup] Stderr:', stderrVal);
     await containerA.stop();
-    throw new Error(`Failed to provision accounts: ${err.message}`);
+    throw new Error(`Failed to provision accounts: ${msg}`, { cause: err });
   }
 
   // Verify accounts were created using host-level CLI
@@ -383,8 +394,9 @@ async function startStalwart(): Promise<{
       }
     );
     console.log('[StalwartSetup] Source account verified:', verifyOutput ? 'found' : 'not found');
-  } catch (err: any) {
-    console.warn('[StalwartSetup] Warning: Could not verify source account:', err.message);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn('[StalwartSetup] Warning: Could not verify source account:', msg);
   }
 
   // Stop provisioning container
@@ -429,8 +441,8 @@ async function startStalwart(): Promise<{
       'rm', '-f', '/data/LOCK'
     ]);
     console.log('[StalwartSetup] LOCK file removal command executed.');
-  } catch (e: any) {
-    console.warn('[StalwartSetup] Warning: Could not remove LOCK file:', e.message);
+  } catch {
+    console.warn('[StalwartSetup] Warning: Could not remove LOCK file');
   }
   
   // Step 3: Verify LOCK file is actually gone (wait up to 10 seconds)
@@ -445,7 +457,7 @@ async function startStalwart(): Promise<{
       // LOCK file still exists
       await new Promise(resolve => setTimeout(resolve, 1000));
       attempts++;
-    } catch (err: any) {
+    } catch {
       // LOCK file does not exist - this is what we want
       console.log('[StalwartSetup] LOCK file confirmed gone after', attempts, 'verification attempts.');
       break;
@@ -472,90 +484,6 @@ async function startStalwart(): Promise<{
   // Listeners auto-start in normal mode (no recovery mode)
   const normalConfig = '{"@type":"RocksDb","path":"/opt/stalwart/data"}';
 
-  // Custom wait strategy that also logs container output for debugging
-  const customWaitStrategy = {
-    waitUntilReady: async (container: any) => {
-      const timeout = 180000;
-      const startTime = Date.now();
-      
-      // Get container ID for manual inspection
-      const containerId = container.getId ? container.getId() : 'unknown';
-      console.log(`[StalwartSetup] Phase 2 container ID: ${containerId}`);
-      
-      // Get initial logs
-      try {
-        const initialLogs = await container.logs({ stdout: true, stderr: true, tail: 50, timestamps: true });
-        console.log('[StalwartSetup] Initial container logs:', initialLogs.toString().substring(0, 1000));
-      } catch (e: any) {
-        console.log('[StalwartSetup] Could not get initial logs:', e.message);
-      }
-      
-      while (Date.now() - startTime < timeout) {
-        // Check if ports are bound
-        const inspect = await container.inspect();
-        const state = inspect.State;
-        const running = state.Running;
-        const status = state.Status;
-        const exited = !running && status === 'exited';
-        const dead = status === 'dead';
-        
-        console.log(`[StalwartSetup] Container state: running=${running}, status=${status}, exited=${exited}, dead=${dead}`);
-        
-        if (exited || dead) {
-          const logs = await container.logs({ stdout: true, stderr: true, tail: 100, timestamps: true });
-          console.error('[StalwartSetup] Container exited! Last logs:', logs.toString().substring(0, 2000));
-          throw new Error(`Stalwart container exited with status: ${status}`);
-        }
-        
-        if (running) {
-          // Get container logs periodically to see what's happening
-          if ((Date.now() - startTime) % 30000 < 5000) {  // Every 30 seconds
-            try {
-              const logs = await container.logs({ stdout: true, stderr: true, tail: 20, timestamps: true });
-              const logStr = logs.toString();
-              if (logStr.length > 0) {
-                console.log('[StalwartSetup] Recent logs:', logStr.substring(0, 500));
-              }
-            } catch (e: any) {
-              // Ignore log errors
-            }
-          }
-          
-          // Try to connect to port 8080
-          try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 2000);
-            const response = await fetch(`http://${container.getHost()}:${container.getMappedPort(8080)}/.well-known/jmap`, {
-              signal: controller.signal
-            });
-            clearTimeout(timeoutId);
-            if (response.ok || response.status === 404) {
-              console.log('[StalwartSetup] Port 8080 is listening');
-              return;
-            }
-          } catch (e: any) {
-            // Port not ready yet
-          }
-        }
-        
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-      
-      // Final attempt to get logs before timeout
-      try {
-        const finalLogs = await container.logs({ stdout: true, stderr: true, tail: 100, timestamps: true });
-        console.error('[StalwartSetup] Final logs before timeout:', finalLogs.toString().substring(0, 2000));
-      } catch (e: any) {
-        console.error('[StalwartSetup] Could not get final logs:', e.message);
-      }
-      
-      throw new Error('Stalwart did not start within timeout');
-    },
-    withStartupTimeout: (ms: number) => customWaitStrategy,
-    isStartupTimeoutSet: () => false,
-    getStartupTimeout: () => 0
-  };
-
   const containerB = await new GenericContainer('stalwart-test-custom:latest')
     .withBindMounts([
       { source: volumeMountpoint, target: '/opt/stalwart/data' },
@@ -570,7 +498,7 @@ async function startStalwart(): Promise<{
     .withStartupTimeout(180000)
     .withUser('root')
     // Use default command from image (already includes --config /etc/stalwart/config.json)
-    .withWaitStrategy(customWaitStrategy)
+    .withWaitStrategy(Wait.forLogMessage('Network listener started'))
     .start();
 
   // Attach log stream for Phase 2 - streams continuously from container start
@@ -666,8 +594,9 @@ export async function stopTestEnvironment(env: TestEnvironment): Promise<void> {
   try {
     await env.postgres.container.stop();
     console.log('[Testcontainers] Postgres stopped.');
-  } catch (err: any) {
-    console.error('[Testcontainers] Error stopping Postgres:', err.message);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[Testcontainers] Error stopping Postgres:', msg);
     // Capture diagnostics on error
     await captureContainerDiagnostics(env.postgres.container, 'postgres', ['ps aux', 'df -h']);
   }
@@ -675,8 +604,9 @@ export async function stopTestEnvironment(env: TestEnvironment): Promise<void> {
   try {
     await env.stalwart.container.stop();
     console.log('[Testcontainers] Stalwart stopped.');
-  } catch (err: any) {
-    console.error('[Testcontainers] Error stopping Stalwart:', err.message);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[Testcontainers] Error stopping Stalwart:', msg);
     // Capture full diagnostics on Stalwart failure
     await captureContainerDiagnostics(
       env.stalwart.container,
