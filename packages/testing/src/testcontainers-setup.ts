@@ -323,6 +323,19 @@ async function startStalwart(): Promise<{
         }
         
         if (running) {
+          // Get container logs periodically to see what's happening
+          if ((Date.now() - startTime) % 30000 < 5000) {  // Every 30 seconds
+            try {
+              const logs = await container.logs({ stdout: true, stderr: true, tail: 20, timestamps: true });
+              const logStr = logs.toString();
+              if (logStr.length > 0) {
+                console.log('[StalwartSetup] Recent logs:', logStr.substring(0, 500));
+              }
+            } catch (e: any) {
+              // Ignore log errors
+            }
+          }
+          
           // Try to connect to port 8080
           try {
             const controller = new AbortController();
