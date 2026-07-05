@@ -107,6 +107,13 @@ async function startStalwart(): Promise<{
     })
     .withExposedPorts(8080)
     .withStartupTimeout(120000)
+    .withHealthCheck({
+      Test: ['CMD-SHELL', 'curl -fs http://localhost:8080/.well-known/jmap || exit 1'],
+      Interval: 5000000000, // 5 seconds
+      Timeout: 3000000000, // 3 seconds
+      Retries: 10,
+      StartPeriod: 10000000000, // 10 seconds
+    })
     .start();
 
   const mgmtPort = containerA.getMappedPort(8080);
