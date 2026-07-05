@@ -62,39 +62,6 @@ export interface TestEnvironment {
 }
 
 /**
- * Create the Stalwart configuration file.
- * Stalwart v0.16 config.json contains DataStore at ROOT level + listen configurations.
- * Format for normal mode:
- * {
- *   "@type": "RocksDb",
- *   "path": "/opt/stalwart/data",
- *   "listen": {
- *     "http": "0.0.0.0:8080",
- *     "imap": "0.0.0.0:143",
- *     "jmap": "0.0.0.0:8080"
- *   }
- * }
- */
-function createStalwartConfig(configPath: string, normalMode: boolean = false): void {
-  const config: any = {
-    '@type': 'RocksDb' as const,
-    path: '/opt/stalwart/data',
-  };
-  
-  // Add listen configurations for normal mode (not recovery mode)
-  if (normalMode) {
-    config.listen = {
-      http: '0.0.0.0:8080',
-      imap: '0.0.0.0:143',
-      jmap: '0.0.0.0:8080',
-    };
-  }
-  
-  writeFileSync(configPath, JSON.stringify(config, null, 2));
-  console.log(`[StalwartSetup] Config written to ${configPath}`);
-}
-
-/**
  * Start Stalwart in two phases:
  *   Phase 1: Recovery mode - provision accounts via stalwart-cli
  *   Phase 2: Normal mode - start with mail listeners enabled
@@ -128,7 +95,6 @@ async function startStalwart(): Promise<{
       { source: dataDir, target: '/opt/stalwart/data' },
     ])
     .withCopyContentToContainer([{ content: configContent, target: '/opt/stalwart/config.json' }])
-    .withUser('root')
     .withCommand(['--config', '/opt/stalwart/config.json'])
     .withEnvironment({
       STALWART_HOSTNAME: 'mail.stalwart.local',
@@ -209,7 +175,7 @@ async function startStalwart(): Promise<{
   try {
     const { stdout: verifyOutput } = await execFileAsync(
       STALWART_CLI_PATH,
-      ['get', 'Account', 'src'],
+      ['get', 'Account', 'source'],
       {
         env: {
           STALWART_URL: `http://${mgmtHost}:${mgmtPort}`,
@@ -238,21 +204,17 @@ async function startStalwart(): Promise<{
   // MINIMAL config per FIXED TRUTH: only DataStore, no http/imap/listeners/accounts/domains
   // Accounts/domains are in the DB from Phase 1 provisioning
   // Listeners auto-start in normal mode (no recovery mode)
-  const normalConfig = {
+  const normalConfig = JSON.stringify({
     '@type': 'RocksDb',
     path: '/opt/stalwart/data',
-  };
-
-  const normalConfigPath = path.join(dataDir2, 'config.json');
-  writeFileSync(normalConfigPath, JSON.stringify(normalConfig, null, 2));
-  console.log('[StalwartSetup] Normal mode config written (minimal - listeners auto-start from DB)');
+  });
 
   const containerB = await new GenericContainer('stalwartlabs/stalwart:v0.16.10')
     .withBindMounts([
       { source: dataDir2, target: '/opt/stalwart/data' },
     ])
-    .withUser('root')
-    .withCommand(['--config', '/opt/stalwart/data/config.json'])
+    .withCopyContentToContainer([{ content: normalConfig, target: '/opt/stalwart/config.json' }])
+    .withCommand(['--config', '/opt/stalwart/config.json'])
     .withEnvironment({
       STALWART_HOSTNAME: 'mail.stalwart.local',
     })
