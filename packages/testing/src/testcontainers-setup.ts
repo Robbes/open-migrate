@@ -112,12 +112,10 @@ async function startStalwart(): Promise<{
   
   // Stalwart v0.16.x account format - account ID is used as username for IMAP
   // IMPORTANT: Must create Bootstrap object FIRST to complete bootstrap mode
-  // Bootstrap is a singleton that uses 'update' operation with 'password' field
+  // Bootstrap is a singleton that uses 'update' operation - try empty value
   const plan = [
     // Step 1: Create Bootstrap object to complete bootstrap mode (use 'update' for singleton)
-    { '@type': 'update', object: 'Bootstrap', value: {
-      password: adminPass,
-    } },
+    { '@type': 'update', object: 'Bootstrap', value: {} },
     // Step 2: Create Domain
     { '@type': 'upsert', object: 'Domain', matchOn: ['name'], value: { 'dom-a': { name: 'dev.local' } } },
     // Step 3: Create source account
