@@ -107,10 +107,6 @@ async function startStalwart(): Promise<{
     })
     .withExposedPorts(8080)
     .withStartupTimeout(120000)
-    .withCreateContainerHostConfigModifier((hostConfig) => {
-      // Disable default health check - we'll use manual polling
-      hostConfig.Healthcheck = undefined;
-    })
     .start();
 
   const mgmtPort = containerA.getMappedPort(8080);
