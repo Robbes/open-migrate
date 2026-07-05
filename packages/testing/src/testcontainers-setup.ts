@@ -102,7 +102,7 @@ async function startStalwart(): Promise<{
       STALWART_RECOVERY_ADMIN: provisionAdmin,
     })
     .withExposedPorts(8080)
-    .withWaitStrategy(Wait.forLogMessage(/Server started in recovery mode/).withStartupTimeout(120000))
+    .withWaitStrategy(Wait.forLogMessage(/Server started in bootstrap mode/).withStartupTimeout(120000))
     .withStartupTimeout(120000)
     .start();
 
