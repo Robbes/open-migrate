@@ -84,11 +84,23 @@ async function startStalwart(): Promise<{
 
   console.log('[StalwartSetup] Phase 1: Starting recovery mode container...');
 
+  // Minimal config.json for Stalwart - just the data store settings
+  // This prevents bootstrap mode and allows recovery mode to work properly
+  const configJson = JSON.stringify({
+    '@type': 'RocksDb',
+    path: '/opt/stalwart/data',
+  });
+
   // Phase 1: Provisioning container in recovery mode
-  // NO config file needed - recovery mode uses defaults and shows bootstrap mode
   const containerA = await new GenericContainer('stalwartlabs/stalwart:v0.16.10')
     .withBindMounts([
       { source: dataDir, target: '/opt/stalwart/data' },
+    ])
+    .withCopyContentToContainer([
+      {
+        content: configJson,
+        target: '/etc/stalwart/config.json',
+      },
     ])
     .withEnvironment({
       STALWART_HOSTNAME: 'mail.stalwart.local',
@@ -96,7 +108,7 @@ async function startStalwart(): Promise<{
       STALWART_RECOVERY_ADMIN: provisionAdmin,
     })
     .withExposedPorts(8080)
-    .withWaitStrategy(Wait.forLogMessage(/Server started in bootstrap mode/).withStartupTimeout(120000))
+    .withWaitStrategy(Wait.forLogMessage(/Server started/).withStartupTimeout(120000))
     .withStartupTimeout(120000)
     .start();
 
@@ -111,22 +123,18 @@ async function startStalwart(): Promise<{
   console.log('[StalwartSetup] Provisioning accounts via stalwart-cli...');
   
   // Stalwart v0.16.x account format - account ID is used as username for IMAP
-  // IMPORTANT: Bootstrap object must be created to complete bootstrap mode
-  // Based on Stalwart docs, Bootstrap collects server setup info
+  // With config.json present, server starts in recovery mode (not bootstrap)
+  // Can directly create Domain and Account objects
   const plan = [
-    // Step 1: Create Bootstrap object with basic server configuration
-    { '@type': 'update', object: 'Bootstrap', value: {
-      hostname: 'dev.local',
-    } },
-    // Step 2: Create Domain
+    // Step 1: Create Domain
     { '@type': 'upsert', object: 'Domain', matchOn: ['name'], value: { 'dom-a': { name: 'dev.local' } } },
-    // Step 3: Create source account
+    // Step 2: Create source account
     { '@type': 'upsert', object: 'Account', matchOn: ['name'], value: { 'source': {
         '@type': 'User', name: 'source', domainId: '#dom-a',
         credentials: { '0': { '@type': 'Password', secret: 'source_password' } },
         roles: { '@type': 'User' }, permissions: { '@type': 'Inherit' }, encryptionAtRest: { '@type': 'Disabled' },
     } } },
-    // Step 4: Create target account
+    // Step 3: Create target account
     { '@type': 'upsert', object: 'Account', matchOn: ['name'], value: { 'target': {
         '@type': 'User', name: 'target', domainId: '#dom-a',
         credentials: { '0': { '@type': 'Password', secret: 'target_password' } },
