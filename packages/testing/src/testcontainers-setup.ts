@@ -25,7 +25,9 @@ const STALWART_CLI_PATH = '/home/openhands/.cargo/bin/stalwart-cli';
 
 // Docker named volume for Stalwart data persistence
 // Bind mounts don't work in this DinD environment, so we use Docker volumes
-const STALWART_DATA_VOLUME = 'stalwart-test-data';
+// IMPORTANT: Use a UNIQUE volume name per test run to prevent RocksDB lock conflicts
+// across parallel test runs or leftover state from previous runs
+const STALWART_DATA_VOLUME = `stalwart-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 /**
  * Ensure the Docker volume exists.
@@ -232,6 +234,34 @@ async function startStalwart(): Promise<{
   // Stop provisioning container
   console.log('[StalwartSetup] Stopping recovery container...');
   await containerA.stop();
+  
+  // CRITICAL: Wait for RocksDB lock to be released
+  // containerA.stop() may return before the process fully releases the lock file
+  // We need to ensure the container is completely gone before starting Phase 2
+  console.log('[StalwartSetup] Waiting for Phase 1 container to fully terminate...');
+  const stopContainerId = containerA.getId();
+  let attempts = 0;
+  const maxAttempts = 30; // 30 seconds total
+  while (attempts < maxAttempts) {
+    try {
+      const { stdout } = await execFileAsync('docker', ['ps', '-q', '--filter', `id=${stopContainerId}`]);
+      if (!stdout.trim()) {
+        // Container is gone - lock should be released
+        console.log('[StalwartSetup] Phase 1 container fully terminated, lock released.');
+        break;
+      }
+    } catch {
+      // Container might already be gone
+      break;
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    attempts++;
+  }
+  if (attempts >= maxAttempts) {
+    console.warn('[StalwartSetup] Warning: Container may still be running, forcing cleanup...');
+    await execFileAsync('docker', ['rm', '-f', stopContainerId]).catch(() => {});
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
 
   console.log('[StalwartSetup] Phase 2: Starting normal mode container with provisioned data...');
 
@@ -343,4 +373,13 @@ export async function stopTestEnvironment(env: TestEnvironment): Promise<void> {
   await env.postgres.container.stop();
   await env.stalwart.container.stop();
   console.log('[Testcontainers] All containers stopped.');
+  
+  // Clean up the Stalwart data volume to prevent stale locks for next run
+  try {
+    execFileSync('docker', ['volume', 'rm', STALWART_DATA_VOLUME], { stdio: 'ignore' });
+    console.log(`[Testcontainers] Cleaned up Stalwart volume: ${STALWART_DATA_VOLUME}`);
+  } catch {
+    // Volume might already be gone or in use
+    console.warn(`[Testcontainers] Could not remove volume ${STALWART_DATA_VOLUME}`);
+  }
 }
