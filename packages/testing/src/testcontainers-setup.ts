@@ -308,7 +308,7 @@ async function startStalwart(): Promise<{
     .withExposedPorts(8080, 143)
     .withStartupTimeout(180000)
     .withUser('root')
-    .withWaitStrategy(Wait.forListeningPort(8080))
+    .withWaitStrategy(Wait.forListeningPorts())
     .start();
 
   console.log('[StalwartSetup] Container started, waiting for JMAP endpoint...');
