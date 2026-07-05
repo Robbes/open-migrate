@@ -108,6 +108,7 @@ async function startStalwart(): Promise<{
     })
     .withExposedPorts(8080)
     .withStartupTimeout(120000)
+    .withWaitStrategy(Wait.forLogMessage('Network listener started'))
     .start();
 
   const mgmtPort = containerA.getMappedPort(8080);
