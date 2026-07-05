@@ -88,18 +88,15 @@ async function startStalwart(): Promise<{
   // This prevents bootstrap mode and allows recovery mode to work properly
   // Format MUST be valid JSON (not JS object notation)
   // Path must match the bind mount target
+  // NOTE: Config is baked into the custom image to ensure it's available at startup
   const configJson = '{"@type":"RocksDb","path":"/opt/stalwart/data/"}';
 
   // Phase 1: Provisioning container in recovery mode
-  const containerA = await new GenericContainer('stalwartlabs/stalwart:v0.16.10')
+  // Uses custom image with config.json baked in (stalwart-test-custom)
+  // Runs as root to allow writing to the mounted data directory
+  const containerA = await new GenericContainer('stalwart-test-custom:latest')
     .withBindMounts([
       { source: dataDir, target: '/opt/stalwart/data' },
-    ])
-    .withCopyContentToContainer([
-      {
-        content: configJson,
-        target: '/etc/stalwart/config.json',
-      },
     ])
     .withEnvironment({
       STALWART_HOSTNAME: 'mail.stalwart.local',
@@ -108,6 +105,7 @@ async function startStalwart(): Promise<{
     })
     .withExposedPorts(8080)
     .withStartupTimeout(120000)
+    .withUser('root')
     .withWaitStrategy(Wait.forLogMessage('Network listener started'))
     .start();
 
@@ -214,19 +212,20 @@ async function startStalwart(): Promise<{
   // MINIMAL config per FIXED TRUTH: only DataStore, no http/imap/listeners/accounts/domains
   // Accounts/domains are in the DB from Phase 1 provisioning
   // Listeners auto-start in normal mode (no recovery mode)
+  // NOTE: Config is baked into the custom image
   const normalConfig = '{"@type":"RocksDb","path":"/opt/stalwart/data/"}';
 
-  const containerB = await new GenericContainer('stalwartlabs/stalwart:v0.16.10')
+  const containerB = await new GenericContainer('stalwart-test-custom:latest')
     .withBindMounts([
       { source: dataDir2, target: '/opt/stalwart/data' },
     ])
-    .withCopyContentToContainer([{ content: normalConfig, target: '/etc/stalwart/config.json' }])
-    .withCommand(['--config', '/etc/stalwart/config.json'])
     .withEnvironment({
       STALWART_HOSTNAME: 'mail.stalwart.local',
     })
     .withExposedPorts(8080, 143)
     .withStartupTimeout(180000)
+    .withUser('root')
+    .withWaitStrategy(Wait.forLogMessage('Network listener started'))
     .start();
 
   console.log('[StalwartSetup] Container started, waiting for JMAP endpoint...');
