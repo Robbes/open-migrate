@@ -86,6 +86,7 @@ async function startStalwart(): Promise<{
 
   // Phase 1: Provisioning container in recovery mode
   // Recovery mode uses minimal config - config.json specifies RocksDB data store
+  // CRITICAL: Use withCopyContentToContainer, NOT bind mounts (bind mounts create directories in this Docker environment)
   const configContent = JSON.stringify({
     '@type': 'RocksDb',
     path: '/opt/stalwart/data',
@@ -94,8 +95,8 @@ async function startStalwart(): Promise<{
     .withBindMounts([
       { source: dataDir, target: '/opt/stalwart/data' },
     ])
-    .withCopyContentToContainer([{ content: configContent, target: '/stalwart-config.json' }])
-    .withCommand(['--config', '/stalwart-config.json'])
+    .withCopyContentToContainer([{ content: configContent, target: '/etc/stalwart/config.json' }])
+    .withCommand(['--config', '/etc/stalwart/config.json'])
     .withEnvironment({
       STALWART_HOSTNAME: 'mail.stalwart.local',
       STALWART_RECOVERY_MODE: '1',
@@ -213,8 +214,8 @@ async function startStalwart(): Promise<{
     .withBindMounts([
       { source: dataDir2, target: '/opt/stalwart/data' },
     ])
-    .withCopyContentToContainer([{ content: normalConfig, target: '/opt/stalwart/config.json' }])
-    .withCommand(['--config', '/opt/stalwart/config.json'])
+    .withCopyContentToContainer([{ content: normalConfig, target: '/etc/stalwart/config.json' }])
+    .withCommand(['--config', '/etc/stalwart/config.json'])
     .withEnvironment({
       STALWART_HOSTNAME: 'mail.stalwart.local',
     })
