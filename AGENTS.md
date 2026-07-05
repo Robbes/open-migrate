@@ -4,6 +4,8 @@ Single source of agent guidance for this repo. Works for Claude Code, OpenHands,
 
 **Before doing anything, read `docs/architecture/solution-architecture.md` — it is the source of truth.** This file is the operational contract; the architecture doc is the design.
 
+Before any Stalwart or integration-test work, read docs/stalwart-integration-fix.md in full and do not deviate from it. Never change the pinned Stalwart version, never put accounts/domains/listeners in config.json, never skip the shadow-pass tests.
+
 ## What we are building
 A sovereign migration/sync stack that moves families and SMBs off US cloud (O365/Google/Dropbox) to EU/CH targets. **Target protocols: JMAP is primary** (Stalwart reference; mosa.cloud / La Suite / MijnBureau), **IMAP/CalDAV/CardDAV/WebDAV is the parallel second family** (Soverin, openDesk, Nextcloud, Proton via import) — **both in MVP (ADR-0018)**. The **O365 source stays IMAP+OAuth2/Graph** (Microsoft has no JMAP), so JMAP is a target-side concern. Migration is **idempotent**, can **shadow-run** in parallel as long as the user wants, and the user stays **in control** via a clear UI.
 
