@@ -270,6 +270,20 @@ async function startStalwart(): Promise<{
   // REUSE the same Docker volume from Phase 1 (contains provisioned accounts in DB)
   console.log('[StalwartSetup] Phase 2 using same volume:', volumeMountpoint);
 
+  // CRITICAL: Remove stale LOCK file from Phase 1 before starting Phase 2
+  // RocksDB creates a LOCK file that persists even after the container stops.
+  // If not removed, Phase 2 will fail with "LOCK: Resource temporarily unavailable"
+  console.log('[StalwartSetup] Cleaning up stale LOCK file...');
+  try {
+    execFileSync('docker', [
+      'run', '--rm', '-v', `${STALWART_DATA_VOLUME}:/data`, 'alpine',
+      'rm', '-f', '/data/LOCK'
+    ], { stdio: 'ignore' });
+    console.log('[StalwartSetup] LOCK file removed.');
+  } catch (err: any) {
+    console.warn('[StalwartSetup] Warning: Could not remove LOCK file:', err.message);
+  }
+
   // MINIMAL config per FIXED TRUTH: only DataStore, no http/imap/listeners/accounts/domains
   // Accounts/domains are in the DB from Phase 1 provisioning
   // Listeners auto-start in normal mode (no recovery mode)
