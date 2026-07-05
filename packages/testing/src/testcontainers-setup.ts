@@ -9,7 +9,7 @@
 
 import { GenericContainer, Wait, Network } from 'testcontainers';
 import type { StartedTestContainer, StoppedTestContainer } from 'testcontainers';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -63,16 +63,12 @@ export interface TestEnvironment {
 
 /**
  * Create the Stalwart configuration file.
- * Stalwart v0.16 config.json contains DataStore at ROOT level + listen configurations.
- * Format for normal mode:
+ * Stalwart v0.16 config.json contains DataStore at ROOT level.
+ * Listeners and all other configuration are loaded from the database.
+ * Format:
  * {
  *   "@type": "RocksDb",
- *   "path": "/opt/stalwart/data",
- *   "listen": {
- *     "http": "0.0.0.0:8080",
- *     "imap": "0.0.0.0:143",
- *     "jmap": "0.0.0.0:8080"
- *   }
+ *   "path": "/opt/stalwart/data"
  * }
  */
 function createStalwartConfig(configPath: string, normalMode: boolean = false): void {
@@ -80,15 +76,6 @@ function createStalwartConfig(configPath: string, normalMode: boolean = false): 
     '@type': 'RocksDb' as const,
     path: '/opt/stalwart/data',
   };
-  
-  // Add listen configurations for normal mode (not recovery mode)
-  if (normalMode) {
-    config.listen = {
-      http: '0.0.0.0:8080',
-      imap: '0.0.0.0:143',
-      jmap: '0.0.0.0:8080',
-    };
-  }
   
   writeFileSync(configPath, JSON.stringify(config, null, 2));
   console.log(`[StalwartSetup] Config written to ${configPath}`);
@@ -127,16 +114,15 @@ async function startStalwart(): Promise<{
     .withBindMounts([
       { source: dataDir, target: '/opt/stalwart/data' },
     ])
-    .withCopyContentToContainer([{ content: configContent, target: '/opt/stalwart/config.json' }])
-    .withUser('root')
-    .withCommand(['--config', '/opt/stalwart/config.json'])
+    .withCopyContentToContainer([{ content: configContent, target: '/etc/stalwart/config.json' }])
+    .withCommand(['--config', '/etc/stalwart/config.json'])
     .withEnvironment({
       STALWART_HOSTNAME: 'mail.stalwart.local',
       STALWART_RECOVERY_MODE: '1',
       STALWART_RECOVERY_ADMIN: provisionAdmin,
     })
     .withExposedPorts(8080)
-    .withWaitStrategy(Wait.forLogMessage(/Server started in recovery mode/).withStartupTimeout(120000))
+    .withWaitStrategy(Wait.forHttp('/healthz/live', 8080).withStartupTimeout(120000))
     .withStartupTimeout(120000)
     .start();
 
@@ -209,7 +195,7 @@ async function startStalwart(): Promise<{
   try {
     const { stdout: verifyOutput } = await execFileAsync(
       STALWART_CLI_PATH,
-      ['get', 'Account', 'src'],
+      ['get', 'Account', 'source'],
       {
         env: {
           STALWART_URL: `http://${mgmtHost}:${mgmtPort}`,
@@ -230,55 +216,26 @@ async function startStalwart(): Promise<{
 
   console.log('[StalwartSetup] Phase 2: Starting normal mode container with provisioned data...');
 
-  // Phase 2: Production container with full configuration for JMAP/IMAP
-  // REUSE the same data directory from Phase 1 (contains provisioned accounts)
-  const dataDir2 = dataDir; // Use the same data directory
-  console.log('[StalwartSetup] Phase 2 data directory:', dataDir2);
-
-  // Create a complete config with all necessary sections for normal mode
-  // Note: Stalwart uses the accounts provisioned via stalwart-cli for authentication
-  // The 'auth' section is for JMAP token auth; IMAP uses the account credentials directly
-  const normalConfig = {
-    '@type': 'RocksDb',
-    path: '/opt/stalwart/data',
-    // Enable HTTP/JMAP server
-    http: {
-      '@type': 'http',
-      listen: '0.0.0.0:8080',
-    },
-    // Enable IMAP server  
-    imap: {
-      '@type': 'imap',
-      listen: '0.0.0.0:143',
-    },
-    // JMAP settings
-    jmap: {
-      '@type': 'jmap',
-    },
-    // Authentication for JMAP (IMAP uses account credentials directly)
-    auth: {
-      '@type': 'jwt',
-      secret: 'test-secret-for-integration-tests-only',
-    },
-  };
-  
-  const normalConfigPath = path.join(dataDir2, 'config.json');
-  writeFileSync(normalConfigPath, JSON.stringify(normalConfig, null, 2));
-  console.log('[StalwartSetup] Normal mode config written');
-
+  // Phase 2: Normal mode - same minimal config as Phase 1.
+  // Listeners auto-start in normal mode; accounts/domains persist from Phase 1.
   const containerB = await new GenericContainer('stalwartlabs/stalwart:v0.16.10')
     .withBindMounts([
-      { source: dataDir2, target: '/opt/stalwart/data' },
+      { source: dataDir, target: '/opt/stalwart/data' },
     ])
-    .withUser('root')
-    .withCommand(['--config', '/opt/stalwart/data/config.json'])
-    .withEnvironment({
-      STALWART_HOSTNAME: 'mail.stalwart.local',
-    })
+    .withCopyContentToContainer([{ 
+      content: JSON.stringify({
+        '@type': 'RocksDb',
+        path: '/opt/stalwart/data',
+      }),
+      target: '/etc/stalwart/config.json',
+    }])
+    .withCommand(['--config', '/etc/stalwart/config.json'])
     .withExposedPorts(8080, 143)
     .withStartupTimeout(180000)
     .start();
 
+  const containerId = containerB.containerId;
+  console.log('[StalwartSetup] Container ID:', containerId);
   console.log('[StalwartSetup] Container started, waiting for JMAP endpoint...');
   const stalwartHost = containerB.getHost();
   const imapPort = containerB.getMappedPort(143);
