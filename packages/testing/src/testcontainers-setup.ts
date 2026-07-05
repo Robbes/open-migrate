@@ -114,8 +114,8 @@ async function startStalwart(): Promise<{
   // IMPORTANT: Must create Bootstrap object FIRST to complete bootstrap process
   // Then create Domain, then Accounts
   const plan = [
-    // Step 1: Create Bootstrap object to complete bootstrap mode
-    { '@type': 'upsert', object: 'Bootstrap', value: {
+    // Step 1: Create Bootstrap object to complete bootstrap mode (use 'update' for singleton)
+    { '@type': 'update', object: 'Bootstrap', value: {
       credentials: { '0': { '@type': 'Password', secret: adminPass } },
     } },
     // Step 2: Create Domain
