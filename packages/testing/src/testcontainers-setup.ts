@@ -111,13 +111,22 @@ async function startStalwart(): Promise<{
   console.log('[StalwartSetup] Provisioning accounts via stalwart-cli...');
   
   // Stalwart v0.16.x account format - account ID is used as username for IMAP
+  // IMPORTANT: Must create Bootstrap object FIRST to complete bootstrap process
+  // Then create Domain, then Accounts
   const plan = [
+    // Step 1: Create Bootstrap object to complete bootstrap mode
+    { '@type': 'upsert', object: 'Bootstrap', value: {
+      credentials: { '0': { '@type': 'Password', secret: adminPass } },
+    } },
+    // Step 2: Create Domain
     { '@type': 'upsert', object: 'Domain', matchOn: ['name'], value: { 'dom-a': { name: 'dev.local' } } },
+    // Step 3: Create source account
     { '@type': 'upsert', object: 'Account', matchOn: ['name'], value: { 'source': {
         '@type': 'User', name: 'source', domainId: '#dom-a',
         credentials: { '0': { '@type': 'Password', secret: 'source_password' } },
         roles: { '@type': 'User' }, permissions: { '@type': 'Inherit' }, encryptionAtRest: { '@type': 'Disabled' },
     } } },
+    // Step 4: Create target account
     { '@type': 'upsert', object: 'Account', matchOn: ['name'], value: { 'target': {
         '@type': 'User', name: 'target', domainId: '#dom-a',
         credentials: { '0': { '@type': 'Password', secret: 'target_password' } },
