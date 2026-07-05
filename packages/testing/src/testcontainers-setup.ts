@@ -275,11 +275,17 @@ async function startStalwart(): Promise<{
   // If not removed, Phase 2 will fail with "LOCK: Resource temporarily unavailable"
   console.log('[StalwartSetup] Cleaning up stale LOCK file...');
   try {
-    execFileSync('docker', [
+    const result = execFileSync('docker', [
       'run', '--rm', '-v', `${STALWART_DATA_VOLUME}:/data`, 'alpine',
       'rm', '-f', '/data/LOCK'
-    ], { stdio: 'ignore' });
-    console.log('[StalwartSetup] LOCK file removed.');
+    ], { encoding: 'utf8' });
+    console.log('[StalwartSetup] LOCK file removal output:', result);
+    // Verify removal
+    const verifyResult = execFileSync('docker', [
+      'run', '--rm', '-v', `${STALWART_DATA_VOLUME}:/data`, 'alpine',
+      'ls', '-la', '/data/LOCK'
+    ], { encoding: 'utf8' });
+    console.log('[StalwartSetup] LOCK file verification:', verifyResult);
   } catch (err: any) {
     console.warn('[StalwartSetup] Warning: Could not remove LOCK file:', err.message);
   }
