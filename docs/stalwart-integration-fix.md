@@ -46,6 +46,26 @@ never ["emailAddress"]. Cross-refs use "#id" strings. Use upsert (idempotent), n
 Run the schema migration EXACTLY ONCE in vitest.global-setup.ts (per-file parallel migration causes
 23505 catalog unique-violation races).
 
+## CRITICAL: RocksDB Lock Collision Prevention
+Stalwart uses RocksDB which permits EXACTLY ONE process per data directory. The following MUST be
+observed to prevent "LOCK: Resource temporarily unavailable" errors:
+
+1. **Unique volume per test run**: Use a dynamically-generated volume name
+   (e.g., `stalwart-test-<timestamp>-<random>`) instead of a fixed name. Reusing a fixed volume
+   name across runs can leave stale LOCK files from previous processes.
+
+2. **Strict Phase 1 → Phase 2 sequencing**: After `containerA.stop()` in Phase 1, WAIT until the
+   container is FULLY REMOVED before starting Phase 2. The `stop()` method may return before the
+   RocksDB lock file is released. Poll `docker ps -q --filter id=<containerId>` until it returns
+   empty, then wait an additional 1-2 seconds before starting Phase 2.
+
+3. **Volume cleanup on teardown**: Remove the Stalwart data volume in the test teardown to prevent
+   stale locks for subsequent runs.
+
+4. **Single instance per run**: Stalwart must be started exactly ONCE in vitest.global-setup.ts
+   and shared by all integration tests. Never start multiple Stalwart containers on the same volume
+   (even across parallel test files).
+
 ## Open item (the ONLY real remaining work)
 IMAP auth succeeds but the connection drops after auth, during commands — a test-client TLS-mode or
 APPEND-literal mismatch. Diagnose with `nc` and `openssl s_client -starttls imap`, align the client
