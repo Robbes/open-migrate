@@ -243,7 +243,7 @@ async function startStalwart(): Promise<{
   // Accounts/domains are in the DB from Phase 1 provisioning
   // Listeners auto-start in normal mode (no recovery mode)
   // NOTE: Config is baked into the custom image
-  const normalConfig = '{"@type":"RocksDb","path":"/opt/stalwart/data/"}';
+  const normalConfig = '{"@type":"RocksDb","path":"/opt/stalwart/data"}';
 
   const containerB = await new GenericContainer('stalwart-test-custom:latest')
     .withBindMounts([
