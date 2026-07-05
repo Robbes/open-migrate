@@ -94,8 +94,8 @@ async function startStalwart(): Promise<{
     .withBindMounts([
       { source: dataDir, target: '/opt/stalwart/data' },
     ])
-    .withCopyContentToContainer([{ content: configContent, target: '/etc/stalwart/config.json' }])
-    .withCommand(['--config', '/etc/stalwart/config.json'])
+    .withCopyContentToContainer([{ content: configContent, target: '/stalwart-config.json' }])
+    .withCommand(['--config', '/stalwart-config.json'])
     .withEnvironment({
       STALWART_HOSTNAME: 'mail.stalwart.local',
       STALWART_RECOVERY_MODE: '1',
