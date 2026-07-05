@@ -295,6 +295,49 @@ async function startStalwart(): Promise<{
   // Listeners auto-start in normal mode (no recovery mode)
   const normalConfig = '{"@type":"RocksDb","path":"/opt/stalwart/data"}';
 
+  // Custom wait strategy that also logs container output for debugging
+  const customWaitStrategy = {
+    waitUntilReady: async (container: any) => {
+      const timeout = 180000;
+      const startTime = Date.now();
+      
+      while (Date.now() - startTime < timeout) {
+        // Check if ports are bound
+        const inspect = await container.inspect();
+        const running = inspect.State.Running;
+        const exited = inspect.State.Running === false && inspect.State.Status === 'exited';
+        
+        if (exited) {
+          const logs = await container.logs({ stdout: true, stderr: true, tail: 100 });
+          console.error('[StalwartSetup] Container exited! Logs:', logs.toString());
+          throw new Error('Stalwart container exited unexpectedly');
+        }
+        
+        if (running) {
+          // Try to connect to port 8080
+          try {
+            const response = await fetch(`http://${container.getHost()}:${container.getMappedPort(8080)}/.well-known/jmap`, {
+              timeout: 2000
+            });
+            if (response.ok || response.status === 404) {
+              console.log('[StalwartSetup] Port 8080 is listening');
+              return;
+            }
+          } catch (e: any) {
+            // Port not ready yet
+          }
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+      
+      throw new Error('Stalwart did not start within timeout');
+    },
+    withStartupTimeout: (ms: number) => customWaitStrategy,
+    isStartupTimeoutSet: () => false,
+    getStartupTimeout: () => 0
+  };
+
   const containerB = await new GenericContainer('stalwart-test-custom:latest')
     .withBindMounts([
       { source: volumeMountpoint, target: '/opt/stalwart/data' },
@@ -308,7 +351,7 @@ async function startStalwart(): Promise<{
     .withExposedPorts(8080, 143)
     .withStartupTimeout(180000)
     .withUser('root')
-    .withWaitStrategy(Wait.forListeningPorts())
+    .withWaitStrategy(customWaitStrategy)
     .start();
 
   console.log('[StalwartSetup] Container started, waiting for JMAP endpoint...');
