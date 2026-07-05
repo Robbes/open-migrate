@@ -121,15 +121,16 @@ async function startStalwart(): Promise<{
   // This prevents bootstrap mode and allows recovery mode to work properly
   // Format MUST be valid JSON (not JS object notation)
   // Path must match the volume mount target
-  // NOTE: Config is baked into the custom image to ensure it's available at startup
   const configJson = '{"@type":"RocksDb","path":"/opt/stalwart/data"}';
 
   // Phase 1: Provisioning container in recovery mode
-  // Uses custom image with config.json baked in (stalwart-test-custom)
   // Runs as root to allow writing to the mounted data directory
   const containerA = await new GenericContainer('stalwart-test-custom:latest')
     .withBindMounts([
       { source: volumeMountpoint, target: '/opt/stalwart/data' },
+    ])
+    .withCopyContentToContainer([
+      { content: configJson, target: '/etc/stalwart/config.json' },
     ])
     .withEnvironment({
       STALWART_HOSTNAME: 'mail.stalwart.local',
@@ -272,12 +273,14 @@ async function startStalwart(): Promise<{
   // MINIMAL config per FIXED TRUTH: only DataStore, no http/imap/listeners/accounts/domains
   // Accounts/domains are in the DB from Phase 1 provisioning
   // Listeners auto-start in normal mode (no recovery mode)
-  // NOTE: Config is baked into the custom image
   const normalConfig = '{"@type":"RocksDb","path":"/opt/stalwart/data"}';
 
   const containerB = await new GenericContainer('stalwart-test-custom:latest')
     .withBindMounts([
       { source: volumeMountpoint, target: '/opt/stalwart/data' },
+    ])
+    .withCopyContentToContainer([
+      { content: normalConfig, target: '/etc/stalwart/config.json' },
     ])
     .withEnvironment({
       STALWART_HOSTNAME: 'mail.stalwart.local',
