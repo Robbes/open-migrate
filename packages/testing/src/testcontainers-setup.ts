@@ -86,10 +86,8 @@ async function startStalwart(): Promise<{
 
   // Minimal config.json for Stalwart - just the data store settings
   // This prevents bootstrap mode and allows recovery mode to work properly
-  const configJson = JSON.stringify({
-    '@type': 'RocksDb',
-    path: '/opt/stalwart/data',
-  });
+  // Format MUST be valid JSON (not JS object notation)
+  const configJson = '{"@type":"RocksDb","path":"/opt/stalwart/data/"}';
 
   // Phase 1: Provisioning container in recovery mode
   const containerA = await new GenericContainer('stalwartlabs/stalwart:v0.16.10')
@@ -214,10 +212,7 @@ async function startStalwart(): Promise<{
   // MINIMAL config per FIXED TRUTH: only DataStore, no http/imap/listeners/accounts/domains
   // Accounts/domains are in the DB from Phase 1 provisioning
   // Listeners auto-start in normal mode (no recovery mode)
-  const normalConfig = JSON.stringify({
-    '@type': 'RocksDb',
-    path: '/opt/stalwart/data',
-  });
+  const normalConfig = '{"@type":"RocksDb","path":"/opt/stalwart/data/"}';
 
   const containerB = await new GenericContainer('stalwartlabs/stalwart:v0.16.10')
     .withBindMounts([
