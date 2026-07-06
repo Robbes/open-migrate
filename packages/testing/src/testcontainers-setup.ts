@@ -177,8 +177,39 @@ async function captureContainerDiagnostics(
   }
 }
 
-// Path to stalwart-cli binary (installed via installer script)
-const STALWART_CLI_PATH = '/home/openhands/.cargo/bin/stalwart-cli';
+/**
+ * Resolve the path to the stalwart-cli binary.
+ * Priority: STALWART_CLI_PATH env var > 'stalwart-cli' on PATH > error.
+ * This allows CI to override the path while keeping local development simple.
+ */
+function resolveStalwartCliPath(): string {
+  const envPath = process.env.STALWART_CLI_PATH;
+  if (envPath) {
+    console.log(`[StalwartSetup] Using STALWART_CLI_PATH from env: ${envPath}`);
+    return envPath;
+  }
+  
+  // Try to find stalwart-cli on PATH
+  try {
+    const result = execFileSync('which', ['stalwart-cli'], { encoding: 'utf8' }).trim();
+    if (result) {
+      console.log(`[StalwartSetup] Found stalwart-cli on PATH: ${result}`);
+      return result;
+    }
+  } catch {
+    // which failed, binary not on PATH
+  }
+  
+  throw new Error(
+    'stalwart-cli not found. Please either:\n' +
+    '  1. Install stalwart-cli and ensure it\'s on PATH, or\n' +
+    '  2. Set the STALWART_CLI_PATH environment variable to the full path of the binary.\n' +
+    'To install: curl --proto \'=https\' --tlsv1.2 -LsSf https://github.com/stalwartlabs/cli/releases/latest/download/stalwart-cli-installer.sh | sh'
+  );
+}
+
+// Path to stalwart-cli binary (resolved dynamically at runtime)
+const STALWART_CLI_PATH = resolveStalwartCliPath();
 
 // Docker named volume for Stalwart data persistence
 // Bind mounts don't work in this DinD environment, so we use Docker volumes
