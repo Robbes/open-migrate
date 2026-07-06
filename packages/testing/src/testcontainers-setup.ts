@@ -299,9 +299,12 @@ async function startStalwart(): Promise<{
   const configJson = '{"@type":"RocksDb","path":"/opt/stalwart/data"}';
 
   // Phase 1: Provisioning container in recovery mode
-  // Use Docker-managed NAMED VOLUME (not bind mount) for consistent UID/permissions
+  // Use Docker-managed NAMED VOLUME (not host bind mount) for consistent UID/permissions
+  // The source is the Docker volume name, which Docker handles with proper permissions
   const containerA = await new GenericContainer('stalwart-test-custom:latest')
-    .withVolumes({ [STALWART_DATA_VOLUME]: '/opt/stalwart/data' })
+    .withBindMounts([
+      { source: STALWART_DATA_VOLUME, target: '/opt/stalwart/data' },
+    ])
     .withCopyContentToContainer([
       { content: configJson, target: '/etc/stalwart/config.json' },
     ])
@@ -476,10 +479,12 @@ async function startStalwart(): Promise<{
   // Listeners auto-start in normal mode (no recovery mode)
   const normalConfig = '{"@type":"RocksDb","path":"/opt/stalwart/data"}';
 
-  // Create container using Docker-managed NAMED VOLUME (not bind mount)
+  // Create container using Docker-managed NAMED VOLUME (not host bind mount)
   // This ensures consistent UID/permissions across both phases
   const containerBBuilder = new GenericContainer('stalwart-test-custom:latest')
-    .withVolumes({ [STALWART_DATA_VOLUME]: '/opt/stalwart/data' })
+    .withBindMounts([
+      { source: STALWART_DATA_VOLUME, target: '/opt/stalwart/data' },
+    ])
     .withCopyContentToContainer([
       { content: normalConfig, target: '/etc/stalwart/config.json' },
     ])
@@ -494,7 +499,7 @@ async function startStalwart(): Promise<{
     .withWaitStrategy(Wait.forListeningPorts());
 
   // Start the container and attach log stream immediately
-  let containerB: StartedTestContainer;
+  let containerB: StartedTestContainer | undefined;
   try {
     containerB = await containerBBuilder.start();
     
@@ -512,7 +517,7 @@ async function startStalwart(): Promise<{
       let containerId: string | undefined;
       
       // If containerB was partially created, use its ID
-      if (containerB) {
+      if (containerB !== undefined) {
         containerId = containerB.getId();
         console.log('[StalwartSetup] Using containerB ID:', containerId);
       } else {
