@@ -15,7 +15,7 @@ import type { StartedTestContainer } from 'testcontainers';
 import { writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, execSync } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -581,7 +581,7 @@ async function startStalwart(): Promise<{
               const diagFile = path.join(TEST_LOGS_DIR, 'stalwart-phase2.log');
               appendFileSync(diagFile, `\n=== FAILED ATTEMPT ${attempt} DIAGNOSTICS ===\n${failedLogs}\n=== END ATTEMPT ${attempt} ===\n`);
             }
-          } catch {}
+          } catch (err) { /* Log capture errors are non-fatal */ }
         }
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
@@ -611,7 +611,7 @@ async function startStalwart(): Promise<{
             'volume', 'inspect', STALWART_DATA_VOLUME, '--format', '{{.Mountpoint}}'
           ]);
           const mountpoint = volumeMountpoint.trim();
-          const { execSync } = require('child_process');
+          
           const rocksdbLog = execSync(`cat ${mountpoint}/LOG 2>/dev/null || echo 'No ROCKSDB LOG'`, { 
             encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore']
           });
