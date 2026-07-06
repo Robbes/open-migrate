@@ -36,6 +36,48 @@ function ensureTestLogsDir(): void {
 }
 
 /**
+ * Create a log consumer function that writes to a file.
+ * This can be used with container.withLogConsumer() to capture logs from container start.
+ */
+function createFileLogConsumer(logFileName: string): (stream: NodeJS.ReadableStream) => void {
+  ensureTestLogsDir();
+  const logFilePath = path.join(TEST_LOGS_DIR, logFileName);
+  
+  // Initialize the log file with header
+  try {
+    appendFileSync(logFilePath, `\n=== ${logFileName} started at ${new Date().toISOString()} ===\n`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[TestLogs] Warning: Could not initialize log file: ${msg}`);
+  }
+  
+  return (logStream: NodeJS.ReadableStream) => {
+    logStream.on('data', (line: string) => {
+      try {
+        appendFileSync(logFilePath, line + '\n');
+      } catch {
+        // Ignore write errors - container might be shutting down
+      }
+    });
+    logStream.on('err', (line: string) => {
+      try {
+        appendFileSync(logFilePath, `[ERR] ${line}\n`);
+      } catch {
+        // Ignore write errors
+      }
+    });
+    logStream.on('end', () => {
+      try {
+        appendFileSync(logFilePath, `\n=== ${logFileName} ended ===\n`);
+      } catch {
+        // Ignore
+      }
+      console.log(`[TestLogs] Log stream completed for: ${logFileName}`);
+    });
+  };
+}
+
+/**
  * Stream container logs to a file from container start.
  * This is different from polling - it attaches a log consumer that streams
  * each line as it's produced.
@@ -301,6 +343,7 @@ async function startStalwart(): Promise<{
   // Phase 1: Provisioning container in recovery mode
   // Use Docker-managed NAMED VOLUME (not host bind mount) for consistent UID/permissions
   // The source is the Docker volume name, which Docker handles with proper permissions
+  // CRITICAL: Attach log consumer BEFORE start() to capture ALL logs from container creation
   const containerA = await new GenericContainer('stalwart-test-custom:latest')
     .withBindMounts([
       { source: STALWART_DATA_VOLUME, target: '/opt/stalwart/data' },
@@ -317,12 +360,14 @@ async function startStalwart(): Promise<{
     .withStartupTimeout(120000)
     .withUser('root')
     .withCommand(['--config', '/etc/stalwart/config.json'])
+    // Attach log consumer BEFORE start() to capture ALL logs including startup failures
+    .withLogConsumer(createFileLogConsumer('stalwart-phase1.log'))
     // Wait for HTTP port (8080) to be listening - more reliable than log matching
     .withWaitStrategy(Wait.forListeningPorts())
     .start();
 
-  // Attach log stream for Phase 1 - streams continuously from container start
-  await streamContainerLogs(containerA, 'stalwart-phase1.log');
+  // Log stream is already attached via withLogConsumer above
+  // No need to call streamContainerLogs again
 
   const mgmtPort = containerA.getMappedPort(8080);
   const mgmtHost = containerA.getHost();
@@ -481,6 +526,7 @@ async function startStalwart(): Promise<{
 
   // Create container using Docker-managed NAMED VOLUME (not host bind mount)
   // This ensures consistent UID/permissions across both phases
+  // CRITICAL: Attach log consumer BEFORE start() to capture logs from container creation
   const containerBBuilder = new GenericContainer('stalwart-test-custom:latest')
     .withBindMounts([
       { source: STALWART_DATA_VOLUME, target: '/opt/stalwart/data' },
@@ -494,17 +540,19 @@ async function startStalwart(): Promise<{
     .withExposedPorts(8080, 143)
     .withStartupTimeout(180000)
     .withUser('root')
+    // Attach log consumer BEFORE start() to capture ALL logs including startup failures
+    .withLogConsumer(createFileLogConsumer('stalwart-phase2.log'))
     // Wait for both HTTP (8080) and IMAP (143) ports to be listening
     // This is more reliable than log-string matching which varies by Stalwart version/mode
     .withWaitStrategy(Wait.forListeningPorts());
 
-  // Start the container and attach log stream immediately
+  // Start the container - log consumer is already attached above
   let containerB: StartedTestContainer | undefined;
   try {
     containerB = await containerBBuilder.start();
     
-    // Attach log stream - this will capture all logs from container start
-    await streamContainerLogs(containerB, 'stalwart-phase2.log');
+    // Log stream is already attached via withLogConsumer above
+    // No need to call streamContainerLogs again
     
   } catch (err) {
     // Wait strategy timed out or container failed to start
@@ -512,28 +560,12 @@ async function startStalwart(): Promise<{
     console.error('[StalwartSetup] Phase 2 startup FAILED:', msg);
     
     // Capture additional diagnostics before re-throwing
-    // CRITICAL: Use containerB.getId() if available, otherwise try to find the failed container
-    try {
-      let containerId: string | undefined;
-      
-      // If containerB was partially created, use its ID
-      if (containerB !== undefined) {
-        containerId = containerB.getId();
-        console.log('[StalwartSetup] Using containerB ID:', containerId);
-      } else {
-        // Fallback: try to find the most recently created container
-        console.log('[StalwartSetup] containerB not available, searching for failed container...');
-        const { stdout: recentContainers } = await execFileAsync('docker', [
-          'ps', '-a', '-n', '1', '--format', '{{.ID}} {{.Names}}'
-        ]);
-        console.log('[StalwartSetup] Most recent container:', recentContainers.trim());
-        const lines = recentContainers.trim().split('\n');
-        if (lines.length > 0 && lines[0]) {
-          containerId = lines[0].split(' ')[0];
-        }
-      }
-      
-      if (containerId) {
+    // CRITICAL: We MUST use containerB.getId() - never fall back to guessing
+    // If containerB is undefined, the start() call failed before creating a container handle
+    // In that case, we cannot reliably get logs, so we skip the docker logs capture
+    if (containerB !== undefined) {
+      try {
+        const containerId = containerB.getId();
         console.log('[StalwartSetup] Fetching logs from failed container:', containerId);
         try {
           const { stdout: failedLogs } = await execFileAsync('docker', [
@@ -561,9 +593,12 @@ async function startStalwart(): Promise<{
         } catch (logErr) {
           console.warn('[TestLogs] Could not fetch container logs:', logErr);
         }
+      } catch (innerErr) {
+        const innerMsg = innerErr instanceof Error ? innerErr.message : String(innerErr);
+        console.warn('[TestLogs] Could not capture diagnostics:', innerMsg);
       }
-    } catch (diagErr) {
-      console.warn('[TestLogs] Could not capture additional diagnostics:', diagErr);
+    } else {
+      console.warn('[StalwartSetup] Cannot capture diagnostics: containerB was never created (start() threw before returning handle)');
     }
     
     throw new Error(`Phase 2 failed to start: ${msg}`, { cause: err });
