@@ -547,67 +547,91 @@ async function startStalwart(): Promise<{
     // This is more reliable than log-string matching which varies by Stalwart version/mode
     .withWaitStrategy(Wait.forListeningPorts());
 
-  // Start the container - log consumer is already attached above
+  // Start the container with retry logic for RocksDB lock race condition
+  // Even after containerA stops, the OS may still hold the flock on the LOCK file.
+  // If Phase 2 starts too soon, it fails with "LOCK: Resource temporarily unavailable"
+  // and exits immediately. Retry with backoff to handle this race.
   let containerB: StartedTestContainer | undefined;
-  try {
-    containerB = await containerBBuilder.start();
-    
-    // Log stream is already attached via withLogConsumer above
-    // No need to call streamContainerLogs again
-    
-  } catch (err) {
-    // Wait strategy timed out or container failed to start
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('[StalwartSetup] Phase 2 startup FAILED:', msg);
-    
-    // Capture additional diagnostics before re-throwing
-    // CRITICAL: We MUST use containerB.getId() - never fall back to guessing
-    // If containerB is undefined, the start() call failed before creating a container handle
-    // In that case, we cannot reliably get logs, so we skip the docker logs capture
-    if (containerB !== undefined) {
-      try {
-        const containerId = containerB.getId();
-        console.log('[StalwartSetup] Fetching logs from failed container:', containerId);
-        try {
-          const { stdout: failedLogs } = await execFileAsync('docker', [
-            'logs', containerId, '--tail', '200'
-          ]);
-          console.log('[StalwartSetup] Failed container logs (last 200 lines):\n', failedLogs);
-          
-          // Write to a separate diagnostics file
-          const diagFile = path.join(TEST_LOGS_DIR, 'stalwart-phase2-diagnostics.log');
-          appendFileSync(diagFile, `=== FAILED CONTAINER LOGS (Container: ${containerId}) ===\n`);
-          appendFileSync(diagFile, failedLogs);
-          
-          // Also cat the RocksDB log from inside the container
+  const maxRetries = 5;
+  let lastError: Error | undefined;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`[StalwartSetup] Phase 2 startup attempt ${attempt}/${maxRetries}...`);
+      containerB = await containerBBuilder.start();
+      
+      // Log stream is already attached via withLogConsumer above
+      console.log('[StalwartSetup] Phase 2 container started successfully.');
+      break;
+      
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      const msg = lastError.message;
+      console.error(`[StalwartSetup] Phase 2 startup attempt ${attempt} FAILED:`, msg);
+      
+      if (attempt < maxRetries) {
+        if (msg.includes('LOCK') || msg.includes('Resource temporarily unavailable') || 
+            msg.includes('143/tcp not bound') || msg.includes('exit code')) {
+          console.log('[StalwartSetup] Possible lock/port issue, waiting 2s before retry...');
           try {
-            const { stdout: rocksdbLog } = await execFileAsync('docker', [
-              'exec', containerId, 'cat', '/opt/stalwart/data/LOG'
-            ]);
-            appendFileSync(diagFile, `\n=== RocksDB LOG from container ===\n${rocksdbLog}\n`);
-          } catch (rocksErr) {
-            const rocksMsg = rocksErr instanceof Error ? rocksErr.message : String(rocksErr);
-            appendFileSync(diagFile, `\n=== RocksDB LOG ===\nCould not read: ${rocksMsg}\n`);
-          }
-          
-          appendFileSync(diagFile, '\n=== END DIAGNOSTICS ===\n');
-        } catch (logErr) {
-          console.warn('[TestLogs] Could not fetch container logs:', logErr);
+            const containerId = containerB?.getId();
+            if (containerId) {
+              const { stdout: failedLogs } = await execFileAsync('docker', ['logs', containerId, '--tail', '100']);
+              console.log('[StalwartSetup] Failed attempt logs:\n', failedLogs);
+              const diagFile = path.join(TEST_LOGS_DIR, 'stalwart-phase2.log');
+              appendFileSync(diagFile, `\n=== FAILED ATTEMPT ${attempt} DIAGNOSTICS ===\n${failedLogs}\n=== END ATTEMPT ${attempt} ===\n`);
+            }
+          } catch {}
         }
-      } catch (innerErr) {
-        const innerMsg = innerErr instanceof Error ? innerErr.message : String(innerErr);
-        console.warn('[TestLogs] Could not capture diagnostics:', innerMsg);
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
-    } else {
-      console.warn('[StalwartSetup] Cannot capture diagnostics: containerB was never created (start() threw before returning handle)');
     }
-    
-    throw new Error(`Phase 2 failed to start: ${msg}`, { cause: err });
   }
   
-  // Log stream is already attached above
-
-  console.log('[StalwartSetup] Container started, waiting for JMAP endpoint...');
+  if (!containerB) {
+    const msg = lastError?.message || 'Unknown error';
+    console.error('[StalwartSetup] Phase 2 failed after all retries:', msg);
+    
+    try {
+      const { stdout: allContainers } = await execFileAsync('docker', [
+        'ps', '-a', '--filter', 'name=stalwart', '--format', '{{.ID}} {{.Names}}'
+      ]);
+      const lines = allContainers.trim().split('\n').filter(l => l);
+      if (lines.length > 0) {
+        const latestId = lines[lines.length - 1].split(' ')[0];
+        const { stdout: finalLogs } = await execFileAsync('docker', ['logs', latestId, '--tail', '200']);
+        console.log('[StalwartSetup] Final failed container logs:\n', finalLogs);
+        
+        const diagFile = path.join(TEST_LOGS_DIR, 'stalwart-phase2-diagnostics.log');
+        appendFileSync(diagFile, `=== FINAL FAILED CONTAINER LOGS (Container: ${latestId}) ===\n`);
+        appendFileSync(diagFile, finalLogs);
+        
+        try {
+          const { stdout: volumeMountpoint } = await execFileAsync('docker', [
+            'volume', 'inspect', STALWART_DATA_VOLUME, '--format', '{{.Mountpoint}}'
+          ]);
+          const mountpoint = volumeMountpoint.trim();
+          const { execSync } = require('child_process');
+          const rocksdbLog = execSync(`cat ${mountpoint}/LOG 2>/dev/null || echo 'No ROCKSDB LOG'`, { 
+            encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore']
+          });
+          appendFileSync(diagFile, `\n=== RocksDB LOG from volume ===\n${rocksdbLog}\n`);
+        } catch (volErr) {
+          appendFileSync(diagFile, `\n=== RocksDB LOG ===\nCould not read: ${volErr}\n`);
+        }
+        
+        appendFileSync(diagFile, '\n=== END DIAGNOSTICS ===\n');
+      }
+    } catch (diagErr) {
+      console.warn('[TestLogs] Could not capture final diagnostics:', diagErr);
+    }
+    
+    throw new Error(`Phase 2 failed to start after ${maxRetries} attempts: ${msg}`, { cause: lastError });
+  }
+  
+  // Log stream is already attached via withLogConsumer above
+  // No need to call streamContainerLogs again
+  
   const stalwartHost = containerB.getHost();
   const imapPort = containerB.getMappedPort(143);
   const jmapPort = containerB.getMappedPort(8080);
