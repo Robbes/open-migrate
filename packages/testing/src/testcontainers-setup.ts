@@ -312,7 +312,6 @@ async function startStalwart(): Promise<{
   const configJson = '{"@type":"RocksDb","path":"/opt/stalwart/data"}';
 
   // Phase 1: Provisioning container in recovery mode
-  // Runs as root to allow writing to the mounted data directory
   const containerA = await new GenericContainer('stalwart-test-custom:latest')
     .withBindMounts([
       { source: volumeMountpoint, target: '/opt/stalwart/data' },
@@ -491,7 +490,8 @@ async function startStalwart(): Promise<{
   // Listeners auto-start in normal mode (no recovery mode)
   const normalConfig = '{"@type":"RocksDb","path":"/opt/stalwart/data"}';
 
-  const containerB = await new GenericContainer('stalwart-test-custom:latest')
+  // Create container first (don't start yet)
+  const containerBBuilder = new GenericContainer('stalwart-test-custom:latest')
     .withBindMounts([
       { source: volumeMountpoint, target: '/opt/stalwart/data' },
     ])
@@ -506,12 +506,64 @@ async function startStalwart(): Promise<{
     .withUser('root')
     // Wait for both HTTP (8080) and IMAP (143) ports to be listening
     // This is more reliable than log-string matching which varies by Stalwart version/mode
-    .withWaitStrategy(Wait.forListeningPorts())
-    // Default command from image includes --config /etc/stalwart/config.json
-    .start();
+    .withWaitStrategy(Wait.forListeningPorts());
 
-  // Attach log stream for Phase 2 - streams continuously from container start
-  await streamContainerLogs(containerB, 'stalwart-phase2.log');
+  // Start the container and attach log stream immediately
+  let containerB: StartedTestContainer;
+  try {
+    containerB = await containerBBuilder.start();
+    
+    // Attach log stream - this will capture all logs from container start
+    await streamContainerLogs(containerB, 'stalwart-phase2.log');
+    
+  } catch (err) {
+    // Wait strategy timed out or container failed to start
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[StalwartSetup] Phase 2 startup FAILED:', msg);
+    
+    // Capture additional diagnostics before re-throwing
+    try {
+      // Get the container ID from the builder if possible
+      // Note: This is a workaround - ideally we'd have access to the container ID
+      console.log('[StalwartSetup] Attempting to capture diagnostics...');
+      
+      // Try to list recent containers to find the failed one
+      const { stdout: recentContainers } = await execFileAsync('docker', [
+        'ps', '-a', '-n', '1', '--format', '{{.ID}} {{.Names}} {{.Status}}'
+      ]);
+      console.log('[StalwartSetup] Most recent container:', recentContainers.trim());
+      
+      // Try to get logs from the most recent container
+      const lines = recentContainers.trim().split('\n');
+      if (lines.length > 0 && lines[0]) {
+        const parts = lines[0].split(' ');
+        const containerId = parts[0];
+        if (containerId) {
+          console.log('[StalwartSetup] Fetching logs from failed container...');
+          try {
+            const { stdout: failedLogs } = await execFileAsync('docker', [
+              'logs', containerId, '--tail', '100'
+            ]);
+            console.log('[StalwartSetup] Failed container logs (last 100 lines):\n', failedLogs);
+            
+            // Write to a separate diagnostics file
+            const diagFile = path.join(TEST_LOGS_DIR, 'stalwart-phase2-diagnostics.log');
+            appendFileSync(diagFile, '=== FAILED CONTAINER LOGS ===\n');
+            appendFileSync(diagFile, failedLogs);
+            appendFileSync(diagFile, '\n=== END DIAGNOSTICS ===\n');
+          } catch (logErr) {
+            console.warn('[StalwartSetup] Could not fetch container logs:', logErr);
+          }
+        }
+      }
+    } catch (diagErr) {
+      console.warn('[StalwartSetup] Could not capture additional diagnostics:', diagErr);
+    }
+    
+    throw new Error(`Phase 2 failed to start: ${msg}`, { cause: err });
+  }
+  
+  // Log stream is already attached above
 
   console.log('[StalwartSetup] Container started, waiting for JMAP endpoint...');
   const stalwartHost = containerB.getHost();
