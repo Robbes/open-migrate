@@ -581,7 +581,7 @@ async function startStalwart(): Promise<{
               const diagFile = path.join(TEST_LOGS_DIR, 'stalwart-phase2.log');
               appendFileSync(diagFile, `\n=== FAILED ATTEMPT ${attempt} DIAGNOSTICS ===\n${failedLogs}\n=== END ATTEMPT ${attempt} ===\n`);
             }
-          } catch (err) { /* Log capture errors are non-fatal */ }
+          } catch { /* Log capture errors are non-fatal */ }
         }
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
@@ -596,9 +596,10 @@ async function startStalwart(): Promise<{
       const { stdout: allContainers } = await execFileAsync('docker', [
         'ps', '-a', '--filter', 'name=stalwart', '--format', '{{.ID}} {{.Names}}'
       ]);
-      const lines = allContainers.trim().split('\n').filter(l => l);
+      const lines = allContainers.trim().split('\n').filter((l): l is string => l.length > 0);
       if (lines.length > 0) {
-        const latestId = lines[lines.length - 1].split(' ')[0];
+        const latestLine = lines[lines.length - 1]!;
+        const latestId = latestLine.split(' ')[0];
         const { stdout: finalLogs } = await execFileAsync('docker', ['logs', latestId, '--tail', '200']);
         console.log('[StalwartSetup] Final failed container logs:\n', finalLogs);
         
