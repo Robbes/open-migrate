@@ -49,7 +49,7 @@ async function streamContainerLogs(
   
   console.log(`[TestLogs] Starting log stream to: ${logFilePath}`);
   
-  // Clear/create the log file
+  // Clear/create the log file with header
   try {
     appendFileSync(logFilePath, `\n=== ${logFileName} started at ${new Date().toISOString()} ===\n`);
   } catch (err) {
@@ -229,18 +229,6 @@ function ensureVolume(): void {
 }
 
 /**
- * Get the host path for a Docker volume.
- * This is needed for testcontainers bind mounts.
- */
-function getVolumeMountpoint(volumeName: string): string {
-  const stdout = execFileSync('docker', ['volume', 'inspect', volumeName], {
-    encoding: 'utf8',
-  });
-  const data = JSON.parse(stdout);
-  return data[0]?.Mountpoint || '/var/lib/docker/volumes/' + volumeName + '/_data';
-}
-
-/**
  * Wait for an HTTP endpoint to become available using manual polling.
  * This is more reliable than testcontainers' built-in HttpWaitStrategy for Stalwart.
  */
@@ -295,8 +283,7 @@ async function startStalwart(): Promise<{
 }> {
   // Ensure Docker volume exists for data persistence
   ensureVolume();
-  const volumeMountpoint = getVolumeMountpoint(STALWART_DATA_VOLUME);
-  console.log(`[StalwartSetup] Using Docker volume at: ${volumeMountpoint}`);
+  console.log('[StalwartSetup] Using Docker named volume:', STALWART_DATA_VOLUME);
 
   // Generate recovery admin credentials
   const recoveryPassword = 'provision_' + Math.random().toString(36).slice(2, 10);
@@ -312,10 +299,9 @@ async function startStalwart(): Promise<{
   const configJson = '{"@type":"RocksDb","path":"/opt/stalwart/data"}';
 
   // Phase 1: Provisioning container in recovery mode
+  // Use Docker-managed NAMED VOLUME (not bind mount) for consistent UID/permissions
   const containerA = await new GenericContainer('stalwart-test-custom:latest')
-    .withBindMounts([
-      { source: volumeMountpoint, target: '/opt/stalwart/data' },
-    ])
+    .withVolumes({ [STALWART_DATA_VOLUME]: '/opt/stalwart/data' })
     .withCopyContentToContainer([
       { content: configJson, target: '/etc/stalwart/config.json' },
     ])
@@ -483,18 +469,17 @@ async function startStalwart(): Promise<{
 
   // Phase 2: Production container with MINIMAL config
   // REUSE the same Docker volume from Phase 1 (contains provisioned accounts in DB)
-  console.log('[StalwartSetup] Phase 2 using same volume:', volumeMountpoint);
+  console.log('[StalwartSetup] Phase 2 using Docker volume:', STALWART_DATA_VOLUME);
 
   // MINIMAL config per FIXED TRUTH: only DataStore, no http/imap/listeners/accounts/domains
   // Accounts/domains are in the DB from Phase 1 provisioning
   // Listeners auto-start in normal mode (no recovery mode)
   const normalConfig = '{"@type":"RocksDb","path":"/opt/stalwart/data"}';
 
-  // Create container first (don't start yet)
+  // Create container using Docker-managed NAMED VOLUME (not bind mount)
+  // This ensures consistent UID/permissions across both phases
   const containerBBuilder = new GenericContainer('stalwart-test-custom:latest')
-    .withBindMounts([
-      { source: volumeMountpoint, target: '/opt/stalwart/data' },
-    ])
+    .withVolumes({ [STALWART_DATA_VOLUME]: '/opt/stalwart/data' })
     .withCopyContentToContainer([
       { content: normalConfig, target: '/etc/stalwart/config.json' },
     ])
@@ -522,42 +507,58 @@ async function startStalwart(): Promise<{
     console.error('[StalwartSetup] Phase 2 startup FAILED:', msg);
     
     // Capture additional diagnostics before re-throwing
+    // CRITICAL: Use containerB.getId() if available, otherwise try to find the failed container
     try {
-      // Get the container ID from the builder if possible
-      // Note: This is a workaround - ideally we'd have access to the container ID
-      console.log('[StalwartSetup] Attempting to capture diagnostics...');
+      let containerId: string | undefined;
       
-      // Try to list recent containers to find the failed one
-      const { stdout: recentContainers } = await execFileAsync('docker', [
-        'ps', '-a', '-n', '1', '--format', '{{.ID}} {{.Names}} {{.Status}}'
-      ]);
-      console.log('[StalwartSetup] Most recent container:', recentContainers.trim());
+      // If containerB was partially created, use its ID
+      if (containerB) {
+        containerId = containerB.getId();
+        console.log('[StalwartSetup] Using containerB ID:', containerId);
+      } else {
+        // Fallback: try to find the most recently created container
+        console.log('[StalwartSetup] containerB not available, searching for failed container...');
+        const { stdout: recentContainers } = await execFileAsync('docker', [
+          'ps', '-a', '-n', '1', '--format', '{{.ID}} {{.Names}}'
+        ]);
+        console.log('[StalwartSetup] Most recent container:', recentContainers.trim());
+        const lines = recentContainers.trim().split('\n');
+        if (lines.length > 0 && lines[0]) {
+          containerId = lines[0].split(' ')[0];
+        }
+      }
       
-      // Try to get logs from the most recent container
-      const lines = recentContainers.trim().split('\n');
-      if (lines.length > 0 && lines[0]) {
-        const parts = lines[0].split(' ');
-        const containerId = parts[0];
-        if (containerId) {
-          console.log('[StalwartSetup] Fetching logs from failed container...');
+      if (containerId) {
+        console.log('[StalwartSetup] Fetching logs from failed container:', containerId);
+        try {
+          const { stdout: failedLogs } = await execFileAsync('docker', [
+            'logs', containerId, '--tail', '200'
+          ]);
+          console.log('[StalwartSetup] Failed container logs (last 200 lines):\n', failedLogs);
+          
+          // Write to a separate diagnostics file
+          const diagFile = path.join(TEST_LOGS_DIR, 'stalwart-phase2-diagnostics.log');
+          appendFileSync(diagFile, `=== FAILED CONTAINER LOGS (Container: ${containerId}) ===\n`);
+          appendFileSync(diagFile, failedLogs);
+          
+          // Also cat the RocksDB log from inside the container
           try {
-            const { stdout: failedLogs } = await execFileAsync('docker', [
-              'logs', containerId, '--tail', '100'
+            const { stdout: rocksdbLog } = await execFileAsync('docker', [
+              'exec', containerId, 'cat', '/opt/stalwart/data/LOG'
             ]);
-            console.log('[StalwartSetup] Failed container logs (last 100 lines):\n', failedLogs);
-            
-            // Write to a separate diagnostics file
-            const diagFile = path.join(TEST_LOGS_DIR, 'stalwart-phase2-diagnostics.log');
-            appendFileSync(diagFile, '=== FAILED CONTAINER LOGS ===\n');
-            appendFileSync(diagFile, failedLogs);
-            appendFileSync(diagFile, '\n=== END DIAGNOSTICS ===\n');
-          } catch (logErr) {
-            console.warn('[StalwartSetup] Could not fetch container logs:', logErr);
+            appendFileSync(diagFile, `\n=== RocksDB LOG from container ===\n${rocksdbLog}\n`);
+          } catch (rocksErr) {
+            const rocksMsg = rocksErr instanceof Error ? rocksErr.message : String(rocksErr);
+            appendFileSync(diagFile, `\n=== RocksDB LOG ===\nCould not read: ${rocksMsg}\n`);
           }
+          
+          appendFileSync(diagFile, '\n=== END DIAGNOSTICS ===\n');
+        } catch (logErr) {
+          console.warn('[TestLogs] Could not fetch container logs:', logErr);
         }
       }
     } catch (diagErr) {
-      console.warn('[StalwartSetup] Could not capture additional diagnostics:', diagErr);
+      console.warn('[TestLogs] Could not capture additional diagnostics:', diagErr);
     }
     
     throw new Error(`Phase 2 failed to start: ${msg}`, { cause: err });
