@@ -524,9 +524,9 @@ async function startStalwart(): Promise<{
   // Listeners auto-start in normal mode (no recovery mode)
   const normalConfig = '{"@type":"RocksDb","path":"/opt/stalwart/data"}';
 
-  // Create container using Docker-managed NAMED VOLUME (not host bind mount)
-  // This ensures consistent UID/permissions across both phases
-  // CRITICAL: Attach log consumer BEFORE start() to capture logs from container creation
+  // Phase 2: Normal mode container (no recovery mode env vars)
+  // Uses SAME bind mount approach as Phase 1 (host path -> container path)
+  // withUser('root') sidesteps any UID/permission issues with the bind-mounted directory
   const containerBBuilder = new GenericContainer('stalwart-test-custom:latest')
     .withBindMounts([
       { source: STALWART_DATA_VOLUME, target: '/opt/stalwart/data' },
@@ -540,6 +540,7 @@ async function startStalwart(): Promise<{
     .withExposedPorts(8080, 143)
     .withStartupTimeout(180000)
     .withUser('root')
+    .withCommand(['--config', '/etc/stalwart/config.json'])
     // Attach log consumer BEFORE start() to capture ALL logs including startup failures
     .withLogConsumer(createFileLogConsumer('stalwart-phase2.log'))
     // Wait for both HTTP (8080) and IMAP (143) ports to be listening
