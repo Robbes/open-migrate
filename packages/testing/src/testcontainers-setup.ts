@@ -599,8 +599,8 @@ async function startStalwart(): Promise<{
       const lines = allContainers.trim().split('\n').filter((l): l is string => l.length > 0);
       if (lines.length > 0) {
         const latestLine = lines[lines.length - 1]!;
-        const latestId = latestLine.split(' ')[0];
-        const { stdout: finalLogs } = await execFileAsync('docker', ['logs', latestId, '--tail', '200']);
+        const latestId = latestLine.split(' ')[0]!;
+        const { stdout: finalLogs } = await execFileAsync('docker', ['logs', latestId, '--tail', '200'] as string[]);
         console.log('[StalwartSetup] Final failed container logs:\n', finalLogs);
         
         const diagFile = path.join(TEST_LOGS_DIR, 'stalwart-phase2-diagnostics.log');
