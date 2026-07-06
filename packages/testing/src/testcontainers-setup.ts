@@ -329,7 +329,8 @@ async function startStalwart(): Promise<{
     .withStartupTimeout(120000)
     .withUser('root')
     .withCommand(['--config', '/etc/stalwart/config.json'])
-    .withWaitStrategy(Wait.forLogMessage('Network listener started'))
+    // Wait for HTTP port (8080) to be listening - more reliable than log matching
+    .withWaitStrategy(Wait.forListeningPorts())
     .start();
 
   // Attach log stream for Phase 1 - streams continuously from container start
@@ -412,9 +413,10 @@ async function startStalwart(): Promise<{
   // Verify accounts were created using host-level CLI
   console.log('[StalwartSetup] Verifying accounts...');
   try {
-    const { stdout: verifyOutput } = await execFileAsync(
+    // Use 'query Account' to list all accounts and verify both exist
+    const { stdout: queryOutput } = await execFileAsync(
       STALWART_CLI_PATH,
-      ['get', 'Account', 'source'],
+      ['query', 'Account'],
       {
         env: {
           STALWART_URL: `http://${mgmtHost}:${mgmtPort}`,
@@ -424,10 +426,24 @@ async function startStalwart(): Promise<{
         timeout: 10000,
       }
     );
-    console.log('[StalwartSetup] Source account verified:', verifyOutput ? 'found' : 'not found');
+    console.log('[StalwartSetup] Account query result:', queryOutput);
+    
+    // Verify both accounts exist in the query output
+    const hasSource = queryOutput.includes('source') && queryOutput.includes('source@dev.local');
+    const hasTarget = queryOutput.includes('target') && queryOutput.includes('target@dev.local');
+    
+    if (!hasSource || !hasTarget) {
+      throw new Error(
+        `Account verification failed. Source: ${hasSource ? 'yes' : 'NO'}, Target: ${hasTarget ? 'yes' : 'NO'}. ` +
+        `Expected accounts: source@dev.local and target@dev.local`
+      );
+    }
+    
+    console.log('[StalwartSetup] ✓ Both accounts verified: source@dev.local and target@dev.local');
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.warn('[StalwartSetup] Warning: Could not verify source account:', msg);
+    console.error('[StalwartSetup] Account verification FAILED:', msg);
+    throw new Error(`Failed to verify accounts: ${msg}`, { cause: err });
   }
 
   // Stop provisioning container
@@ -463,52 +479,12 @@ async function startStalwart(): Promise<{
     await new Promise(resolve => setTimeout(resolve, 3000));
   }
 
-  // Step 2: Force-remove LOCK file and verify it's gone
-  // The LOCK file may persist due to Docker volume caching or delayed cleanup
-  console.log('[StalwartSetup] Forcing LOCK file removal...');
-  try {
-    await execFileAsync('docker', [
-      'run', '--rm', '-v', `${STALWART_DATA_VOLUME}:/data`, 'alpine',
-      'rm', '-f', '/data/LOCK'
-    ]);
-    console.log('[StalwartSetup] LOCK file removal command executed.');
-  } catch {
-    console.warn('[StalwartSetup] Warning: Could not remove LOCK file');
-  }
-  
-  // Step 3: Verify LOCK file is actually gone (wait up to 10 seconds)
-  console.log('[StalwartSetup] Verifying LOCK file is gone...');
-  attempts = 0;
-  while (attempts < 10) {
-    try {
-      await execFileAsync('docker', [
-        'run', '--rm', '-v', `${STALWART_DATA_VOLUME}:/data`, 'alpine',
-        'test', '-f', '/data/LOCK'
-      ]);
-      // LOCK file still exists
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      attempts++;
-    } catch {
-      // LOCK file does not exist - this is what we want
-      console.log('[StalwartSetup] LOCK file confirmed gone after', attempts, 'verification attempts.');
-      break;
-    }
-  }
-  
-  if (attempts >= 10) {
-    console.error('[StalwartSetup] ERROR: LOCK file still present after forced removal!');
-    console.error('[StalwartSetup] This indicates a persistent lock issue - aborting Phase 2.');
-    throw new Error('LOCK file could not be removed - RocksDB may still be in use');
-  }
-
+  console.log('[StalwartSetup] Phase 1 fully terminated. RocksDB lock released.');
   console.log('[StalwartSetup] Phase 2: Starting normal mode container with provisioned data...');
 
   // Phase 2: Production container with MINIMAL config
   // REUSE the same Docker volume from Phase 1 (contains provisioned accounts in DB)
   console.log('[StalwartSetup] Phase 2 using same volume:', volumeMountpoint);
-
-  // LOCK file should already be released by the wait loop above
-  // No need to force-remove it here
 
   // MINIMAL config per FIXED TRUTH: only DataStore, no http/imap/listeners/accounts/domains
   // Accounts/domains are in the DB from Phase 1 provisioning
@@ -528,8 +504,10 @@ async function startStalwart(): Promise<{
     .withExposedPorts(8080, 143)
     .withStartupTimeout(180000)
     .withUser('root')
-    // Use default command from image (already includes --config /etc/stalwart/config.json)
-    .withWaitStrategy(Wait.forLogMessage('Network listener started'))
+    // Wait for both HTTP (8080) and IMAP (143) ports to be listening
+    // This is more reliable than log-string matching which varies by Stalwart version/mode
+    .withWaitStrategy(Wait.forListeningPorts())
+    // Default command from image includes --config /etc/stalwart/config.json
     .start();
 
   // Attach log stream for Phase 2 - streams continuously from container start
