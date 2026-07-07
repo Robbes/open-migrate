@@ -212,6 +212,7 @@ export class ImapSource implements SourceConnector {
         name: string;
         uidvalidity: number; 
         uidnext?: number;
+        messages?: number; // Total number of messages in the mailbox
         flags: string[];
         readOnly: boolean;
       };
@@ -253,7 +254,7 @@ export class ImapSource implements SourceConnector {
       console.log('[DEBUG listSince] searchCriteria:', searchCriteria);
       console.log('[DEBUG listSince] fetchCriteria:', fetchCriteria);
       console.log('[DEBUG listSince] box.uidnext:', box.uidnext);
-      console.log('[DEBUG listSince] box.total:', (box as unknown as { messagesTotal?: number }).messagesTotal ?? box.total);
+      console.log('[DEBUG listSince] box.total:', box.messages ?? 'unknown');
 
       const results = await conn.search(searchCriteria, fetchCriteria);
       console.log('[DEBUG listSince] search results count:', results?.length);
