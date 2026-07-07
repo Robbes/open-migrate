@@ -45,7 +45,8 @@ async function runMigration(postgresUrl: string): Promise<void> {
       
       if (attempt === maxRetries) {
         await sql.end();
-        throw new Error(`Migration failed after ${maxRetries} attempts: ${error.message}`, { cause: error });
+        // Re-throw the original error to preserve the cause chain
+        throw error;
       }
       
       await sql.end();
