@@ -12,6 +12,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import type { ImapSimpleOptions } from 'imap-simple';
+import { sql } from 'drizzle-orm';
 import { createPgDb } from '../../../packages/ledger/src/db.ts';
 import { PgLedger } from '../../../packages/ledger/src/ledger.ts';
 import { ImapSource } from '../../../packages/connectors/src/imap-source.ts';
@@ -73,13 +74,15 @@ async function waitForSchema(maxRetries = 30, delayMs = 1000): Promise<void> {
   
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const result = await (client as { sql: unknown }).sql<{ exists: boolean }>`
+      const result = await client.execute(sql`
         SELECT EXISTS (
           SELECT 1 FROM information_schema.tables 
           WHERE table_schema = 'public' AND table_name = 'mailbox'
         ) as exists
-      `;
-      if (result[0]?.exists) {
+      `);
+      // RowList is iterable, get first row
+      const rows = Array.from(result);
+      if (rows[0]?.exists) {
         return;
       }
     } catch {
@@ -175,22 +178,22 @@ async function cleanDatabaseState(): Promise<void> {
   
   try {
     // Delete cursor entries for this mapping
-    await (client as { sql: unknown }).sql`
+    await client.execute(sql`
       DELETE FROM cursor 
       WHERE mapping_id = ${REINDEX_MAPPING_ID}
-    `;
+    `);
     
     // Delete ledger/item entries for this tenant
-    await (client as { sql: unknown }).sql`
+    await client.execute(sql`
       DELETE FROM item 
       WHERE tenant_id = ${REINDEX_TENANT_ID}
-    `;
+    `);
     
     // Delete mailbox mappings for this tenant
-    await (client as { sql: unknown }).sql`
+    await client.execute(sql`
       DELETE FROM mailbox 
       WHERE tenant_id = ${REINDEX_TENANT_ID}
-    `;
+    `);
     
     console.log('[Cleanup] Database state cleaned for tenant', REINDEX_TENANT_ID);
   } finally {
