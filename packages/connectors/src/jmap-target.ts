@@ -185,8 +185,12 @@ export class JmapTargetWriter implements TargetWriter {
       throw new Error(`JMAP API error: ${error.type ?? 'unknown'} - ${error.description ?? 'no description'}`);
     }
 
-    const result = await response.json() as { methodResponses?: unknown[] };
-    return result.methodResponses?.[0]?.[1] as T;
+    const result = await response.json() as { methodResponses?: Array<unknown[]> };
+    const firstResponse = result.methodResponses?.[0];
+    if (!firstResponse || !Array.isArray(firstResponse) || firstResponse.length < 2) {
+      throw new Error('Invalid JMAP response format');
+    }
+    return firstResponse[1] as T;
   }
 
   /**

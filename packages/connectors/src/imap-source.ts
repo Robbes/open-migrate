@@ -253,13 +253,15 @@ export class ImapSource implements SourceConnector {
       console.log('[DEBUG listSince] searchCriteria:', searchCriteria);
       console.log('[DEBUG listSince] fetchCriteria:', fetchCriteria);
       console.log('[DEBUG listSince] box.uidnext:', box.uidnext);
-      console.log('[DEBUG listSince] box.total:', box.messagesTotal);
+      console.log('[DEBUG listSince] box.total:', (box as unknown as { messagesTotal?: number }).messagesTotal ?? box.total);
 
       const results = await conn.search(searchCriteria, fetchCriteria);
       console.log('[DEBUG listSince] search results count:', results?.length);
       if (results && results.length > 0) {
-        console.log('[DEBUG listSince] first result UID:', results[0].attributes?.uid);
-        console.log('[DEBUG listSince] last result UID:', results[results.length - 1]?.attributes?.uid);
+        const firstUid = results[0]?.attributes?.uid;
+        const lastUid = results[results.length - 1]?.attributes?.uid;
+        console.log('[DEBUG listSince] first result UID:', firstUid);
+        console.log('[DEBUG listSince] last result UID:', lastUid);
       }
 
       const items: MailItem[] = [];
