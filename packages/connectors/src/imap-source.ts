@@ -132,22 +132,13 @@ export class ImapSource implements SourceConnector {
         conn.imap.getBoxes as () => Promise<Record<string, MailboxInfo>>
       )();
 
-      // DEBUG: Log the raw response
-      console.log('[DEBUG listFolders] getBoxes() returned:', list);
-      console.log('[DEBUG listFolders] list type:', typeof list);
-      console.log('[DEBUG listFolders] list is undefined:', list === undefined);
-      console.log('[DEBUG listFolders] list is null:', list === null);
-      console.log('[DEBUG listFolders] list keys:', list ? Object.keys(list) : 'N/A');
-
       // Handle case where getBoxes returns undefined - this can happen with some IMAP servers
       // that don't include INBOX in the LIST response or use a different response format.
       // In this case, we'll try to open INBOX directly and include it in the folder list.
       if (!list) {
-        console.log('[DEBUG listFolders] getBoxes() returned undefined, attempting to open INBOX directly...');
         
         try {
           await conn.openBox('INBOX');
-          console.log('[DEBUG listFolders] Successfully opened INBOX');
           
           // Return INBOX as the only folder
           return [{
@@ -156,8 +147,6 @@ export class ImapSource implements SourceConnector {
             specialUse: 'inbox' as SpecialUse,
           }];
         } catch (openErr) {
-          const openMsg = openErr instanceof Error ? openErr.message : String(openErr);
-          console.log('[DEBUG listFolders] Failed to open INBOX:', openMsg);
           throw new Error(
             'IMAP getBoxes() returned undefined and INBOX cannot be opened. ' +
             'This indicates a server-side issue or missing account configuration.',
@@ -193,18 +182,7 @@ export class ImapSource implements SourceConnector {
   ): Promise<{ items: ReadonlyArray<MailItem>; nextCursor: SyncCursor }> {
     const conn = await this.connect();
     try {
-      console.log(`[DEBUG listSince] Opening box: ${folder.path}`);
-      console.log('[DEBUG listSince] conn.imap state before openBox:', {
-        state: conn.imap.state,
-        _box: (conn.imap as unknown as { _box?: unknown })._box
-      });
       await conn.openBox(folder.path);
-      console.log('[DEBUG listSince] openBox completed');
-      console.log('[DEBUG listSince] conn.imap state after openBox:', {
-        state: conn.imap.state,
-        _box: (conn.imap as unknown as { _box?: unknown })._box,
-        box: (conn.imap as unknown as { box?: unknown }).box
-      });
 
       // Get UIDVALIDITY from the opened box
       // Note: node-imap uses _box (with underscore) internally
@@ -217,7 +195,6 @@ export class ImapSource implements SourceConnector {
         readOnly: boolean;
       };
       const box = (conn.imap as unknown as { _box?: ImapBox })._box;
-      console.log('[DEBUG listSince] _box object:', box);
       if (!box) {
         throw new Error("No mailbox opened");
       }
@@ -230,16 +207,13 @@ export class ImapSource implements SourceConnector {
       if (cursor) {
         try {
           const decoded = decodeImapCursor(cursor);
-          console.log('[DEBUG listSince] cursor decoded:', decoded);
           if (decoded.uidValidity === uidValidity) {
             // Only fetch messages with UID >= UIDNEXT from the cursor
             // Fetch ALL messages and filter by UID manually (more reliable than range search)
             searchCriteria = ['ALL'];
             uidNext = decoded.uidNext;
-            console.log('[DEBUG listSince] Fetching all messages, will filter by UID >=', uidNext);
           }
-        } catch (err) {
-          console.log('[DEBUG listSince] Invalid cursor, doing full scan:', err);
+        } catch {
           // Invalid cursor, do a full scan
         }
       }
@@ -251,19 +225,7 @@ export class ImapSource implements SourceConnector {
         markSeen: false,
       };
 
-      console.log('[DEBUG listSince] searchCriteria:', searchCriteria);
-      console.log('[DEBUG listSince] fetchCriteria:', fetchCriteria);
-      console.log('[DEBUG listSince] box.uidnext:', box.uidnext);
-      console.log('[DEBUG listSince] box.total:', box.messages ?? 'unknown');
-
       const results = await conn.search(searchCriteria, fetchCriteria);
-      console.log('[DEBUG listSince] search results count:', results?.length);
-      if (results && results.length > 0) {
-        const firstUid = results[0]?.attributes?.uid;
-        const lastUid = results[results.length - 1]?.attributes?.uid;
-        console.log('[DEBUG listSince] first result UID:', firstUid);
-        console.log('[DEBUG listSince] last result UID:', lastUid);
-      }
 
       // Filter results by UID if we're using a cursor
       let filteredResults = results || [];
@@ -273,52 +235,19 @@ export class ImapSource implements SourceConnector {
           if (decoded.uidValidity === uidValidity) {
             filteredResults = filteredResults.filter(msg => {
               const uid = msg.attributes?.uid;
-              // Ensure UID is within valid range: >= cursor.uidNext and < box.uidnext
-              // This prevents returning stale UIDs that don't exist
-              return uid >= decoded.uidNext && uid < (box.uidnext || Infinity);
+              // Include all messages with UID >= cursor.uidNext
+              return uid >= decoded.uidNext;
             });
-            console.log('[DEBUG listSince] Filtered to', filteredResults.length, 'messages with UID >=', decoded.uidNext, 'and <', box.uidnext);
           }
         } catch {
           // Invalid cursor, use all results
         }
       }
 
-      // Re-verify that each message actually exists by attempting to fetch headers
-      // This handles the case where the IMAP server returns stale UIDs in the search results
-      const verifiedResults = [];
-      for (const msg of filteredResults) {
-        const uid = msg.attributes?.uid;
-        if (uid) {
-          // Quick existence check - try to fetch just the envelope (headers)
-          try {
-            const verifyResults = await conn.search([`${uid}`], {
-              envelope: true,  // Fetch envelope/headers only
-              struct: false,
-              bodies: '',
-            });
-            if (verifyResults && verifyResults.length > 0) {
-              verifiedResults.push(msg);
-            } else {
-              console.log('[DEBUG listSince] Skipping non-existent UID:', uid);
-            }
-          } catch (err) {
-            console.log('[DEBUG listSince] Error verifying UID', uid, ':', err);
-            // If verification fails, skip the message
-          }
-        }
-      }
-      filteredResults = verifiedResults;
-      console.log('[DEBUG listSince] After verification, have', filteredResults.length, 'messages');
-
       const items: MailItem[] = [];
       let maxUidNext = uidNext;
 
       for (const msg of filteredResults) {
-        console.log('[DEBUG listSince] processing message:', {
-          hasAttributes: !!msg.attributes,
-          attributes: msg.attributes,
-        });
         const attrs = msg.attributes;
 
         // Extract Message-ID from envelope
@@ -371,18 +300,19 @@ export class ImapSource implements SourceConnector {
       await conn.openBox(item.folder.path);
 
       const uid = this.extractUidFromSourceRef(item.sourceRef);
-      console.log('[DEBUG fetch] Fetching UID:', uid, 'from folder:', item.folder.path);
       
       // Fetch the raw RFC822 message using the UID
       // Retry up to 3 times to handle potential race conditions where the message
       // hasn't been fully committed to the IMAP server yet
       let results: Array<{ attributes: { uid: number }; parts: Array<{ body: unknown }> }> = [];
       for (let attempt = 1; attempt <= 3; attempt++) {
-        results = await conn.search([`${uid}`], {
+        // Search for the specific UID using the correct node-imap criteria format
+        // node-imap expects an array of criteria, where each criterion is either a string or an array
+        // For UID search, we need to nest it: [['UID', String(uid)]]
+        results = await conn.search([['UID', String(uid)]] as unknown as string[], {
           bodies: '',  // Fetch entire message body
           markSeen: false,
         });
-        console.log('[DEBUG fetch] search results count:', results?.length, '(attempt', attempt + ')');
         if (results.length > 0) {
           break;
         }
@@ -410,8 +340,6 @@ export class ImapSource implements SourceConnector {
       const rfc822Buffer = Buffer.isBuffer(rfc822Data)
         ? rfc822Data
         : Buffer.from(rfc822Data as string);
-
-      console.log('[DEBUG fetch] Got message with', rfc822Buffer.length, 'bytes');
 
       return {
         item,
