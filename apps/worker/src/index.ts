@@ -11,13 +11,13 @@
 import {
   parseMappingConfig,
   type MappingConfig,
-  type ReconcileDeps,
 } from '@openmig/shared';
 import { InProcessScheduler } from '@openmig/scheduler';
 import { runShadowPass } from '@openmig/core';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { buildDeps } from './build-deps.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -51,6 +51,10 @@ Examples:
 
   # Run in scheduled mode (respects cron from config)
   node --loader ts-node/esm apps/worker/src/index.ts --config mapping.json
+
+Environment Variables:
+  DATABASE_URL         PostgreSQL connection string (required)
+  OAUTH2_ACCESS_TOKEN  OAuth2 access token for O365 (if using XOAUTH2)
 `);
       process.exit(0);
     }
@@ -69,23 +73,6 @@ function loadConfig(configPath: string): MappingConfig {
   const absolutePath = join(__dirname, configPath);
   const text = readFileSync(absolutePath, 'utf-8');
   return parseMappingConfig(text);
-}
-
-/** Build the dependency bundle for the shadow pass. */
-async function buildDeps(_config: MappingConfig): Promise<ReconcileDeps> {
-  // TODO: Implement actual dependency injection
-  // For now, we'll create stub implementations that throw errors
-  // This is a placeholder - the real implementation would connect to:
-  // - Postgres for ledger
-  // - IMAP source connector
-  // - JMAP target writer
-  // - Cursor store
-
-  throw new Error(
-    'Dependency injection not yet implemented. ' +
-    'This worker requires: ledger (Postgres), source (IMAP), target (JMAP), cursors (Postgres). ' +
-    'See workplan 0001 for the full dependency bundle definition.'
-  );
 }
 
 /** Main entry point. */

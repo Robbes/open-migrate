@@ -75,9 +75,15 @@ importers:
 
   apps/worker:
     dependencies:
+      '@openmig/connectors':
+        specifier: workspace:*
+        version: link:../../packages/connectors
       '@openmig/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@openmig/ledger':
+        specifier: workspace:*
+        version: link:../../packages/ledger
       '@openmig/scheduler':
         specifier: workspace:*
         version: link:../../packages/scheduler

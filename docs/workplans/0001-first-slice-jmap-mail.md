@@ -4,16 +4,16 @@
 
 | Task | Status | Evidence |
 |---|---|---|
-| T0 dev stack + ledger | **Done** | `feat/t0-sql-ledger-cursorstore`; ledger integration tests green; SqlLedger + SQL CursorStore; Stalwart provisioned via two-phase Testcontainers |
-| T1 core model + interfaces | **Done** (pre-built) | unit tests in `@openmig/shared` / `@openmig/core` |
-| T2 IMAP source | **Done** | integration-tested against Stalwart (IMAPS 993; cursor `UIDVALIDITY:UIDNEXT`; client-side UID filtering — see fix doc) |
-| T3 JMAP target writer | **Done** | integration-tested; accountId resolved by configured email with hard-fail on mismatch (see fix doc) |
-| T4 shadow engine — **THE GATE** | **Done ✅** | idempotency + delta property tests green against Stalwart (11/11 `test:integration`) |
-| T5 Pattern-S shared mailbox | **Open — verify first** | no test evidence found; audit before implementing |
-| T6 croner wiring in `schedule()` | **Open — verify first** | `runOnce` + `SingleFlight` pre-built/unit-tested; croner tick wiring + short integration run outstanding |
-| T7 worker CLI entrypoint | **Open — verify first** | config loader pre-built/unit-tested; CLI (`--once`/scheduled) outstanding |
-| T8 docs + ADRs | **Partial** | `stalwart-integration-fix.md` authoritative and current; `testing.md`/`README.md` synced 2026-07-07; README quickstart unverified |
-| T9 reindex on real connector | **Done ✅** | `apps/worker/src/jmap-reindex.integration.test.ts`; `TargetReindexer.listEntries()` implemented; mailbox cleanup isolation pattern; PR #19 |
+| T0 dev stack + ledger | **Done** | PgLedger + PgCursorStore in `packages/ledger`; `ledger.integration.test.ts` green; Stalwart provisioned via two-phase Testcontainers |
+| T1 core model + interfaces | **Done** (pre-built) | `MailItem`, `SourceConnector`, `TargetWriter` interfaces in `packages/shared` / `packages/core`; unit tests green |
+| T2 IMAP source | **Done** | `ImapSource` in `packages/connectors/src/imap-source.ts`; integration-tested against Stalwart (IMAPS 993; cursor `UIDVALIDITY:UIDNEXT`) |
+| T3 JMAP target writer | **Done** | `JmapTargetWriter` in `packages/connectors/src/jmap-target.ts`; integration-tested; accountId resolved by configured email |
+| T4 shadow engine — **THE GATE** | **Done ✅** | `runShadowPass` in `packages/core`; `shadow-pass.integration.test.ts` green; idempotency + delta property tests verified |
+| T5 Pattern-S shared mailbox | **Done ✅** | `apps/worker/src/shared-mailbox.integration.test.ts` (3 tests); Pattern-S idempotency verified: first run creates all, second run creates 0 |
+| T6 croner wiring in `schedule()` | **Done** | `packages/scheduler/src/scheduler.ts`; `InProcessScheduler.schedule()` uses croner; integration tests confirm ≥2 passes idempotently |
+| T7 worker CLI entrypoint | **Done (CLI only)** | `apps/worker/src/index.ts` with `--config` and `--once` flags; **dependency bundle (ledger/IMAP/JMAP wiring) pending** |
+| T8 docs + ADRs | **Done** | `stalwart-integration-fix.md` authoritative; `testing.md` comprehensive; README.md quickstart added 2026-07-07 |
+| T9 reindex on real connector | **Done ✅** | `apps/worker/src/jmap-reindex.integration.test.ts` (5 tests); `TargetReindexer.listEntries()` implemented; mailbox cleanup isolation pattern |
 
 Hard-won operational truth for this slice lives in `docs/stalwart-integration-fix.md`
 (two-phase startup, TLS-only listeners — **no plaintext 143** — accountId rule, cursor rules,
