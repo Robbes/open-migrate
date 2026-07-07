@@ -1,0 +1,27 @@
+{
+  "tenantId": "test-tenant",
+  "mappingId": "test-mapping-001",
+  "source": {
+    "type": "imap-oauth2",
+    "host": "outlook.office365.com",
+    "port": 993,
+    "user": "test@example.com",
+    "auth": {
+      "kind": "xoauth2",
+      "tokenFromEnv": "OAUTH2_TOKEN"
+    }
+  },
+  "target": {
+    "type": "jmap",
+    "baseUrl": "https://jmap.example.com",
+    "user": "test@example.com",
+    "auth": {
+      "kind": "bearer",
+      "tokenFromEnv": "JMAP_TOKEN"
+    }
+  },
+  "schedule": {
+    "cron": "0 */6 * * *"
+  },
+  "concurrency": 4
+}
