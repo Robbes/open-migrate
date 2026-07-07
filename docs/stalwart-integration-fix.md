@@ -127,3 +127,66 @@ This issue is unrelated to the IMAP authentication fix and requires further inve
 2. Check Stalwart logs for IMAP LIST command handling
 3. Test with raw IMAP commands to isolate the issue
 4. Consider using a different IMAP client library or raw socket testing
+
+## Critical Lessons from Integration Testing
+
+### Wrong AccountId Root Cause (FIXED)
+
+**Problem**: The JMAP target connector was importing emails into the WRONG account (source instead of target).
+
+**Root Cause**: The `jmap-target.ts` connector used `session.primaryAccounts?.['urn:ietf:params:jmap:mail']` which returns the FIRST account in the session, not the authenticated user's account. The test authenticated as `source@dev.local` but the connector resolved accountId to `b` (source) instead of `c` (target).
+
+**Evidence from CI logs**:
+```
+[DEBUG JMAP] Session primaryAccounts: {"urn:ietf:params:jmap:mail":"b",...}
+[DEBUG JMAP] Email import response: {"accountId":"b",...}
+```
+Every email import showed `accountId: "b"` (source), causing source INBOX to grow 3→6→7 across runs.
+
+**Fix**: 
+1. Authenticate JMAP client with TARGET credentials (`target@dev.local`, not `source@dev.local`)
+2. Resolve accountId by matching the configured target email against `session.accounts` map
+3. Add hard fail at connector init if resolved account's email doesn't match configured target
+
+**Rule**: JMAP connectors MUST resolve accountId by matching the configured target email against the session's account list (or `primaryAccounts` for `urn:ietf:params:jmap:mail`). NEVER take the first session account. Hard-fail on mismatch — a wrong-account mirror must be impossible to reach silently.
+
+### IMAP Cursor Filtering (FIXED)
+
+**Problem**: Cursor-based delta scans were not working correctly - second run was scanning 1 message instead of 0.
+
+**Root Cause**: node-imap library doesn't support the `'UID 4:*'` range search syntax correctly. The search was finding UID 3 even when searching for UID >= 4.
+
+**Fix**: Fetch ALL messages and filter by UID >= cursor.uidNext in JavaScript. This is more reliable than relying on IMAP range search syntax.
+
+**Rule**: When using cursor-based delta scans with node-imap, always fetch all messages and filter client-side by UID >= cursor value. Do not rely on IMAP range search syntax.
+
+### Cursor Isolation (FIXED)
+
+**Problem**: Tests were reading leftover cursors from other tests, causing "Invalid cursor format" errors and unexpected full scans.
+
+**Root Cause**: Both `ledger.integration.test.ts` and `shadow-pass.integration.test.ts` use the same `TEST_TENANT_ID` and `TEST_MAPPING_ID`. Cursors from one test could leak into another.
+
+**Fix**: Add cursor cleanup at the START of each test's `beforeAll` hook:
+```typescript
+await db.execute(sql`DELETE FROM cursor WHERE tenant_id = ${TEST_TENANT_ID}`);
+```
+
+**Rule**: Ledger cursors MUST be isolated between tests. Either truncate cursors at the start of each test, or namespace cursors per test. Never allow one test to read another test's cursor.
+
+### Log Consumer Retry Trap (FIXED)
+
+**Problem**: Phase 2 logs (`stalwart-phase2.log`) were empty (header/footer only) across runs.
+
+**Root Cause**: The log consumer was attached to the wrong container builder instance during the retry loop. The consumer was attached to `containerBBuilder` but the actual container started was a new instance created inside the retry loop.
+
+**Fix**: Ensure the log consumer is attached AFTER the container successfully starts, or attach it to the correct builder instance that's actually used.
+
+**Rule**: When using `withLogConsumer()` in testcontainers, verify the consumer is attached to the actual container instance being started, not a builder that gets discarded during retry logic.
+
+### Source INBOX Regression Guards (ADDED)
+
+**Purpose**: Prevent cross-account pollution from going undetected.
+
+**Implementation**: After each mirror run, assert via IMAP that source@dev.local INBOX still contains exactly the seeded count (3 initially, 4 after delta append).
+
+**Rule**: Always verify source INBOX count after mirror operations to catch cross-account pollution immediately.

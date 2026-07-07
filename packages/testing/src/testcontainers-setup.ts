@@ -560,8 +560,10 @@ async function startStalwart(): Promise<{
       console.log(`[StalwartSetup] Phase 2 startup attempt ${attempt}/${maxRetries}...`);
       containerB = await containerBBuilder.start();
       
-      // Log stream is already attached via withLogConsumer above
-      console.log('[StalwartSetup] Phase 2 container started successfully.');
+      // CRITICAL: Also attach a log stream AFTER successful start to ensure logs are captured
+      // The withLogConsumer on the builder may not capture all logs reliably
+      await streamContainerLogs(containerB, 'stalwart-phase2.log');
+      console.log('[StalwartSetup] Phase 2 container started successfully with log stream attached.');
       break;
       
     } catch (err) {
@@ -701,8 +703,8 @@ export async function startTestEnvironment(): Promise<TestEnvironment> {
     imapHost: stalwart.imapHost,
     imapPort: stalwart.imapPort,
     jmapUrl: stalwart.jmapUrl,
-    jmapUsername: 'source@dev.local',
-    jmapPassword: 'source_password',
+    jmapUsername: 'target@dev.local',
+    jmapPassword: 'target_password',
     container: stalwart.container,
   };
 

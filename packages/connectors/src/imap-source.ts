@@ -233,10 +233,10 @@ export class ImapSource implements SourceConnector {
           console.log('[DEBUG listSince] cursor decoded:', decoded);
           if (decoded.uidValidity === uidValidity) {
             // Only fetch messages with UID >= UIDNEXT from the cursor
-            // node-imap expects just the range, UID prefix is added automatically
-            searchCriteria = [`${decoded.uidNext}:*`];
+            // Fetch ALL messages and filter by UID manually (more reliable than range search)
+            searchCriteria = ['ALL'];
             uidNext = decoded.uidNext;
-            console.log('[DEBUG listSince] Using cursor-based search:', searchCriteria);
+            console.log('[DEBUG listSince] Fetching all messages, will filter by UID >=', uidNext);
           }
         } catch (err) {
           console.log('[DEBUG listSince] Invalid cursor, doing full scan:', err);
@@ -265,10 +265,27 @@ export class ImapSource implements SourceConnector {
         console.log('[DEBUG listSince] last result UID:', lastUid);
       }
 
+      // Filter results by UID if we're using a cursor
+      let filteredResults = results || [];
+      if (cursor) {
+        try {
+          const decoded = decodeImapCursor(cursor);
+          if (decoded.uidValidity === uidValidity) {
+            filteredResults = filteredResults.filter(msg => {
+              const uid = msg.attributes?.uid;
+              return uid >= decoded.uidNext;
+            });
+            console.log('[DEBUG listSince] Filtered to', filteredResults.length, 'messages with UID >=', decoded.uidNext);
+          }
+        } catch (err) {
+          // Invalid cursor, use all results
+        }
+      }
+
       const items: MailItem[] = [];
       let maxUidNext = uidNext;
 
-      for (const msg of results) {
+      for (const msg of filteredResults) {
         console.log('[DEBUG listSince] processing message:', {
           hasAttributes: !!msg.attributes,
           attributes: msg.attributes,

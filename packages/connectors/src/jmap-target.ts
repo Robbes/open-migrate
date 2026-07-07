@@ -112,6 +112,21 @@ const SPECIAL_USE_ROLE_MAP: Record<
 };
 
 /**
+ * JMAP session type from jmap-jam.
+ */
+interface JmapSession {
+  accounts?: Record<string, {
+    id?: string;
+    name?: string;
+    email?: string;
+    isPrimary?: boolean;
+  }>;
+  primaryAccounts?: Record<string, string>;
+  apiUrl?: string;
+  uploadUrl?: string;
+}
+
+/**
  * JMAP target writer implementation.
  */
 export class JmapTargetWriter implements TargetWriter {
@@ -137,8 +152,9 @@ export class JmapTargetWriter implements TargetWriter {
     console.log('[DEBUG JMAP] Session URL:', sessionUrl);
 
     // Load the session directly
-    const session = await JamClient.loadSession(sessionUrl, this.authHeader);
+    const session = await JamClient.loadSession(sessionUrl, this.authHeader) as JmapSession;
     console.log('[DEBUG JMAP] Session primaryAccounts:', JSON.stringify(session.primaryAccounts));
+    console.log('[DEBUG JMAP] Session accounts:', JSON.stringify(session.accounts));
     console.log('[DEBUG JMAP] Session apiUrl (may be incorrect):', session.apiUrl);
     
     // Use the base URL + /jmap as the API URL
@@ -148,8 +164,62 @@ export class JmapTargetWriter implements TargetWriter {
       : `${this.config.baseUrl}/jmap`;
     console.log('[DEBUG JMAP] Using API URL:', this.apiUrl);
     
-    // Stalwart uses "b" as the account ID for the primary account
-    this.accountId = session.primaryAccounts?.['urn:ietf:params:jmap:mail'] || 'b';
+    // CRITICAL: Resolve accountId by matching the configured target email against session accounts
+    // NEVER take the first account blindly - this caused emails to be written to the wrong account
+    let resolvedAccountId: string | null = null;
+    
+    if (session.accounts) {
+      // Try to find the account that matches the configured username (full email address)
+      for (const [accountId, accountInfo] of Object.entries(session.accounts)) {
+        const accountEmail = accountInfo.email || accountInfo.name;
+        console.log('[DEBUG JMAP] Checking account:', accountId, 'email/name:', accountEmail);
+        
+        // Match by exact email or by name if email is not available
+        if (accountEmail === this.config.username || 
+            (accountInfo.email === this.config.username) ||
+            (accountInfo.name && this.config.username.includes(accountInfo.name + '@'))) {
+          resolvedAccountId = accountId;
+          console.log('[DEBUG JMAP] Found matching account:', accountId, 'for username:', this.config.username);
+          break;
+        }
+      }
+    }
+    
+    // If no match found, try primaryAccounts as fallback
+    if (!resolvedAccountId && session.primaryAccounts?.['urn:ietf:params:jmap:mail']) {
+      resolvedAccountId = session.primaryAccounts['urn:ietf:params:jmap:mail'];
+      console.log('[DEBUG JMAP] Using primary account from primaryAccounts:', resolvedAccountId);
+    }
+    
+    // HARD FAIL if we couldn't resolve an accountId
+    if (!resolvedAccountId) {
+      throw new Error(
+        `Failed to resolve accountId for target account '${this.config.username}'. ` +
+        `JMAP session has ${session.accounts ? Object.keys(session.accounts).length : 0} accounts. ` +
+        `This is a critical error - refusing to proceed without a valid accountId to prevent ` +
+        `writing emails to the wrong account.`
+      );
+    }
+    
+    // Verify the resolved account matches expected target
+    const resolvedAccountInfo = session.accounts?.[resolvedAccountId];
+    if (resolvedAccountInfo) {
+      const resolvedEmail = resolvedAccountInfo.email || resolvedAccountInfo.name;
+      console.log('[DEBUG JMAP] Resolved account:', resolvedAccountId, 'with email/name:', resolvedEmail);
+      
+      // Hard fail if the resolved account doesn't match the configured target
+      if (resolvedEmail !== this.config.username && 
+          !this.config.username.includes(resolvedAccountInfo.name + '@') &&
+          resolvedAccountInfo.email !== this.config.username) {
+        throw new Error(
+          `Account mismatch: configured target is '${this.config.username}' but resolved account ` +
+          `'${resolvedAccountId}' has email/name '${resolvedEmail}'. This is a critical safety check ` +
+          `to prevent writing emails to the wrong account.`
+        );
+      }
+    }
+    
+    this.accountId = resolvedAccountId;
     console.log('[DEBUG JMAP] Using account ID:', this.accountId);
     
     // Create the client with the session

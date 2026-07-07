@@ -190,11 +190,16 @@ describe('Shadow Pass Integration (T4)', () => {
     await waitForImap(STALWART_IMAP_HOST, STALWART_IMAP_PORT);
     console.log('[ShadowPass] IMAP server is ready');
     
-    // Setup database
+    // CRITICAL: Clean up any leftover cursor state from previous tests
+    // Both ledger.integration.test.ts and shadow-pass.integration.test.ts use the same
+    // TEST_TENANT_ID and TEST_MAPPING_ID, so cursors can leak between tests
     db = createPgDb(PG_CONNECTION_STRING);
-    
     ledger = new PgLedger(db);
     cursorStore = new PgCursorStore(db);
+    
+    console.log('[ShadowPass] Cleaning up leftover cursor state...');
+    await db.execute(sql`DELETE FROM cursor WHERE tenant_id = ${TEST_TENANT_ID}`);
+    console.log('[ShadowPass] Cursor cleanup complete.');
     
     // Setup connectors
     source = new ImapSource({
@@ -296,6 +301,27 @@ describe('Shadow Pass Integration (T4)', () => {
     expect(result1.created).toBe(3);
     expect(result1.skipped).toBe(0);
 
+    // REGRESSION GUARD: Verify source INBOX still has exactly 3 messages (no cross-account pollution)
+    const imap = await import('imap-simple');
+    const config1: ImapSimpleOptions = {
+      imap: {
+        user: SOURCE_ACCOUNT,
+        password: SOURCE_PASSWORD,
+        host: STALWART_IMAP_HOST,
+        port: STALWART_IMAP_PORT,
+        tls: true,
+        tlsOptions: { rejectUnauthorized: false },
+      },
+    };
+    const conn1 = await imap.connect(config1);
+    try {
+      const inbox1 = await conn1.openBox('INBOX');
+      expect(inbox1.messages.total).toBe(3);
+      console.log('[REGRESSION GUARD] Source INBOX count after first run: 3 ✓');
+    } finally {
+      conn1.end();
+    }
+
     // Second run should create 0 (idempotent)
     const result2 = await runShadowPass({
       tenantId: TEST_TENANT_ID,
@@ -307,9 +333,31 @@ describe('Shadow Pass Integration (T4)', () => {
       concurrency: 2,
     });
 
-    expect(result2.scanned).toBe(3);
+    // With cursor-based delta scan, second run should scan 0 messages (all already seen)
+    // and skip 0 (nothing new to process)
+    expect(result2.scanned).toBe(0);
     expect(result2.created).toBe(0);
-    expect(result2.skipped).toBe(3);
+    expect(result2.skipped).toBe(0);
+
+    // REGRESSION GUARD: Verify source INBOX still has exactly 3 messages after second run
+    const config2: ImapSimpleOptions = {
+      imap: {
+        user: SOURCE_ACCOUNT,
+        password: SOURCE_PASSWORD,
+        host: STALWART_IMAP_HOST,
+        port: STALWART_IMAP_PORT,
+        tls: true,
+        tlsOptions: { rejectUnauthorized: false },
+      },
+    };
+    const conn2 = await imap.connect(config2);
+    try {
+      const inbox2 = await conn2.openBox('INBOX');
+      expect(inbox2.messages.total).toBe(3);
+      console.log('[REGRESSION GUARD] Source INBOX count after second run: 3 ✓');
+    } finally {
+      conn2.end();
+    }
   }, 120000);
 
   it('should handle delta correctly (adding one message creates exactly 1)', async () => {
@@ -347,6 +395,16 @@ This is the fourth test message for delta testing.
       conn.end();
     }
 
+    // REGRESSION GUARD: Verify source INBOX has exactly 4 messages before delta run
+    const connPre = await imap.connect(config);
+    try {
+      const inboxPre = await connPre.openBox('INBOX');
+      expect(inboxPre.messages.total).toBe(4);
+      console.log('[REGRESSION GUARD] Source INBOX count before delta run: 4 ✓');
+    } finally {
+      connPre.end();
+    }
+
     // Run shadow pass again - should only create the new message
     const result = await runShadowPass({
       tenantId: TEST_TENANT_ID,
@@ -361,5 +419,15 @@ This is the fourth test message for delta testing.
     // Should scan 1 new message (due to cursor) and create 1
     expect(result.created).toBe(1);
     expect(result.skipped).toBe(0);
+
+    // REGRESSION GUARD: Verify source INBOX still has exactly 4 messages after delta (no cross-account pollution)
+    const connPost = await imap.connect(config);
+    try {
+      const inboxPost = await connPost.openBox('INBOX');
+      expect(inboxPost.messages.total).toBe(4);
+      console.log('[REGRESSION GUARD] Source INBOX count after delta run: 4 ✓');
+    } finally {
+      connPost.end();
+    }
   }, 120000);
 });
