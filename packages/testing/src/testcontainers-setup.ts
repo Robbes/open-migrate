@@ -344,7 +344,7 @@ async function startStalwart(): Promise<{
   // Use Docker-managed NAMED VOLUME (not host bind mount) for consistent UID/permissions
   // The source is the Docker volume name, which Docker handles with proper permissions
   // CRITICAL: Attach log consumer BEFORE start() to capture ALL logs from container creation
-  const containerA = await new GenericContainer('stalwart-test-custom:latest')
+  const containerA = await new GenericContainer('stalwartlabs/stalwart:v0.16.10')
     .withBindMounts([
       { source: STALWART_DATA_VOLUME, target: '/opt/stalwart/data' },
     ])
@@ -527,7 +527,7 @@ async function startStalwart(): Promise<{
   // Phase 2: Normal mode container (no recovery mode env vars)
   // Uses SAME bind mount approach as Phase 1 (host path -> container path)
   // withUser('root') sidesteps any UID/permission issues with the bind-mounted directory
-  const containerBBuilder = new GenericContainer('stalwart-test-custom:latest')
+  const containerBBuilder = new GenericContainer('stalwartlabs/stalwart:v0.16.10')
     .withBindMounts([
       { source: STALWART_DATA_VOLUME, target: '/opt/stalwart/data' },
     ])
@@ -537,14 +537,14 @@ async function startStalwart(): Promise<{
     .withEnvironment({
       STALWART_HOSTNAME: 'mail.stalwart.local',
     })
-    .withExposedPorts(8080, 143)
+    .withExposedPorts(8080, 993)
     .withStartupTimeout(180000)
     .withUser('root')
     .withCommand(['--config', '/etc/stalwart/config.json'])
     // Attach log consumer BEFORE start() to capture ALL logs including startup failures
     .withLogConsumer(createFileLogConsumer('stalwart-phase2.log'))
-    // Wait for both HTTP (8080) and IMAP (143) ports to be listening
-    // This is more reliable than log-string matching which varies by Stalwart version/mode
+    // Wait for both HTTP (8080) and IMAPS (993) ports to be listening
+    // Note: Stalwart v0.16.10 auto-binds TLS listeners (993/995) but NOT plaintext (143/110)
     .withWaitStrategy(Wait.forListeningPorts());
 
   // Start the container with retry logic for RocksDB lock race condition
@@ -571,7 +571,7 @@ async function startStalwart(): Promise<{
       
       if (attempt < maxRetries) {
         if (msg.includes('LOCK') || msg.includes('Resource temporarily unavailable') || 
-            msg.includes('143/tcp not bound') || msg.includes('exit code')) {
+            msg.includes('993/tcp not bound') || msg.includes('exit code')) {
           console.log('[StalwartSetup] Possible lock/port issue, waiting 2s before retry...');
           try {
             const containerId = containerB?.getId();
@@ -634,7 +634,7 @@ async function startStalwart(): Promise<{
   // No need to call streamContainerLogs again
   
   const stalwartHost = containerB.getHost();
-  const imapPort = containerB.getMappedPort(143);
+  const imapsPort = containerB.getMappedPort(993);
   const jmapPort = containerB.getMappedPort(8080);
   const jmapUrl = `http://${stalwartHost}:${jmapPort}`;
   
@@ -642,14 +642,14 @@ async function startStalwart(): Promise<{
   await waitForHttpEndpoint(`${jmapUrl}/.well-known/jmap`);
   
   console.log('[StalwartSetup] JMAP endpoint ready at:', jmapUrl);
-  console.log('[StalwartSetup] IMAP available at:', `${stalwartHost}:${imapPort}`);
+  console.log('[StalwartSetup] IMAPS available at:', `${stalwartHost}:${imapsPort}`);
 
-  console.log(`[StalwartSetup] Stalwart ready - JMAP: ${jmapUrl}, IMAP: ${stalwartHost}:${imapPort}`);
+  console.log(`[StalwartSetup] Stalwart ready - JMAP: ${jmapUrl}, IMAPS: ${stalwartHost}:${imapsPort}`);
 
   return {
     jmapUrl,
     imapHost: stalwartHost,
-    imapPort,
+    imapPort: imapsPort,
     container: containerB,
   };
 }

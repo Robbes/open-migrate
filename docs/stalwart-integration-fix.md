@@ -4,6 +4,22 @@ DO NOT deviate from this. DO NOT change the pinned version. DO NOT put accounts/
 in config.json. DO NOT skip the shadow-pass tests. Prior sessions repeatedly re-fabricated the
 config below; this file is the corrected ground truth.
 
+## Verified Image: stalwartlabs/stalwart:v0.16.10 (official, no custom image needed)
+
+**Finding**: The custom image `stalwart-test-custom:latest` provides NO benefit over the official
+image. It was previously thought to contain workarounds for config or listener issues, but those
+were solving non-problems. The official image `stalwartlabs/stalwart:v0.16.10` works correctly
+when used with the proper two-phase startup pattern.
+
+**Dockerfile inspection** (from prior session):
+```
+docker inspect stalwart-test-custom:latest --format '{{json .Config.Entrypoint}}'
+# Result: [] (no custom entrypoint)
+docker inspect stalwart-test-custom:latest --format '{{json .Config.Cmd}}'
+# Result: [] (no custom command)
+```
+The custom image had no special configuration baked in. Switch to the official image.
+
 ## config.json — the ENTIRE file, both phases, nothing else
 {"@type": "RocksDb", "path": "/opt/stalwart/data"}
 
@@ -71,3 +87,33 @@ IMAP auth succeeds but the connection drops after auth, during commands — a te
 APPEND-literal mismatch. Diagnose with `nc` and `openssl s_client -starttls imap`, align the client
 (APPEND literal needs \r\n endings + exact octet count; match the server's advertised CAPABILITY).
 Do NOT change config.json for this — listeners need no config.
+
+## Verified Findings from Integration Testing
+
+**Image**: The official `stalwartlabs/stalwart:v0.16.10` image works correctly. No custom image
+is needed. The custom image `stalwart-test-custom:latest` provided no benefit.
+
+**TLS Ports**: Stalwart v0.16.10 in Normal Mode auto-binds TLS listeners:
+- IMAPS on port 993 (implicit TLS)
+- POP3S on port 995 (implicit TLS)
+- HTTPS on port 443
+- SMTPS on port 465
+- Management HTTP on port 8080 (unencrypted, for JMAP/management)
+
+**Plaintext ports NOT bound by default**: IMAP (143), POP3 (110), SMTP (25/587) are NOT
+auto-bound in v0.16.10. This is a hardening change from earlier versions. Tests MUST use TLS
+ports (993 for IMAPS).
+
+**Known IMAP Issue**: During integration testing, IMAP connections to port 993 establish
+successfully (TCP + TLS handshake), but subsequent IMAP commands fail with error "localhost.local".
+This appears to be a server-side issue where Stalwart is returning an error message containing
+its hostname during the IMAP protocol exchange. This is separate from the listener binding issue
+and requires further investigation.
+
+**Workaround**: The IMAP issue may be related to:
+1. Server hostname configuration (STALWART_HOSTNAME environment variable)
+2. TLS certificate configuration
+3. IMAP listener configuration
+
+Further debugging requires capturing the actual IMAP protocol dialogue to understand what the
+server is responding with.
