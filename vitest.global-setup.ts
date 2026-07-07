@@ -40,12 +40,16 @@ async function runMigration(postgresUrl: string): Promise<void> {
 export default async function () {
   console.log('[Vitest Global Setup] Starting Testcontainers environment...');
   
-  // Detect which test project is running
-  const projectName = process.env.VITEST_PROJECT_NAME || '';
-  const isUnitTests = projectName === 'unit';
+  // Detect which test project is running via environment variable
+  // CI workflows should set SKIP_STALWART=true for unit tests
+  const skipStalwart = process.env.SKIP_STALWART === 'true';
+  
+  if (skipStalwart) {
+    console.log('[Vitest Global Setup] Skipping Stalwart (unit test mode via SKIP_STALWART).');
+  }
   
   // Skip Stalwart for unit tests - they don't need it and it requires stalwart-cli
-  const testEnv = await startTestEnvironment(isUnitTests);
+  const testEnv = await startTestEnvironment(skipStalwart);
 
   process.env.TEST_DATABASE_URL = testEnv.postgres.connectionString;
 
@@ -66,7 +70,7 @@ export default async function () {
     console.log(`  - STALWART_JMAP_URL: ${testEnv.stalwart.jmapUrl}`);
     console.log(`  - STALWART_IMAP: ${testEnv.stalwart.imapHost}:${testEnv.stalwart.imapPort}`);
   } else {
-    console.log('  - Stalwart: Skipped (unit test mode)');
+    console.log('  - Stalwart: Skipped');
   }
 
   return async (error?: Error) => {
