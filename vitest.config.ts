@@ -22,18 +22,45 @@ export default defineConfig({
         test: {
           name: 'unit',
           include: ['**/*.unit.test.ts'],
+          resolve: {
+            alias: {
+              '@openmig/shared': resolve(rootDir, 'packages/shared/src/index.ts'),
+              '@openmig/ledger': resolve(rootDir, 'packages/ledger/src/index.ts'),
+              '@openmig/core': resolve(rootDir, 'packages/core/src/index.ts'),
+              '@openmig/connectors': resolve(rootDir, 'packages/connectors/src/index.ts'),
+              '@openmig/scheduler': resolve(rootDir, 'packages/scheduler/src/index.ts'),
+            },
+          },
         },
       },
       {
         test: {
           name: 'integration',
           include: ['**/*.integration.test.ts'],
+          resolve: {
+            alias: {
+              '@openmig/shared': resolve(rootDir, 'packages/shared/src/index.ts'),
+              '@openmig/ledger': resolve(rootDir, 'packages/ledger/src/index.ts'),
+              '@openmig/core': resolve(rootDir, 'packages/core/src/index.ts'),
+              '@openmig/connectors': resolve(rootDir, 'packages/connectors/src/index.ts'),
+              '@openmig/scheduler': resolve(rootDir, 'packages/scheduler/src/index.ts'),
+            },
+          },
         },
       },
       {
         test: {
           name: 'e2e',
           include: ['**/*.e2e.test.ts'],
+          resolve: {
+            alias: {
+              '@openmig/shared': resolve(rootDir, 'packages/shared/src/index.ts'),
+              '@openmig/ledger': resolve(rootDir, 'packages/ledger/src/index.ts'),
+              '@openmig/core': resolve(rootDir, 'packages/core/src/index.ts'),
+              '@openmig/connectors': resolve(rootDir, 'packages/connectors/src/index.ts'),
+              '@openmig/scheduler': resolve(rootDir, 'packages/scheduler/src/index.ts'),
+            },
+          },
         },
       },
     ],

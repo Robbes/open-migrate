@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { InProcessScheduler } from './scheduler';
 
 describe('InProcessScheduler.runOnce (single-flight)', () => {
@@ -45,5 +45,59 @@ describe('InProcessScheduler.runOnce (single-flight)', () => {
       }),
     ]);
     expect([a, b]).toEqual([1, 1]);
+  });
+});
+
+describe('InProcessScheduler.schedule (croner)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('triggers task on cron tick', async () => {
+    const sched = new InProcessScheduler();
+    let calls = 0;
+    const task = async () => {
+      calls++;
+    };
+
+    // Schedule every 1 second
+    const handle = sched.schedule('test-job', '* * * * * *', task);
+
+    // Advance 1.5 seconds to trigger one tick
+    await vi.advanceTimersByTimeAsync(1500);
+
+    expect(calls).toBe(1);
+
+    // Stop the job
+    handle.stop();
+
+    // Advance another second - should not trigger
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toBe(1);
+  });
+
+  it('allows multiple independent scheduled jobs', async () => {
+    const sched = new InProcessScheduler();
+    let a = 0;
+    let b = 0;
+
+    const handleA = sched.schedule('job-a', '* * * * * *', async () => {
+      a++;
+    });
+    const handleB = sched.schedule('job-b', '* * * * * *', async () => {
+      b++;
+    });
+
+    await vi.advanceTimersByTimeAsync(1500);
+
+    expect(a).toBe(1);
+    expect(b).toBe(1);
+
+    handleA.stop();
+    handleB.stop();
   });
 });
