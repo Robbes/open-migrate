@@ -28,6 +28,17 @@ interface MailboxQueryResponse {
 }
 
 /**
+ * JMAP Mailbox object.
+ */
+interface Mailbox {
+  id: string;
+  name: string;
+  path?: string;
+  role?: string;
+  type?: string;
+}
+
+/**
  * JMAP Mailbox set response type.
  */
 interface MailboxSetResponse {
@@ -170,11 +181,11 @@ export class JmapTargetWriter implements TargetWriter {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(`JMAP API error: ${error.type} - ${error.description}`);
+      const error = await response.json() as { type?: string; description?: string };
+      throw new Error(`JMAP API error: ${error.type ?? 'unknown'} - ${error.description ?? 'no description'}`);
     }
 
-    const result = await response.json();
+    const result = await response.json() as { methodResponses?: unknown[] };
     return result.methodResponses?.[0]?.[1] as T;
   }
 
@@ -215,7 +226,7 @@ export class JmapTargetWriter implements TargetWriter {
       throw new Error(`Blob upload failed: ${error}`);
     }
 
-    const result = await response.json();
+    const result = await response.json() as { blobId: string };
     console.log('[DEBUG JMAP] Blob upload response:', JSON.stringify(result));
     return result;
   }
@@ -301,13 +312,15 @@ export class JmapTargetWriter implements TargetWriter {
       created?: Record<string, { id: string }>;
       notCreated?: Record<string, { type: string; description: string }>;
     };
-    const createdId = Object.keys(mailboxResponse.created || {})[0];
+    const created = mailboxResponse.created || {};
+    const createdId = Object.keys(created)[0];
     
     if (!createdId) {
       // Check if it already exists
-      if (mailboxResponse.notCreated) {
-        const errors = Object.values(mailboxResponse.notCreated);
-        if (errors.length > 0 && errors[0].type === 'alreadyExists') {
+      const notCreated = mailboxResponse.notCreated || {};
+      if (Object.keys(notCreated).length > 0) {
+        const errors = Object.values(notCreated);
+        if (errors.length > 0 && errors[0]?.type === 'alreadyExists') {
           // Extract existingId from the description - format: "existingId: \"a\""
           const match = errors[0].description.match(/existingId:\s*"([^"]+)"/);
           if (match && match[1]) {

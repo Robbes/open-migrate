@@ -153,7 +153,7 @@ export class ImapSource implements SourceConnector {
           return [{
             path: 'INBOX',
             name: 'INBOX',
-            specialUse: '\\Inbox',
+            specialUse: 'inbox' as SpecialUse,
           }];
         } catch (openErr) {
           const openMsg = openErr instanceof Error ? openErr.message : String(openErr);
@@ -253,7 +253,7 @@ export class ImapSource implements SourceConnector {
       console.log('[DEBUG listSince] searchCriteria:', searchCriteria);
       console.log('[DEBUG listSince] fetchCriteria:', fetchCriteria);
       console.log('[DEBUG listSince] box.uidnext:', box.uidnext);
-      console.log('[DEBUG listSince] box.total:', box.messages?.total);
+      console.log('[DEBUG listSince] box.total:', box.messagesTotal);
 
       const results = await conn.search(searchCriteria, fetchCriteria);
       console.log('[DEBUG listSince] search results count:', results?.length);
@@ -342,7 +342,10 @@ export class ImapSource implements SourceConnector {
         throw new Error(`No parts found for message: ${item.sourceRef}`);
       }
       
-      const rfc822Data = msg.parts[0].body;
+      const rfc822Data = msg.parts[0]?.body;
+      if (!rfc822Data) {
+        throw new Error(`No body found for message: ${item.sourceRef}`);
+      }
       
       // Ensure we have a Buffer
       const rfc822Buffer = Buffer.isBuffer(rfc822Data)
