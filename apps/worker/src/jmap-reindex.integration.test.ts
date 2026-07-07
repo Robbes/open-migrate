@@ -191,8 +191,66 @@ async function cleanDatabaseState(): Promise<void> {
     
     // Delete mailbox mappings for this tenant
     await client.execute(sql`
+      DELETE FROM mailbox_mapping 
+      WHERE tenant_id = ${REINDEX_TENANT_ID}
+    `);
+    
+    // Delete mailboxes for this tenant
+    await client.execute(sql`
       DELETE FROM mailbox 
       WHERE tenant_id = ${REINDEX_TENANT_ID}
+    `);
+    
+    // Delete connections for this tenant
+    await client.execute(sql`
+      DELETE FROM connection 
+      WHERE tenant_id = ${REINDEX_TENANT_ID}
+    `);
+    
+    // Create tenant if it doesn't exist
+    await client.execute(sql`
+      INSERT INTO tenant (id, name, status)
+      VALUES (${REINDEX_TENANT_ID}, 'Test Tenant', 'active')
+      ON CONFLICT (id) DO NOTHING
+    `);
+    
+    // Create source connection
+    const sourceConnId = '650e8400-e29b-41d4-a716-446655440003';
+    await client.execute(sql`
+      INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status)
+      VALUES (${sourceConnId}, ${REINDEX_TENANT_ID}, 'source', 'imap', 'Test Source', '{}', 'connected')
+      ON CONFLICT (id) DO NOTHING
+    `);
+    
+    // Create target connection
+    const targetConnId = '650e8400-e29b-41d4-a716-446655440004';
+    await client.execute(sql`
+      INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status)
+      VALUES (${targetConnId}, ${REINDEX_TENANT_ID}, 'target', 'selfhosted_mail', 'Test Target', '{}', 'connected')
+      ON CONFLICT (id) DO NOTHING
+    `);
+    
+    // Create source mailbox
+    const sourceMailboxId = '650e8400-e29b-41d4-a716-446655440005';
+    await client.execute(sql`
+      INSERT INTO mailbox (id, tenant_id, connection_id, kind, display_name, status)
+      VALUES (${sourceMailboxId}, ${REINDEX_TENANT_ID}, ${sourceConnId}, 'user', 'INBOX', 'active')
+      ON CONFLICT (id) DO NOTHING
+    `);
+    
+    // Create target mailbox
+    const targetMailboxId = '650e8400-e29b-41d4-a716-446655440006';
+    await client.execute(sql`
+      INSERT INTO mailbox (id, tenant_id, connection_id, kind, display_name, status)
+      VALUES (${targetMailboxId}, ${REINDEX_TENANT_ID}, ${targetConnId}, 'user', 'INBOX', 'active')
+      ON CONFLICT (id) DO NOTHING
+    `);
+    
+    // Create mailbox mapping
+    await client.execute(sql`
+      INSERT INTO mailbox_mapping (id, tenant_id, source_mailbox_id, target_mailbox_id, mode, status)
+      VALUES (${REINDEX_MAPPING_ID}, ${REINDEX_TENANT_ID}, ${sourceMailboxId}, ${targetMailboxId}, 'mirror', 'active')
+      ON CONFLICT (id) DO NOTHING
     `);
     
     console.log('[Cleanup] Database state cleaned for tenant', REINDEX_TENANT_ID);
@@ -250,7 +308,7 @@ interface AppendOptions {
 }
 
 /**
- * Seed test messages to source account.
+ * Seed test messages to source account (IMAP).
  */
 async function seedReindex(): Promise<void> {
   const config: ImapSimpleOptions = {
@@ -302,7 +360,7 @@ ${msg.body}
       } as AppendOptions);
     }
 
-    console.log('[seedReindex] Seeded', messages.length, 'test messages');
+    console.log('[seedReindex] Seeded', messages.length, 'test messages to source');
   } finally {
     conn.end();
   }
@@ -357,6 +415,10 @@ describe('JMAP Reindex Integration Tests', () => {
     console.log('[JMAP Reindex] Cleaning database state...');
     await cleanDatabaseState();
     
+    // Connect to JMAP server
+    console.log('[JMAP Reindex] Connecting to JMAP server...');
+    await target.connect();
+    
     // Seed fresh test data
     console.log('[JMAP Reindex] Seeding test data...');
     await seedReindex();
@@ -376,6 +438,15 @@ describe('JMAP Reindex Integration Tests', () => {
 
   describe('listEntries', () => {
     it('should return entries from target with natural keys', async () => {
+      // Run shadow pass to sync messages from source to target
+      await runShadowPass({
+        source,
+        target,
+        mappingId: REINDEX_MAPPING_ID,
+        tenantId: REINDEX_TENANT_ID,
+        ledger,
+      });
+
       const entries = [];
       for await (const entry of target.listEntries()) {
         entries.push(entry);
@@ -424,42 +495,37 @@ describe('JMAP Reindex Integration Tests', () => {
         tenantId: REINDEX_TENANT_ID,
         ledger,
       });
-      
-      // Add a new message to source
-      const config: ImapSimpleOptions = {
-        imap: {
-          user: SOURCE_ACCOUNT,
-          password: SOURCE_PASSWORD,
-          host: STALWART_IMAP_HOST,
-          port: STALWART_IMAP_PORT,
-          tls: true,
-          tlsOptions: { rejectUnauthorized: false },
-          authTimeout: 3000,
-        },
-      };
-      
-      const conn = await imap.connect(config);
-      const newMessage = `From: ${SOURCE_ACCOUNT}
-To: ${TARGET_ACCOUNT}
+
+      // Get the target mailbox ID (INBOX)
+      const targetMailboxId = await target.ensureMailbox({
+        name: 'INBOX',
+        role: 'inbox',
+        type: 'user',
+      });
+
+      // Add a new message directly to the target (simulating a message added outside the migration)
+      const newMessage = `From: ${TARGET_ACCOUNT}
+To: ${SOURCE_ACCOUNT}
 Subject: New Message After Sync
 Message-ID: <new-message-after-sync@dev.local>
 Date: ${new Date().toUTCString()}
 Content-Type: text/plain; charset=utf-8
 
-This message was added after the initial sync.
+This message was added directly to the target after the initial sync.
 `;
-      
-      await conn.append(newMessage, { mailbox: 'INBOX' });
-      conn.end();
-      
-      // Run reindex - should find the new message
+
+      await target.upsertEmail(targetMailboxId, {
+        rfc822: new Uint8Array(Buffer.from(newMessage)),
+      }, []);
+
+      // Run reindex - should find the new message in the target
       const result = await reindexFromTarget({
         tenantId: REINDEX_TENANT_ID,
         mappingId: REINDEX_MAPPING_ID,
         reindexer: target,
         ledger,
       });
-      
+
       // Should have added at least 1 new item
       expect(result.adopted).toBeGreaterThanOrEqual(1);
     });
