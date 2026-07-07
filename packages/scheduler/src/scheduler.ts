@@ -1,4 +1,4 @@
-import { NotImplementedError, type Scheduler, type ScheduleHandle } from '@openmig/shared';
+import { type Scheduler, type ScheduleHandle } from '@openmig/shared';
 import { SingleFlight } from './single-flight';
 import { Cron } from 'croner';
 

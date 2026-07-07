@@ -17,50 +17,25 @@ export default defineConfig({
     exclude: ['node_modules', 'dist'],
     globalSetup: './vitest.global-setup.ts',
     testTimeout: 180000,
+    // Root-level resolve alias applies to all projects
+    // Individual projects can't have their own resolve config
     projects: [
       {
         test: {
           name: 'unit',
           include: ['**/*.unit.test.ts'],
-          resolve: {
-            alias: {
-              '@openmig/shared': resolve(rootDir, 'packages/shared/src/index.ts'),
-              '@openmig/ledger': resolve(rootDir, 'packages/ledger/src/index.ts'),
-              '@openmig/core': resolve(rootDir, 'packages/core/src/index.ts'),
-              '@openmig/connectors': resolve(rootDir, 'packages/connectors/src/index.ts'),
-              '@openmig/scheduler': resolve(rootDir, 'packages/scheduler/src/index.ts'),
-            },
-          },
         },
       },
       {
         test: {
           name: 'integration',
           include: ['**/*.integration.test.ts'],
-          resolve: {
-            alias: {
-              '@openmig/shared': resolve(rootDir, 'packages/shared/src/index.ts'),
-              '@openmig/ledger': resolve(rootDir, 'packages/ledger/src/index.ts'),
-              '@openmig/core': resolve(rootDir, 'packages/core/src/index.ts'),
-              '@openmig/connectors': resolve(rootDir, 'packages/connectors/src/index.ts'),
-              '@openmig/scheduler': resolve(rootDir, 'packages/scheduler/src/index.ts'),
-            },
-          },
         },
       },
       {
         test: {
           name: 'e2e',
           include: ['**/*.e2e.test.ts'],
-          resolve: {
-            alias: {
-              '@openmig/shared': resolve(rootDir, 'packages/shared/src/index.ts'),
-              '@openmig/ledger': resolve(rootDir, 'packages/ledger/src/index.ts'),
-              '@openmig/core': resolve(rootDir, 'packages/core/src/index.ts'),
-              '@openmig/connectors': resolve(rootDir, 'packages/connectors/src/index.ts'),
-              '@openmig/scheduler': resolve(rootDir, 'packages/scheduler/src/index.ts'),
-            },
-          },
         },
       },
     ],
