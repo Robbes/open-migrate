@@ -13,7 +13,7 @@
 | T6 croner wiring in `schedule()` | **Open — verify first** | `runOnce` + `SingleFlight` pre-built/unit-tested; croner tick wiring + short integration run outstanding |
 | T7 worker CLI entrypoint | **Open — verify first** | config loader pre-built/unit-tested; CLI (`--once`/scheduled) outstanding |
 | T8 docs + ADRs | **Partial** | `stalwart-integration-fix.md` authoritative and current; `testing.md`/`README.md` synced 2026-07-07; README quickstart unverified |
-| T9 reindex on real connector | **Open — verify first** | `reindexFromTarget` core pre-built/unit-tested; real `TargetReindexer.listEntries` + Stalwart integration test outstanding |
+| T9 reindex on real connector | **Done ✅** | `apps/worker/src/jmap-reindex.integration.test.ts`; `TargetReindexer.listEntries()` implemented; mailbox cleanup isolation pattern; PR #19 |
 
 Hard-won operational truth for this slice lives in `docs/stalwart-integration-fix.md`
 (two-phase startup, TLS-only listeners — **no plaintext 143** — accountId rule, cursor rules,
