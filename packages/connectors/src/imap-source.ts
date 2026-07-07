@@ -129,14 +129,42 @@ export class ImapSource implements SourceConnector {
       // Note: getBoxes is callback-based in the type definitions, but returns a Promise in practice
       type MailboxInfo = { attributes?: string[] };
       const list = await (
-        conn.imap.getBoxes as () => Promise<Record<string, MailboxInfo> | undefined>
+        conn.imap.getBoxes as () => Promise<Record<string, MailboxInfo>>
       )();
-      
-      // Handle case where getBoxes returns undefined (no folders or server doesn't support LIST)
+
+      // DEBUG: Log the raw response
+      console.log('[DEBUG listFolders] getBoxes() returned:', list);
+      console.log('[DEBUG listFolders] list type:', typeof list);
+      console.log('[DEBUG listFolders] list is undefined:', list === undefined);
+      console.log('[DEBUG listFolders] list is null:', list === null);
+      console.log('[DEBUG listFolders] list keys:', list ? Object.keys(list) : 'N/A');
+
+      // Handle case where getBoxes returns undefined - this can happen with some IMAP servers
+      // that don't include INBOX in the LIST response or use a different response format.
+      // In this case, we'll try to open INBOX directly and include it in the folder list.
       if (!list) {
-        return [];
+        console.log('[DEBUG listFolders] getBoxes() returned undefined, attempting to open INBOX directly...');
+        
+        try {
+          await conn.openBox('INBOX');
+          console.log('[DEBUG listFolders] Successfully opened INBOX');
+          
+          // Return INBOX as the only folder
+          return [{
+            path: 'INBOX',
+            name: 'INBOX',
+            specialUse: '\\Inbox',
+          }];
+        } catch (openErr) {
+          const openMsg = openErr instanceof Error ? openErr.message : String(openErr);
+          console.log('[DEBUG listFolders] Failed to open INBOX:', openMsg);
+          throw new Error(
+            'IMAP getBoxes() returned undefined and INBOX cannot be opened. ' +
+            'This indicates a server-side issue or missing account configuration.'
+          );
+        }
       }
-      
+
       const folders: MailFolder[] = [];
 
       for (const [path, mailbox] of Object.entries(list)) {
@@ -164,29 +192,52 @@ export class ImapSource implements SourceConnector {
   ): Promise<{ items: ReadonlyArray<MailItem>; nextCursor: SyncCursor }> {
     const conn = await this.connect();
     try {
+      console.log(`[DEBUG listSince] Opening box: ${folder.path}`);
+      console.log('[DEBUG listSince] conn.imap state before openBox:', {
+        state: conn.imap.state,
+        _box: (conn.imap as unknown as { _box?: unknown })._box
+      });
       await conn.openBox(folder.path);
+      console.log('[DEBUG listSince] openBox completed');
+      console.log('[DEBUG listSince] conn.imap state after openBox:', {
+        state: conn.imap.state,
+        _box: (conn.imap as unknown as { _box?: unknown })._box,
+        box: (conn.imap as unknown as { box?: unknown }).box
+      });
 
       // Get UIDVALIDITY from the opened box
-      type ImapBox = { uidValidity: number; uidNext?: number };
-      const box = (conn.imap as unknown as { box?: ImapBox }).box;
+      // Note: node-imap uses _box (with underscore) internally
+      type ImapBox = { 
+        name: string;
+        uidvalidity: number; 
+        uidnext?: number;
+        flags: string[];
+        readOnly: boolean;
+      };
+      const box = (conn.imap as unknown as { _box?: ImapBox })._box;
+      console.log('[DEBUG listSince] _box object:', box);
       if (!box) {
         throw new Error("No mailbox opened");
       }
-      const uidValidity = box.uidValidity;
+      const uidValidity = box.uidvalidity;
 
       // Determine search criteria
       let searchCriteria: string[] = ["ALL"];
-      let uidNext = box.uidNext || 1;
+      let uidNext = box.uidnext || 1;
 
       if (cursor) {
         try {
           const decoded = decodeImapCursor(cursor);
+          console.log('[DEBUG listSince] cursor decoded:', decoded);
           if (decoded.uidValidity === uidValidity) {
             // Only fetch messages with UID >= UIDNEXT from the cursor
-            searchCriteria = [`UID ${decoded.uidNext}:*`];
+            // node-imap expects just the range, UID prefix is added automatically
+            searchCriteria = [`${decoded.uidNext}:*`];
             uidNext = decoded.uidNext;
+            console.log('[DEBUG listSince] Using cursor-based search:', searchCriteria);
           }
-        } catch {
+        } catch (err) {
+          console.log('[DEBUG listSince] Invalid cursor, doing full scan:', err);
           // Invalid cursor, do a full scan
         }
       }
@@ -198,12 +249,26 @@ export class ImapSource implements SourceConnector {
         markSeen: false,
       };
 
+      console.log('[DEBUG listSince] searchCriteria:', searchCriteria);
+      console.log('[DEBUG listSince] fetchCriteria:', fetchCriteria);
+      console.log('[DEBUG listSince] box.uidnext:', box.uidnext);
+      console.log('[DEBUG listSince] box.total:', box.messages?.total);
+
       const results = await conn.search(searchCriteria, fetchCriteria);
+      console.log('[DEBUG listSince] search results count:', results?.length);
+      if (results && results.length > 0) {
+        console.log('[DEBUG listSince] first result UID:', results[0].attributes?.uid);
+        console.log('[DEBUG listSince] last result UID:', results[results.length - 1]?.attributes?.uid);
+      }
 
       const items: MailItem[] = [];
       let maxUidNext = uidNext;
 
       for (const msg of results) {
+        console.log('[DEBUG listSince] processing message:', {
+          hasAttributes: !!msg.attributes,
+          attributes: msg.attributes,
+        });
         const attrs = msg.attributes;
 
         // Extract Message-ID from envelope
@@ -256,27 +321,34 @@ export class ImapSource implements SourceConnector {
       await conn.openBox(item.folder.path);
 
       const uid = this.extractUidFromSourceRef(item.sourceRef);
-      const searchCriteria = [`UID ${uid}`];
-      const fetchCriteria: FetchOptions = {
-        bodies: "",
+      console.log('[DEBUG fetch] Fetching UID:', uid, 'from folder:', item.folder.path);
+      
+      // Fetch the raw RFC822 message using the UID
+      const results = await conn.search([`${uid}`], {
+        bodies: '',  // Fetch entire message body
         markSeen: false,
-      };
-
-      const results = await conn.search(searchCriteria, fetchCriteria);
+      });
+      console.log('[DEBUG fetch] search results count:', results?.length);
 
       if (results.length === 0) {
         throw new Error(`Message not found: ${item.sourceRef}`);
       }
 
       const msg = results[0]!;
-
-      // Get the raw message body using getPartData
-      const rfc822 = await conn.getPartData(msg, { which: "TEXT", part: 0 });
-
+      
+      // The raw message should be in msg.parts[0].body
+      if (!msg.parts || msg.parts.length === 0) {
+        throw new Error(`No parts found for message: ${item.sourceRef}`);
+      }
+      
+      const rfc822Data = msg.parts[0].body;
+      
       // Ensure we have a Buffer
-      const rfc822Buffer = Buffer.isBuffer(rfc822)
-        ? rfc822
-        : Buffer.from(rfc822 as string);
+      const rfc822Buffer = Buffer.isBuffer(rfc822Data)
+        ? rfc822Data
+        : Buffer.from(rfc822Data as string);
+
+      console.log('[DEBUG fetch] Got message with', rfc822Buffer.length, 'bytes');
 
       return {
         item,
@@ -292,9 +364,11 @@ export class ImapSource implements SourceConnector {
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private extractMessageId(msg: any): string | null {
+    // The search result structure is: { attributes: { envelope: { messageId: ... } }, parts: [...] }
     // Try to get from envelope first (fetched with envelope: true)
-    if (msg.envelope?.messageId) {
-      const messageId = msg.envelope.messageId;
+    const envelope = msg.attributes?.envelope || msg.envelope;
+    if (envelope?.messageId) {
+      const messageId = envelope.messageId;
       // Ensure it has angle brackets
       if (messageId.startsWith("<") && messageId.endsWith(">")) {
         return messageId;

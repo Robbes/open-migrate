@@ -352,7 +352,7 @@ async function startStalwart(): Promise<{
       { content: configJson, target: '/etc/stalwart/config.json' },
     ])
     .withEnvironment({
-      STALWART_HOSTNAME: 'mail.stalwart.local',
+      STALWART_HOSTNAME: 'localhost',
       STALWART_RECOVERY_MODE: '1',
       STALWART_RECOVERY_ADMIN: provisionAdmin,
     })
@@ -379,19 +379,19 @@ async function startStalwart(): Promise<{
 
   console.log('[StalwartSetup] Provisioning accounts via stalwart-cli...');
   
-  // Stalwart v0.16.x account format - account ID is used as username for IMAP
+  // Stalwart v0.16.x account format - name is local part, account ID is the key
   // With config.json present, server starts in recovery mode (not bootstrap)
   // Can directly create Domain and Account objects
   const plan = [
     // Step 1: Create Domain
     { '@type': 'upsert', object: 'Domain', matchOn: ['name'], value: { 'dom-a': { name: 'dev.local' } } },
-    // Step 2: Create source account
+    // Step 2: Create source account (name is local part only)
     { '@type': 'upsert', object: 'Account', matchOn: ['name'], value: { 'source': {
         '@type': 'User', name: 'source', domainId: '#dom-a',
         credentials: { '0': { '@type': 'Password', secret: 'source_password' } },
         roles: { '@type': 'User' }, permissions: { '@type': 'Inherit' }, encryptionAtRest: { '@type': 'Disabled' },
     } } },
-    // Step 3: Create target account
+    // Step 3: Create target account (name is local part only)
     { '@type': 'upsert', object: 'Account', matchOn: ['name'], value: { 'target': {
         '@type': 'User', name: 'target', domainId: '#dom-a',
         credentials: { '0': { '@type': 'Password', secret: 'target_password' } },
@@ -535,7 +535,7 @@ async function startStalwart(): Promise<{
       { content: normalConfig, target: '/etc/stalwart/config.json' },
     ])
     .withEnvironment({
-      STALWART_HOSTNAME: 'mail.stalwart.local',
+      STALWART_HOSTNAME: 'localhost',
     })
     .withExposedPorts(8080, 993)
     .withStartupTimeout(180000)
@@ -569,19 +569,27 @@ async function startStalwart(): Promise<{
       const msg = lastError.message;
       console.error(`[StalwartSetup] Phase 2 startup attempt ${attempt} FAILED:`, msg);
       
+      // CRITICAL: Stop the failed container BEFORE retrying to release resources
+      // Without this, each failed attempt leaves a zombie container that can cause
+      // port conflicts and resource leaks
+      if (containerB) {
+        try {
+          await containerB.stop();
+          console.log('[StalwartSetup] Failed container stopped.');
+          containerB = undefined;
+        } catch (stopErr) {
+          const stopMsg = stopErr instanceof Error ? stopErr.message : String(stopErr);
+          console.warn('[StalwartSetup] Warning: Could not stop failed container:', stopMsg);
+          containerB = undefined;
+        }
+      }
+      
       if (attempt < maxRetries) {
         if (msg.includes('LOCK') || msg.includes('Resource temporarily unavailable') || 
             msg.includes('993/tcp not bound') || msg.includes('exit code')) {
           console.log('[StalwartSetup] Possible lock/port issue, waiting 2s before retry...');
-          try {
-            const containerId = containerB?.getId();
-            if (containerId) {
-              const { stdout: failedLogs } = await execFileAsync('docker', ['logs', containerId, '--tail', '100']);
-              console.log('[StalwartSetup] Failed attempt logs:\n', failedLogs);
-              const diagFile = path.join(TEST_LOGS_DIR, 'stalwart-phase2.log');
-              appendFileSync(diagFile, `\n=== FAILED ATTEMPT ${attempt} DIAGNOSTICS ===\n${failedLogs}\n=== END ATTEMPT ${attempt} ===\n`);
-            }
-          } catch { /* Log capture errors are non-fatal */ }
+          // Note: containerB is now undefined, so we can't get logs from the failed container
+          // The log consumer should have already captured startup logs to stalwart-phase2.log
         }
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
