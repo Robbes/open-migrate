@@ -9,11 +9,9 @@
 // This is simpler and more efficient than unique accounts per test.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { sql } from 'drizzle-orm';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import type { ImapSimpleOptions } from 'imap-simple';
-import * as schema from '../../../packages/ledger/src/schema-pg.ts';
 import { createPgDb } from '../../../packages/ledger/src/db.ts';
 import { PgLedger } from '../../../packages/ledger/src/ledger.ts';
 import { ImapSource } from '../../../packages/connectors/src/imap-source.ts';
@@ -75,7 +73,7 @@ async function waitForSchema(maxRetries = 30, delayMs = 1000): Promise<void> {
   
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const result = await (client as any).sql<{ exists: boolean }>`
+      const result = await (client as { sql: unknown }).sql<{ exists: boolean }>`
         SELECT EXISTS (
           SELECT 1 FROM information_schema.tables 
           WHERE table_schema = 'public' AND table_name = 'mailbox'
@@ -115,41 +113,41 @@ async function cleanTargetMailboxes(): Promise<void> {
     },
   };
 
-  let conn: any = null;
+  let conn: unknown = null;
   
   try {
     conn = await imap.connect(config);
     
     // Get all mailboxes
-    const mailboxes: any = await conn.getMailboxes();
+    const mailboxes: Record<string, { name: string }> = await (conn as { getMailboxes: () => Promise<Record<string, { name: string }>> }).getMailboxes();
     
     // Delete all messages from each mailbox
     for (const mailbox of Object.values(mailboxes)) {
       try {
-        const mb: any = mailbox;
-        await conn.openBox(mb.name);
+        const mb = mailbox;
+        await (conn as { openBox: (name: string) => Promise<void> }).openBox(mb.name);
         
         // Fetch all messages
         const searchCriteria = ['ALL'];
-        const fetchResults: any = await conn.search(searchCriteria, {
+        const fetchResults: Array<{ attributes: { uid: number } }> = await (conn as { search: (criteria: string[], opts: unknown) => Promise<Array<{ attributes: { uid: number } }>> }).search(searchCriteria, {
           fields: ['ENVELOPE', 'RFC822.SIZE'],
         });
         
         if (fetchResults.length > 0) {
           // Get message UIDs for deletion
-          const uids = fetchResults.map((r: any) => r.attributes.uid);
+          const uids = fetchResults.map((r) => r.attributes.uid);
           
           // Mark all messages as deleted
-          await conn.addFlags(uids, '\\Deleted');
+          await (conn as { addFlags: (uids: number[], flags: string) => Promise<void> }).addFlags(uids, '\\Deleted');
           
           // Expunge to actually remove them
-          await conn.expunge();
+          await (conn as { expunge: () => Promise<void> }).expunge();
           
           console.log(`[Cleanup] Deleted ${fetchResults.length} messages from ${mb.name}`);
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        const mbName = (mailbox as any)?.name || 'unknown';
+        const mbName = (mailbox as { name: string })?.name || 'unknown';
         console.warn(`[Cleanup] Warning: Could not clean mailbox ${mbName}: ${msg}`);
       }
     }
@@ -161,7 +159,7 @@ async function cleanTargetMailboxes(): Promise<void> {
     // Don't fail the test if cleanup fails - just warn
   } finally {
     if (conn) {
-      conn.end();
+      (conn as { end: () => void }).end();
     }
   }
 }
@@ -177,19 +175,19 @@ async function cleanDatabaseState(): Promise<void> {
   
   try {
     // Delete cursor entries for this mapping
-    await (client as any).sql`
+    await (client as { sql: unknown }).sql`
       DELETE FROM cursor 
       WHERE mapping_id = ${REINDEX_MAPPING_ID}
     `;
     
     // Delete ledger/item entries for this tenant
-    await (client as any).sql`
+    await (client as { sql: unknown }).sql`
       DELETE FROM item 
       WHERE tenant_id = ${REINDEX_TENANT_ID}
     `;
     
     // Delete mailbox mappings for this tenant
-    await (client as any).sql`
+    await (client as { sql: unknown }).sql`
       DELETE FROM mailbox 
       WHERE tenant_id = ${REINDEX_TENANT_ID}
     `;
@@ -448,7 +446,7 @@ Content-Type: text/plain; charset=utf-8
 This message was added after the initial sync.
 `;
       
-      await conn.append(newMessage, { mailbox: 'INBOX' } as any);
+      await conn.append(newMessage, { mailbox: 'INBOX' });
       conn.end();
       
       // Run reindex - should find the new message
