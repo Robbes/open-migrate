@@ -17,9 +17,12 @@ export class InProcessScheduler implements Scheduler {
   }
 
   schedule(jobId: string, cron: string, task: () => Promise<void>): ScheduleHandle {
-    const job = new Cron(cron, async () => {
+    // Use paused: true to prevent immediate execution, then resume to start
+    const job = new Cron(cron, { paused: true }, async () => {
       await this.sf.run(jobId, task);
     });
+
+    job.resume();
 
     return {
       stop: () => {

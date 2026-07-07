@@ -220,11 +220,11 @@ async function captureContainerDiagnostics(
 }
 
 /**
- * Resolve the path to the stalwart-cli binary.
+ * Resolve the path to the stalwart-cli binary (lazy evaluation).
+ * Only called when actually starting Stalwart containers.
  * Priority: STALWART_CLI_PATH env var > 'stalwart-cli' on PATH > error.
- * This allows CI to override the path while keeping local development simple.
  */
-function resolveStalwartCliPath(): string {
+function getStalwartCliPath(): string {
   const envPath = process.env.STALWART_CLI_PATH;
   if (envPath) {
     console.log(`[StalwartSetup] Using STALWART_CLI_PATH from env: ${envPath}`);
@@ -249,9 +249,6 @@ function resolveStalwartCliPath(): string {
     'To install: curl --proto \'=https\' --tlsv1.2 -LsSf https://github.com/stalwartlabs/cli/releases/latest/download/stalwart-cli-installer.sh | sh'
   );
 }
-
-// Path to stalwart-cli binary (resolved dynamically at runtime)
-const STALWART_CLI_PATH = resolveStalwartCliPath();
 
 // Docker named volume for Stalwart data persistence
 // Bind mounts don't work in this DinD environment, so we use Docker volumes
@@ -301,7 +298,7 @@ export interface TestEnvironment {
     connectionString: string;
     container: StartedTestContainer;
   };
-  stalwart: {
+  stalwart?: {
     imapHost: string;
     imapPort: number;
     jmapUrl: string;
@@ -410,8 +407,9 @@ async function startStalwart(): Promise<{
     console.log('[StalwartSetup] Plan written to:', planFile);
     
     console.log('[StalwartSetup] Running stalwart-cli...');
+    const stalwartCli = getStalwartCliPath();
     const { stdout, stderr } = await execFileAsync(
-      STALWART_CLI_PATH,
+      stalwartCli,
       ['apply', '--file', planFile],
       {
         env: {
@@ -446,9 +444,10 @@ async function startStalwart(): Promise<{
   // Verify accounts were created using host-level CLI
   console.log('[StalwartSetup] Verifying accounts...');
   try {
+    const stalwartCli = getStalwartCliPath();
     // Use 'query Account' to list all accounts and verify both exist
     const { stdout: queryOutput } = await execFileAsync(
-      STALWART_CLI_PATH,
+      stalwartCli,
       ['query', 'Account'],
       {
         env: {
@@ -666,9 +665,10 @@ async function startStalwart(): Promise<{
 
 /**
  * Start the test environment using Testcontainers.
- * Spins up Postgres and Stalwart (two-phase startup) containers.
+ * Spins up Postgres and optionally Stalwart (two-phase startup) containers.
+ * @param skipStalwart - If true, skip starting Stalwart container (useful for unit tests)
  */
-export async function startTestEnvironment(): Promise<TestEnvironment> {
+export async function startTestEnvironment(skipStalwart: boolean = false): Promise<TestEnvironment> {
   console.log('[Testcontainers] Starting test environment...');
 
   // Create a shared network for containers
@@ -696,27 +696,38 @@ export async function startTestEnvironment(): Promise<TestEnvironment> {
 
   console.log(`[Testcontainers] Postgres ready at ${postgresConnectionString}`);
 
-  // Start Stalwart (two-phase: provision then run)
-  const stalwart = await startStalwart();
+  // Start Stalwart only if not skipped
+  let stalwartEnv: TestEnvironment['stalwart'] | undefined;
+  
+  if (!skipStalwart) {
+    const stalwart = await startStalwart();
+    stalwartEnv = {
+      imapHost: stalwart.imapHost,
+      imapPort: stalwart.imapPort,
+      jmapUrl: stalwart.jmapUrl,
+      jmapUsername: 'target@dev.local',
+      jmapPassword: 'target_password',
+      container: stalwart.container,
+    };
+    console.log(`[StalwartSetup] Stalwart ready - JMAP: ${stalwart.jmapUrl}, IMAPS: ${stalwart.imapHost}:${stalwart.imapPort}`);
+  } else {
+    console.log('[Testcontainers] Skipping Stalwart startup (unit test mode).');
+  }
 
-  const stalwartEnv: TestEnvironment['stalwart'] = {
-    imapHost: stalwart.imapHost,
-    imapPort: stalwart.imapPort,
-    jmapUrl: stalwart.jmapUrl,
-    jmapUsername: 'target@dev.local',
-    jmapPassword: 'target_password',
-    container: stalwart.container,
-  };
-
-  return {
+  const result: TestEnvironment = {
     postgres: {
       host: postgresHost,
       port: postgresPort,
       connectionString: postgresConnectionString,
       container: postgresContainer,
     },
-    stalwart: stalwartEnv,
   };
+  
+  if (stalwartEnv) {
+    result.stalwart = stalwartEnv;
+  }
+  
+  return result;
 }
 
 /**
@@ -739,28 +750,33 @@ export async function stopTestEnvironment(env: TestEnvironment): Promise<void> {
     await captureContainerDiagnostics(env.postgres.container, 'postgres', ['ps aux', 'df -h']);
   }
   
-  try {
-    await env.stalwart.container.stop();
-    console.log('[Testcontainers] Stalwart stopped.');
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('[Testcontainers] Error stopping Stalwart:', msg);
-    // Capture full diagnostics on Stalwart failure
-    await captureContainerDiagnostics(
-      env.stalwart.container,
-      'stalwart-phase2',
-      ['ps aux', 'df -h', 'cat /etc/stalwart/config.json 2>/dev/null || echo "no config"', 'ls -la /opt/stalwart/data/']
-    );
+  // Only stop Stalwart if it was started
+  if (env.stalwart) {
+    try {
+      await env.stalwart.container.stop();
+      console.log('[Testcontainers] Stalwart stopped.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[Testcontainers] Error stopping Stalwart:', msg);
+      // Capture full diagnostics on Stalwart failure
+      await captureContainerDiagnostics(
+        env.stalwart.container,
+        'stalwart-phase2',
+        ['ps aux', 'df -h', 'cat /etc/stalwart/config.json 2>/dev/null || echo "no config"', 'ls -la /opt/stalwart/data/']
+      );
+    }
+    
+    // Clean up the Stalwart data volume to prevent stale locks for next run
+    try {
+      execFileSync('docker', ['volume', 'rm', STALWART_DATA_VOLUME], { stdio: 'ignore' });
+      console.log(`[Testcontainers] Cleaned up Stalwart volume: ${STALWART_DATA_VOLUME}`);
+    } catch {
+      // Volume might already be gone or in use
+      console.warn(`[Testcontainers] Could not remove volume ${STALWART_DATA_VOLUME}`);
+    }
+  } else {
+    console.log('[Testcontainers] No Stalwart container to stop.');
   }
   
   console.log('[Testcontainers] All containers stopped.');
-  
-  // Clean up the Stalwart data volume to prevent stale locks for next run
-  try {
-    execFileSync('docker', ['volume', 'rm', STALWART_DATA_VOLUME], { stdio: 'ignore' });
-    console.log(`[Testcontainers] Cleaned up Stalwart volume: ${STALWART_DATA_VOLUME}`);
-  } catch {
-    // Volume might already be gone or in use
-    console.warn(`[Testcontainers] Could not remove volume ${STALWART_DATA_VOLUME}`);
-  }
 }

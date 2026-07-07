@@ -67,8 +67,8 @@ describe('InProcessScheduler.schedule (croner)', () => {
     // Schedule every 1 second
     const handle = sched.schedule('test-job', '* * * * * *', task);
 
-    // Advance 1.5 seconds to trigger one tick
-    await vi.advanceTimersByTimeAsync(1500);
+    // Advance exactly 1 second to trigger one tick
+    await vi.advanceTimersByTimeAsync(1000);
 
     expect(calls).toBe(1);
 
@@ -92,7 +92,8 @@ describe('InProcessScheduler.schedule (croner)', () => {
       b++;
     });
 
-    await vi.advanceTimersByTimeAsync(1500);
+    // Advance exactly 1 second to trigger one tick for each job
+    await vi.advanceTimersByTimeAsync(1000);
 
     expect(a).toBe(1);
     expect(b).toBe(1);
