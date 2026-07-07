@@ -49,9 +49,89 @@ integration suite does not depend on it.
 - **Fresh, uniquely named volume per run**, removed in teardown — never reuse dirty volumes.
 - Per-phase server logs are streamed to `test-logs/stalwart-phase{1,2}.log`; the log consumer is
   attached to the container instance actually started (retry-loop trap).
+- **Test isolation via mailbox cleanup**: Integration tests that share Stalwart accounts must
+  clean ALL target mailboxes and database state before each test. This prevents data leakage
+  between tests without the overhead of unique accounts per test. See `apps/worker/src/jmap-reindex.integration.test.ts`
+  for the canonical pattern: `cleanTargetMailboxes()` + `cleanDatabaseState()` in `beforeEach`.
 - Ledger **cursors are isolated between tests**; no test may read another test's cursor.
 - After every mirror run the tests **assert the source INBOX count is unchanged**
   (cross-account-pollution guard).
+
+## Test isolation patterns
+
+### Mailbox cleanup (recommended for shared accounts)
+
+When multiple tests share the same Stalwart accounts, clean ALL target mailboxes and database
+state before each test:
+
+```typescript
+async function cleanTargetMailboxes(): Promise<void> {
+  const config: ImapSimpleOptions = { /* ... */ };
+  const conn = await imap.connect(config);
+  
+  const mailboxes = await conn.getMailboxes();
+  for (const mailbox of Object.values(mailboxes)) {
+    await conn.openBox(mailbox.name);
+    const all = await conn.search(['ALL'], { fields: ['UID'] });
+    if (all.length > 0) {
+      const uids = all.map(r => r.attributes.uid);
+      await conn.addFlags(uids, '\\Deleted');
+      await conn.expunge();
+    }
+  }
+  conn.end();
+}
+
+async function cleanDatabaseState(tenantId: string, mappingId: string): Promise<void> {
+  await db.sql`DELETE FROM cursor WHERE mapping_id = ${mappingId}`;
+  await db.sql`DELETE FROM item WHERE tenant_id = ${tenantId}`;
+  await db.sql`DELETE FROM mailbox WHERE tenant_id = ${tenantId}`;
+}
+
+// In beforeEach:
+beforeEach(async () => {
+  await cleanTargetMailboxes();
+  await cleanDatabaseState(TENANT_ID, MAPPING_ID);
+  await seedTestData(); // Optional: seed fresh test data
+});
+```
+
+**Why this approach?**
+- ✅ Simple: No complex account provisioning or container management
+- ✅ Fast: No container startup overhead (~10-15s saved per test file)
+- ✅ Reusable: Works with the existing shared Stalwart infrastructure
+- ✅ Standard: Follows the "clean slate" pattern common in integration testing
+
+**When to use unique accounts instead:**
+- Tests that need to run truly in parallel (same Stalwart instance)
+- Tests that modify account-level settings (not just message data)
+- Tests that verify account-specific behavior
+
+### Unique accounts per test (advanced)
+
+For true isolation, each test file can start its own Stalwart container with unique accounts:
+
+```typescript
+import { generateTestAccounts, startStalwartIsolated } from '@openmig/testing';
+
+const TEST_ACCOUNTS = generateTestAccounts('mytest');
+
+beforeAll(async () => {
+  const stalwart = await startStalwartIsolated([
+    { name: TEST_ACCOUNTS.source.name, password: TEST_ACCOUNTS.source.password },
+    { name: TEST_ACCOUNTS.target.name, password: TEST_ACCOUNTS.target.password },
+  ]);
+  // Use stalwart.imapHost, stalwart.imapPort, etc.
+});
+```
+
+**Trade-offs:**
+- ✅ Complete isolation: No shared state at all
+- ❌ Complex: Each test file manages its own container lifecycle
+- ❌ Slow: ~10-15 seconds overhead per test file for container startup
+- ❌ Resource intensive: Multiple containers if tests run in parallel
+
+Generally, **mailbox cleanup is preferred** unless you have a specific need for complete isolation.
 
 ## CI mapping (.github/workflows)
 - `ci.yml` — `detect-changes -> docs-hygiene (parallel) -> lint -> unit-tests ->

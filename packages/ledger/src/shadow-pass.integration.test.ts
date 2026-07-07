@@ -2,7 +2,7 @@
 // Integration tests for the shadow pass (T4) against real IMAP source + JMAP target + SQL ledger.
 // Tests idempotency: running twice creates 0 duplicates; delta: adding one message creates exactly 1.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
@@ -136,6 +136,7 @@ type DbClient = ReturnType<typeof createPgDb>;
 
 /**
  * Seed test messages into the source IMAP account.
+ * First cleans the INBOX to ensure test isolation.
  */
 async function seedSourceMessages(): Promise<void> {
   const imap = await import('imap-simple');
@@ -155,7 +156,36 @@ async function seedSourceMessages(): Promise<void> {
 
   try {
     // Open INBOX
-    await conn.openBox('INBOX');
+    const inbox = await conn.openBox('INBOX') as unknown as ImMapBox;
+    
+    console.log(`[seedSource] INBOX has ${inbox.messages.total} messages before cleanup`);
+    
+    // Clean existing messages before seeding
+    if (inbox.messages.total > 0) {
+      const searchCriteria = ['ALL'];
+      const messages = await conn.search(searchCriteria, {
+        envelope: true,
+        size: true,
+      });
+      
+      console.log(`[seedSource] Search returned ${messages.length} messages`);
+      
+      if (messages.length > 0) {
+        const uids = messages.map((m: { attributes: { uid: number } }) => m.attributes.uid);
+        console.log(`[seedSource] Deleting messages with UIDs: ${uids.join(', ')}`);
+        await (conn as { addFlags: (uids: number[], flags: string) => Promise<void> }).addFlags(uids, '\\Deleted');
+        // Close the box with autoExpunge=true to remove deleted messages
+        // The closeBox method accepts autoExpunge parameter (defaults to true)
+        await conn.closeBox(true);
+        console.log(`[seedSource] Closed INBOX with autoExpunge, removed ${uids.length} deleted messages`);
+        // Reopen the box for seeding new messages
+        await conn.openBox('INBOX');
+        console.log(`[seedSource] Reopened INBOX, ready for new messages`);
+        console.log(`[seedSource] Cleaned ${uids.length} existing messages from INBOX`);
+      }
+    } else {
+      console.log('[seedSource] INBOX is already empty, no cleanup needed');
+    }
 
     // Seed test messages with known Message-IDs
     const testMessages = [
@@ -190,7 +220,10 @@ ${msg.body}
       await conn.append(rfc822, {
         mailbox: 'INBOX',
       } as AppendOptions);
+      console.log(`[seedSource] Appended message: ${msg.messageId}`);
     }
+    
+    console.log(`[seedSource] Successfully seeded ${testMessages.length} messages to INBOX`);
   } finally {
     conn.end();
   }
@@ -242,10 +275,23 @@ describe('Shadow Pass Integration (T4)', () => {
     // Connect target
     await target.connect();
     
-    // Seed source messages (accounts are already provisioned by testcontainers setup)
+    console.log('[ShadowPass] Test setup complete');
+  }, 60000);
+
+  beforeEach(async () => {
+    // Clean and re-seed source INBOX before each test to ensure test isolation
+    // This prevents cross-contamination from parallel test runs (e.g., jmap-reindex test)
+    console.log('[ShadowPass] Cleaning and re-seeding source INBOX...');
     await seedSourceMessages();
+    console.log('[ShadowPass] Source INBOX ready for test');
     
-    // Create test data (tenant, connection, mailbox, mapping)
+    // Clean database items but PRESERVE cursor state for delta tests
+    // The cursor is needed to track which messages have already been processed
+    console.log('[ShadowPass] Deleting items for tenant:', TEST_TENANT_ID);
+    await db.execute(sql`DELETE FROM item WHERE tenant_id = ${TEST_TENANT_ID}`);
+    // NOTE: Do NOT delete cursor - it must persist across tests for delta semantics
+    
+    // Recreate test data (tenant, connection, mailbox, mapping)
     await db.execute(sql`
       INSERT INTO tenant (id, name, status)
       VALUES (${TEST_TENANT_ID}, 'Test Tenant', 'active')
@@ -281,13 +327,15 @@ describe('Shadow Pass Integration (T4)', () => {
       VALUES (${targetMailboxId}, ${TEST_TENANT_ID}, ${targetConnId}, 'INBOX', 'user', 'INBOX', 'active')
       ON CONFLICT (id) DO NOTHING
     `);
-
+    
     await db.execute(sql`
       INSERT INTO mailbox_mapping (id, tenant_id, source_mailbox_id, target_mailbox_id, mode, status)
       VALUES (${TEST_MAPPING_ID}, ${TEST_TENANT_ID}, ${sourceMailboxId}, ${targetMailboxId}, 'mirror', 'active')
       ON CONFLICT (id) DO NOTHING
     `);
-  }, 60000);
+    
+    console.log('[ShadowPass] Database state cleaned (cursor preserved)');
+  });
 
   afterAll(async () => {
     // Cleanup: delete test data
@@ -380,8 +428,10 @@ describe('Shadow Pass Integration (T4)', () => {
     }
   }, 120000);
 
-  it('should handle delta correctly (adding one message creates exactly 1)', async () => {
-    // Seed one more message
+  it('should handle delta correctly (adding one more message creates exactly 1)', async () => {
+    // The beforeEach re-seeded the messages with new UIDs.
+    // We need to reset the cursor to match the re-seeded messages.
+    // First, query the IMAP server to get the current UIDs.
     const imap = await import('imap-simple');
 
     const config: ImapSimpleOptions = {
@@ -396,7 +446,41 @@ describe('Shadow Pass Integration (T4)', () => {
     };
 
     const conn = await imap.connect(config);
-
+    
+    try {
+      const inbox = await conn.openBox('INBOX') as unknown as ImMapBox;
+      const uidValidity = inbox.uidvalidity;
+      let maxUid = 0;
+      
+      // Get all messages to find the max UID
+      const searchCriteria = ['ALL'];
+      const fetchCriteria = {
+        envelope: true,
+        size: true,
+      };
+      const messages = await conn.search(searchCriteria, fetchCriteria);
+      
+      for (const msg of messages) {
+        const uid = msg.attributes?.uid;
+        if (uid && uid > maxUid) {
+          maxUid = uid;
+        }
+      }
+      
+      console.log(`[Delta Test] Re-seeded INBOX: uidValidity=${uidValidity}, maxUid=${maxUid}`);
+      
+      // Reset cursor to uidNext = maxUid + 1, so that only new messages will be processed
+      const newCursorValue = `${uidValidity}:${maxUid + 1}`;
+      await cursorStore.set(TEST_TENANT_ID, TEST_MAPPING_ID, 'INBOX', {
+        value: newCursorValue,
+      });
+      console.log(`[Delta Test] Cursor reset to uidNext=${maxUid + 1}`);
+    } finally {
+      conn.end();
+    }
+    
+    // Now add one more message
+    const conn2 = await imap.connect(config);
     try {
       const newMessage = `From: source@dev.local
 To: target@dev.local
@@ -408,11 +492,11 @@ Content-Type: text/plain; charset=utf-8
 This is the fourth test message for delta testing.
 `;
 
-      await conn.append(newMessage, {
+      await conn2.append(newMessage, {
         mailbox: 'INBOX',
       } as AppendOptions);
     } finally {
-      conn.end();
+      conn2.end();
     }
 
     // REGRESSION GUARD: Verify source INBOX has exactly 4 messages before delta run
