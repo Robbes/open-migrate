@@ -19,7 +19,7 @@ import { ImapSource } from '../../../packages/connectors/src/imap-source.ts';
 import { JmapTargetWriter } from '../../../packages/connectors/src/jmap-target.ts';
 import { runShadowPass } from '../../../packages/core/src/reconcile.ts';
 import { reindexFromTarget } from '../../../packages/core/src/reindex.ts';
-import { asTenantId, asMappingId } from '@openmig/shared';
+import { asTenantId, asMappingId, type MailItem } from '@openmig/shared';
 import imap from 'imap-simple';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -498,9 +498,9 @@ describe('JMAP Reindex Integration Tests', () => {
 
       // Get the target mailbox ID (INBOX)
       const targetMailboxId = await target.ensureMailbox({
+        path: 'INBOX',
         name: 'INBOX',
-        role: 'inbox',
-        type: 'user',
+        specialUse: 'inbox',
       });
 
       // Add a new message directly to the target (simulating a message added outside the migration)
@@ -514,7 +514,20 @@ Content-Type: text/plain; charset=utf-8
 This message was added directly to the target after the initial sync.
 `;
 
+      const newMessageItem: MailItem = {
+        messageId: '<new-message-after-sync@dev.local>',
+        folder: {
+          path: 'INBOX',
+          name: 'INBOX',
+          specialUse: 'inbox',
+        },
+        keywords: [],
+        receivedAt: new Date().toISOString(),
+        sourceRef: 'INBOX:1',
+      };
+
       await target.upsertEmail(targetMailboxId, {
+        item: newMessageItem,
         rfc822: new Uint8Array(Buffer.from(newMessage)),
       }, []);
 
