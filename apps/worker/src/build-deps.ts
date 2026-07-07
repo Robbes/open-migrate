@@ -8,11 +8,9 @@ import {
   type MappingConfig,
   type SourceConnector,
   type TargetWriter,
-  type Ledger,
-  type CursorStore,
 } from '@openmig/shared';
-import { ImapSource, type ImapSourceConfig } from '@openmig/connectors';
-import { JmapTargetWriter, type JmapTargetConfig } from '@openmig/connectors';
+import { ImapSource } from '@openmig/connectors';
+import { JmapTargetWriter } from '@openmig/connectors';
 import { PgLedger } from '@openmig/ledger';
 import { PgCursorStore } from '@openmig/ledger';
 import { createPgDb } from '@openmig/ledger';
@@ -22,7 +20,7 @@ import { createPgDb } from '@openmig/ledger';
  * This wires together all the components needed for the worker to run.
  */
 export async function buildDeps(config: MappingConfig): Promise<ReconcileDeps> {
-  // Extract database connection from config or environment
+  // Extract database connection from environment
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     throw new Error(
@@ -47,8 +45,8 @@ export async function buildDeps(config: MappingConfig): Promise<ReconcileDeps> {
   const target = buildTargetWriter(config.target);
 
   return {
-    tenantId: config.tenantId,
-    mappingId: config.mappingId,
+    tenantId: config.tenantId as unknown as ReconcileDeps['tenantId'],
+    mappingId: config.mappingId as unknown as ReconcileDeps['mappingId'],
     source,
     target,
     ledger,
@@ -59,52 +57,61 @@ export async function buildDeps(config: MappingConfig): Promise<ReconcileDeps> {
 
 /**
  * Build a source connector from the mapping config.
+ * Currently only supports imap-oauth2 (O365 with XOAUTH2).
  */
 function buildSourceConnector(sourceConfig: MappingConfig['source']): SourceConnector {
-  if (sourceConfig.type !== 'imap') {
-    throw new Error(`Unsupported source type: ${sourceConfig.type}. Only 'imap' is supported.`);
-  }
-
-  const imapConfig: ImapSourceConfig = {
+  // SourceConfig is currently ImapOAuth2Source (only type supported)
+  const imapConfig = {
     host: sourceConfig.host,
     port: sourceConfig.port,
-    tls: sourceConfig.tls ?? true,
+    tls: true,
     auth: {
-      user: sourceConfig.username,
+      user: sourceConfig.user,
+      accessToken: sourceConfig.auth.kind === 'xoauth2' 
+        ? process.env[sourceConfig.auth.tokenFromEnv] 
+        : undefined,
     },
-    authType: sourceConfig.authType,
+    authType: 'XOAUTH2' as const,
   };
-
-  // Handle authentication
-  if ('accessToken' in sourceConfig && sourceConfig.accessToken) {
-    // XOAUTH2 authentication
-    imapConfig.auth.accessToken = sourceConfig.accessToken;
-    imapConfig.authType = 'XOAUTH2';
-  } else if ('password' in sourceConfig && sourceConfig.password) {
-    // Plain LOGIN authentication
-    imapConfig.auth.password = sourceConfig.password;
-    imapConfig.authType = 'LOGIN';
-  } else {
-    throw new Error(
-      'IMAP source requires either password (LOGIN) or accessToken (XOAUTH2) authentication'
-    );
-  }
 
   return new ImapSource(imapConfig);
 }
 
 /**
  * Build a target writer from the mapping config.
+ * Currently only supports jmap targets.
  */
 function buildTargetWriter(targetConfig: MappingConfig['target']): TargetWriter {
   if (targetConfig.type !== 'jmap') {
     throw new Error(`Unsupported target type: ${targetConfig.type}. Only 'jmap' is supported.`);
   }
 
-  const jmapConfig: JmapTargetConfig = {
-    baseUrl: targetConfig.url,
-    username: targetConfig.username,
-    password: targetConfig.password,
+  // For JMAP targets, we need to determine the password based on auth type
+  // - basic: password from environment variable
+  // - bearer: we use the token as password (JMAP library accepts it)
+  let password: string;
+  if (targetConfig.auth.kind === 'basic') {
+    password = process.env[targetConfig.auth.passwordFromEnv] ?? '';
+  } else if (targetConfig.auth.kind === 'bearer') {
+    // For bearer token auth, we use the token as the password
+    password = process.env[targetConfig.auth.tokenFromEnv] ?? '';
+  } else {
+    throw new Error(`Unsupported JMAP auth kind: ${(targetConfig.auth as {kind: string}).kind}`);
+  }
+
+  if (!password) {
+    throw new Error(
+      `JMAP target password/token not found in environment: ` +
+      `check ${targetConfig.auth.kind === 'basic' 
+        ? targetConfig.auth.passwordFromEnv 
+        : targetConfig.auth.tokenFromEnv}`
+    );
+  }
+
+  const jmapConfig = {
+    baseUrl: targetConfig.baseUrl,
+    username: targetConfig.user,
+    password,
   };
 
   return new JmapTargetWriter(jmapConfig);
