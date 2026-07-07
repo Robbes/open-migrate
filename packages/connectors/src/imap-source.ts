@@ -273,14 +273,43 @@ export class ImapSource implements SourceConnector {
           if (decoded.uidValidity === uidValidity) {
             filteredResults = filteredResults.filter(msg => {
               const uid = msg.attributes?.uid;
-              return uid >= decoded.uidNext;
+              // Ensure UID is within valid range: >= cursor.uidNext and < box.uidnext
+              // This prevents returning stale UIDs that don't exist
+              return uid >= decoded.uidNext && uid < (box.uidnext || Infinity);
             });
-            console.log('[DEBUG listSince] Filtered to', filteredResults.length, 'messages with UID >=', decoded.uidNext);
+            console.log('[DEBUG listSince] Filtered to', filteredResults.length, 'messages with UID >=', decoded.uidNext, 'and <', box.uidnext);
           }
         } catch {
           // Invalid cursor, use all results
         }
       }
+
+      // Re-verify that each message actually exists by attempting to fetch headers
+      // This handles the case where the IMAP server returns stale UIDs in the search results
+      const verifiedResults = [];
+      for (const msg of filteredResults) {
+        const uid = msg.attributes?.uid;
+        if (uid) {
+          // Quick existence check - try to fetch just the envelope (headers)
+          try {
+            const verifyResults = await conn.search([`${uid}`], {
+              envelope: true,  // Fetch envelope/headers only
+              struct: false,
+              bodies: '',
+            });
+            if (verifyResults && verifyResults.length > 0) {
+              verifiedResults.push(msg);
+            } else {
+              console.log('[DEBUG listSince] Skipping non-existent UID:', uid);
+            }
+          } catch (err) {
+            console.log('[DEBUG listSince] Error verifying UID', uid, ':', err);
+            // If verification fails, skip the message
+          }
+        }
+      }
+      filteredResults = verifiedResults;
+      console.log('[DEBUG listSince] After verification, have', filteredResults.length, 'messages');
 
       const items: MailItem[] = [];
       let maxUidNext = uidNext;
@@ -345,11 +374,21 @@ export class ImapSource implements SourceConnector {
       console.log('[DEBUG fetch] Fetching UID:', uid, 'from folder:', item.folder.path);
       
       // Fetch the raw RFC822 message using the UID
-      const results = await conn.search([`${uid}`], {
-        bodies: '',  // Fetch entire message body
-        markSeen: false,
-      });
-      console.log('[DEBUG fetch] search results count:', results?.length);
+      // Retry up to 3 times to handle potential race conditions where the message
+      // hasn't been fully committed to the IMAP server yet
+      let results: Array<{ attributes: { uid: number }; parts: Array<{ body: unknown }> }> = [];
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        results = await conn.search([`${uid}`], {
+          bodies: '',  // Fetch entire message body
+          markSeen: false,
+        });
+        console.log('[DEBUG fetch] search results count:', results?.length, '(attempt', attempt + ')');
+        if (results.length > 0) {
+          break;
+        }
+        // Small delay between retries to allow IMAP server to commit the message
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
 
       if (results.length === 0) {
         throw new Error(`Message not found: ${item.sourceRef}`);

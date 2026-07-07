@@ -13,7 +13,7 @@
     "format:fix": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --project unit --passWithNoTests",
-    "test:integration": "vitest run --project integration --passWithNoTests",
+    "test:integration": "vitest run --project integration --no-file-parallelism --passWithNoTests",
     "test:e2e": "vitest run --project e2e --passWithNoTests",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"

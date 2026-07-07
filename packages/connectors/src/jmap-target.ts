@@ -508,7 +508,7 @@ export class JmapTargetWriter implements TargetWriter, TargetReindexer {
         };
       }
 
-      console.log('[DEBUG JMAP] Email/query position:', position, 'limit:', LIMIT);
+      console.log('[DEBUG JMAP] Email/query request:', JSON.stringify(queryArgs));
 
       const response = await this.apiRequest<EmailQueryResponse>('Email/query', queryArgs);
       const ids = (response as { ids?: string[] }).ids || [];
@@ -531,11 +531,25 @@ export class JmapTargetWriter implements TargetWriter, TargetReindexer {
 
       const emails = (getResponse as { list?: EmailGetResponse['list'] }).list || [];
       console.log('[DEBUG JMAP] Email/get returned', emails.length, 'emails');
+      
+      // Debug: Log first email structure
+      if (emails.length > 0) {
+        console.log('[DEBUG JMAP] First email structure:', JSON.stringify(emails[0], null, 2));
+      }
 
       for (const email of emails) {
         // Extract Message-ID from headers
-        // JMAP returns headers as a Record<string, string> where keys are header names
-        const messageId = email.headers?.['Message-ID'] || email.headers?.['message-id'] || '';
+        // JMAP returns headers as an array of {name, value} objects
+        let messageId = '';
+        if (Array.isArray(email.headers)) {
+          const messageIdHeader = email.headers.find(h => h.name.toLowerCase() === 'message-id');
+          if (messageIdHeader) {
+            messageId = messageIdHeader.value.trim();
+          }
+        } else if (email.headers) {
+          // Fallback: try record format (name: value)
+          messageId = (email.headers as Record<string, string>)['Message-ID'] || (email.headers as Record<string, string>)['message-id'] || '';
+        }
         
         // If no Message-ID, skip this email (it won't have a natural key)
         if (!messageId) {
@@ -652,7 +666,7 @@ export class JmapTargetWriter implements TargetWriter, TargetReindexer {
     console.log('[DEBUG JMAP] receivedAt:', receivedAt);
     
     // Step 2: Import the email from the blob using Email/import
-    const importResponse = await this.apiRequest<EmailImportResponse>('Email/import', {
+    const importRequest = {
       accountId: this.accountId,
       emails: {
         "0": {
@@ -662,7 +676,9 @@ export class JmapTargetWriter implements TargetWriter, TargetReindexer {
           receivedAt,
         },
       },
-    });
+    };
+    console.log('[DEBUG JMAP] Email/import request:', JSON.stringify(importRequest));
+    const importResponse = await this.apiRequest<EmailImportResponse>('Email/import', importRequest);
 
     console.log('[DEBUG JMAP] Email import response:', JSON.stringify(importResponse));
 

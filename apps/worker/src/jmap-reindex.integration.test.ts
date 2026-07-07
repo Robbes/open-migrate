@@ -531,6 +531,16 @@ This message was added directly to the target after the initial sync.
         rfc822: new Uint8Array(Buffer.from(newMessage)),
       }, []);
 
+      // Verify the message was added by checking listEntries
+      let foundNewMessage = false;
+      for await (const entry of target.listEntries()) {
+        if (entry.naturalKey === '<new-message-after-sync@dev.local>') {
+          foundNewMessage = true;
+          break;
+        }
+      }
+      expect(foundNewMessage).toBe(true);
+
       // Run reindex - should find the new message in the target
       const result = await reindexFromTarget({
         tenantId: REINDEX_TENANT_ID,
@@ -544,6 +554,15 @@ This message was added directly to the target after the initial sync.
     });
 
     it('should be idempotent - re-running reindex should not add duplicates', async () => {
+      // Setup: sync messages from source to target
+      await runShadowPass({
+        source,
+        target,
+        mappingId: REINDEX_MAPPING_ID,
+        tenantId: REINDEX_TENANT_ID,
+        ledger,
+      });
+
       // Run reindex twice
       const result1 = await reindexFromTarget({
         tenantId: REINDEX_TENANT_ID,
@@ -551,17 +570,17 @@ This message was added directly to the target after the initial sync.
         reindexer: target,
         ledger,
       });
-      
+
       const result2 = await reindexFromTarget({
         tenantId: REINDEX_TENANT_ID,
         mappingId: REINDEX_MAPPING_ID,
         reindexer: target,
         ledger,
       });
-      
+
       // First run should adopt items
       expect(result1.adopted).toBeGreaterThan(0);
-      
+
       // Second run should adopt nothing (already synced)
       expect(result2.adopted).toBe(0);
     });
