@@ -7,8 +7,82 @@ Low-maintenance, open-source stack to migrate families and small/medium business
 - **You stay in control** — a clear UI shows what migrates, what doesn't, the status, and any choices to make.
 - **Two editions, one core:** self-host it yourself (NAS / mini-PC / Raspberry Pi / Spark) or use it as a managed service.
 
+## Quickstart
+
+### Prerequisites
+- Node.js 24+ (or use [Corepack](https://nodejs.org/api/corepack.html))
+- pnpm (via `corepack enable pnpm`)
+- Docker (for integration tests and dev stack)
+
+### Installation
+```bash
+# Clone the repository
+git clone https://github.com/your-org/open-migrate.git
+cd open-migrate
+
+# Install dependencies
+corepack enable pnpm
+pnpm install
+```
+
+### Running Tests
+```bash
+# Unit tests (no dependencies)
+pnpm test
+
+# Integration tests (requires Docker)
+pnpm test:integration
+
+# All gates
+pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration
+```
+
+### Running the Worker (Development)
+
+> **Note:** The worker CLI is implemented but the full dependency injection (ledger, IMAP source, JMAP target) is still being wired up. Integration tests verify the core logic works end-to-end.
+
+```bash
+# Bring up the dev stack (Postgres + Stalwart + Nextcloud)
+docker compose -f deploy/compose/dev.yml up -d
+
+# Run worker (requires full dependency bundle - see workplan 0001 T7)
+node --loader ts-node/esm apps/worker/src/index.ts --config ./mapping.example.json --once
+```
+
+### Configuration
+Create a mapping configuration file (see `mapping.example.json`):
+```json
+{
+  "tenantId": "your-tenant-id",
+  "mappingId": "your-mapping-id",
+  "source": {
+    "type": "imap",
+    "host": "outlook.office365.com",
+    "port": 993,
+    "username": "user@domain.com",
+    "auth": { "type": "OAUTH2", "accessToken": "..." }
+  },
+  "target": {
+    "type": "jmap",
+    "url": "https://your-jmap-provider.com/jmap",
+    "username": "target@domain.com",
+    "password": "..."
+  },
+  "schedule": "0 */6 * * *"
+}
+```
+
+Secrets should be stored in environment variables or a vault, never committed to the repository.
+
 ## Documentation
 Everything lives in [`docs/`](./docs/). Start with the source of truth: [`docs/architecture/solution-architecture.md`](./docs/architecture/solution-architecture.md). Decisions are recorded in [`docs/adr/`](./docs/adr/).
+
+### Key Documentation
+- **Architecture**: [`docs/architecture/solution-architecture.md`](./docs/architecture/solution-architecture.md)
+- **Testing Guide**: [`docs/testing.md`](./docs/testing.md)
+- **Stalwart Integration**: [`docs/stalwart-integration-fix.md`](./docs/stalwart-integration-fix.md)
+- **Workplans**: [`docs/workplans/`](./docs/workplans/)
+- **Decision Records**: [`docs/adr/`](./docs/adr/)
 
 ## Status
 Early development. License: Apache-2.0 (see `LICENSE`).

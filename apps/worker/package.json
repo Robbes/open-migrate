@@ -11,6 +11,8 @@
     "@openmig/core": "workspace:*",
     "@openmig/scheduler": "workspace:*",
     "@openmig/shared": "workspace:*",
+    "@openmig/connectors": "workspace:*",
+    "@openmig/ledger": "workspace:*",
     "croner": "9.1.0"
   }
 }
