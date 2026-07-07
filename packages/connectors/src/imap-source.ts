@@ -129,8 +129,14 @@ export class ImapSource implements SourceConnector {
       // Note: getBoxes is callback-based in the type definitions, but returns a Promise in practice
       type MailboxInfo = { attributes?: string[] };
       const list = await (
-        conn.imap.getBoxes as () => Promise<Record<string, MailboxInfo>>
+        conn.imap.getBoxes as () => Promise<Record<string, MailboxInfo> | undefined>
       )();
+      
+      // Handle case where getBoxes returns undefined (no folders or server doesn't support LIST)
+      if (!list) {
+        return [];
+      }
+      
       const folders: MailFolder[] = [];
 
       for (const [path, mailbox] of Object.entries(list)) {

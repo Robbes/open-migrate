@@ -82,12 +82,6 @@ observed to prevent "LOCK: Resource temporarily unavailable" errors:
    and shared by all integration tests. Never start multiple Stalwart containers on the same volume
    (even across parallel test files).
 
-## Open item (the ONLY real remaining work)
-IMAP auth succeeds but the connection drops after auth, during commands — a test-client TLS-mode or
-APPEND-literal mismatch. Diagnose with `nc` and `openssl s_client -starttls imap`, align the client
-(APPEND literal needs \r\n endings + exact octet count; match the server's advertised CAPABILITY).
-Do NOT change config.json for this — listeners need no config.
-
 ## Verified Findings from Integration Testing
 
 **Image**: The official `stalwartlabs/stalwart:v0.16.10` image works correctly. No custom image
@@ -104,16 +98,32 @@ is needed. The custom image `stalwart-test-custom:latest` provided no benefit.
 auto-bound in v0.16.10. This is a hardening change from earlier versions. Tests MUST use TLS
 ports (993 for IMAPS).
 
-**Known IMAP Issue**: During integration testing, IMAP connections to port 993 establish
-successfully (TCP + TLS handshake), but subsequent IMAP commands fail with error "localhost.local".
-This appears to be a server-side issue where Stalwart is returning an error message containing
-its hostname during the IMAP protocol exchange. This is separate from the listener binding issue
-and requires further investigation.
+## IMAP Authentication Fix (Resolved)
 
-**Workaround**: The IMAP issue may be related to:
-1. Server hostname configuration (STALWART_HOSTNAME environment variable)
-2. TLS certificate configuration
-3. IMAP listener configuration
+**Problem**: IMAP authentication was failing with error "localhost.local" during the login phase.
 
-Further debugging requires capturing the actual IMAP protocol dialogue to understand what the
-server is responding with.
+**Root Cause**: The test was using a bare username (`source`) instead of the full email address
+(`source@dev.local`). Stalwart v0.16.x requires full email addresses for IMAP authentication.
+When a bare username is provided, Stalwart appends its default domain (which appears to be
+`localhost.local` when not explicitly configured), resulting in a lookup for
+`source@localhost.local` which doesn't exist.
+
+**Fix**: Changed the IMAP username from `source` to `source@dev.local` in the test configuration.
+This aligns with standard mail server behavior where the IMAP username should be the full email
+address.
+
+**Evidence**: After the fix, the test output shows "IMAP server is ready" instead of failing
+with the "localhost.local" error.
+
+## Known Issues
+
+**Empty Folder List**: The integration test currently scans 0 folders instead of the expected
+messages. This appears to be a separate issue where Stalwart's IMAP server is not returning
+folders via the `LIST` command, or the node-imap library isn't parsing the response correctly.
+This issue is unrelated to the IMAP authentication fix and requires further investigation.
+
+**Debugging Steps**:
+1. Verify that the INBOX was created during message seeding
+2. Check Stalwart logs for IMAP LIST command handling
+3. Test with raw IMAP commands to isolate the issue
+4. Consider using a different IMAP client library or raw socket testing

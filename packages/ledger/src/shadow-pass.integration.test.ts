@@ -59,7 +59,7 @@ if (!STALWART_IMAP_HOST || !STALWART_JMAP_URL) {
 }
 
 // Test accounts - must match the accounts provisioned in testcontainers-setup.ts
-const SOURCE_ACCOUNT = 'source';
+const SOURCE_ACCOUNT = 'source@dev.local';
 const SOURCE_PASSWORD = 'source_password';
 
 // Retry configuration for IMAP connection
@@ -238,7 +238,7 @@ describe('Shadow Pass Integration (T4)', () => {
     
     await db.execute(sql`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status)
-      VALUES (${targetConnId}, ${TEST_TENANT_ID}, 'target', 'jmap', 'JMAP Target', '{}', 'connected')
+      VALUES (${targetConnId}, ${TEST_TENANT_ID}, 'target', 'selfhosted_mail', 'Self-hosted Mail (JMAP)', '{}', 'connected')
       ON CONFLICT (id) DO NOTHING
     `);
 
