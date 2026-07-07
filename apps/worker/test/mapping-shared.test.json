@@ -1,0 +1,28 @@
+{
+  "tenantId": "test-tenant",
+  "mappingId": "shared-mailbox-mapping",
+  "source": {
+    "type": "imap",
+    "host": "localhost",
+    "port": 993,
+    "tls": true,
+    "user": "shared@dev.local",
+    "auth": {
+      "kind": "login",
+      "password": "shared_password"
+    }
+  },
+  "target": {
+    "type": "jmap",
+    "baseUrl": "http://localhost:8080",
+    "user": "target-shared@dev.local",
+    "auth": {
+      "kind": "basic",
+      "password": "target-shared_password"
+    }
+  },
+  "schedule": {
+    "cron": "0 */6 * * *"
+  },
+  "concurrency": 2
+}

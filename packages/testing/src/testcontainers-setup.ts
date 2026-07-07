@@ -394,6 +394,18 @@ async function startStalwart(): Promise<{
         credentials: { '0': { '@type': 'Password', secret: 'target_password' } },
         roles: { '@type': 'User' }, permissions: { '@type': 'Inherit' }, encryptionAtRest: { '@type': 'Disabled' },
     } } },
+    // Step 4: Create shared mailbox account (name is local part only)
+    { '@type': 'upsert', object: 'Account', matchOn: ['name'], value: { 'shared': {
+        '@type': 'User', name: 'shared', domainId: '#dom-a',
+        credentials: { '0': { '@type': 'Password', secret: 'shared_password' } },
+        roles: { '@type': 'User' }, permissions: { '@type': 'Inherit' }, encryptionAtRest: { '@type': 'Disabled' },
+    } } },
+    // Step 5: Create target-shared account (name is local part only)
+    { '@type': 'upsert', object: 'Account', matchOn: ['name'], value: { 'target-shared': {
+        '@type': 'User', name: 'target-shared', domainId: '#dom-a',
+        credentials: { '0': { '@type': 'Password', secret: 'target-shared_password' } },
+        roles: { '@type': 'User' }, permissions: { '@type': 'Inherit' }, encryptionAtRest: { '@type': 'Disabled' },
+    } } },
   ].map((op) => JSON.stringify(op)).join('\n');
 
   try {
@@ -460,18 +472,22 @@ async function startStalwart(): Promise<{
     );
     console.log('[StalwartSetup] Account query result:', queryOutput);
     
-    // Verify both accounts exist in the query output
+    // Verify all four accounts exist in the query output
     const hasSource = queryOutput.includes('source') && queryOutput.includes('source@dev.local');
     const hasTarget = queryOutput.includes('target') && queryOutput.includes('target@dev.local');
+    const hasShared = queryOutput.includes('shared') && queryOutput.includes('shared@dev.local');
+    const hasTargetShared = queryOutput.includes('target-shared') && queryOutput.includes('target-shared@dev.local');
     
-    if (!hasSource || !hasTarget) {
+    if (!hasSource || !hasTarget || !hasShared || !hasTargetShared) {
       throw new Error(
-        `Account verification failed. Source: ${hasSource ? 'yes' : 'NO'}, Target: ${hasTarget ? 'yes' : 'NO'}. ` +
-        `Expected accounts: source@dev.local and target@dev.local`
+        `Account verification failed. ` +
+        `Source: ${hasSource ? 'yes' : 'NO'}, Target: ${hasTarget ? 'yes' : 'NO'}, ` +
+        `Shared: ${hasShared ? 'yes' : 'NO'}, Target-Shared: ${hasTargetShared ? 'yes' : 'NO'}. ` +
+        `Expected accounts: source@dev.local, target@dev.local, shared@dev.local, target-shared@dev.local`
       );
     }
     
-    console.log('[StalwartSetup] ✓ Both accounts verified: source@dev.local and target@dev.local');
+    console.log('[StalwartSetup] ✓ All accounts verified: source@dev.local, target@dev.local, shared@dev.local, target-shared@dev.local');
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[StalwartSetup] Account verification FAILED:', msg);
