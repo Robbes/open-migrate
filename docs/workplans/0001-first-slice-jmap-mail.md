@@ -1,5 +1,24 @@
 # Workplan 0001 — First buildable slice: O365 → JMAP mail (one-way shadow)
 
+## Status — 2026-07-07 (update this block at the end of every session)
+
+| Task | Status | Evidence |
+|---|---|---|
+| T0 dev stack + ledger | **Done** | `feat/t0-sql-ledger-cursorstore`; ledger integration tests green; SqlLedger + SQL CursorStore; Stalwart provisioned via two-phase Testcontainers |
+| T1 core model + interfaces | **Done** (pre-built) | unit tests in `@openmig/shared` / `@openmig/core` |
+| T2 IMAP source | **Done** | integration-tested against Stalwart (IMAPS 993; cursor `UIDVALIDITY:UIDNEXT`; client-side UID filtering — see fix doc) |
+| T3 JMAP target writer | **Done** | integration-tested; accountId resolved by configured email with hard-fail on mismatch (see fix doc) |
+| T4 shadow engine — **THE GATE** | **Done ✅** | idempotency + delta property tests green against Stalwart (11/11 `test:integration`) |
+| T5 Pattern-S shared mailbox | **Open — verify first** | no test evidence found; audit before implementing |
+| T6 croner wiring in `schedule()` | **Open — verify first** | `runOnce` + `SingleFlight` pre-built/unit-tested; croner tick wiring + short integration run outstanding |
+| T7 worker CLI entrypoint | **Open — verify first** | config loader pre-built/unit-tested; CLI (`--once`/scheduled) outstanding |
+| T8 docs + ADRs | **Partial** | `stalwart-integration-fix.md` authoritative and current; `testing.md`/`README.md` synced 2026-07-07; README quickstart unverified |
+| T9 reindex on real connector | **Open — verify first** | `reindexFromTarget` core pre-built/unit-tested; real `TargetReindexer.listEntries` + Stalwart integration test outstanding |
+
+Hard-won operational truth for this slice lives in `docs/stalwart-integration-fix.md`
+(two-phase startup, TLS-only listeners — **no plaintext 143** — accountId rule, cursor rules,
+RocksDB lock rules). Do not re-litigate its settled findings.
+
 > Read `AGENTS.md` and `docs/architecture/solution-architecture.md` (source of truth) first.
 > This plan is **JMAP-first (ADR-0018)**. Build it as a thin **vertical slice**: one mailbox's
 > mail flowing end-to-end, idempotently, in shadow mode — before any breadth.
@@ -135,7 +154,9 @@ Integration test on Stalwart.
   mismatches on the Spark, run a plain `pnpm install` once to reconcile, then commit.
 - **No committed artifacts** (`node_modules`/`dist`/`build`/`.env`) — the PR guard enforces this.
 - **Stalwart in dev:** the image's built-in healthcheck targets TLS/443 and is disabled in the compose;
-  the e2e workflow polls `stalwart:8080`. JMAP + DAV are on the HTTP API (8080); IMAP on 143.
+  the e2e workflow polls `stalwart:8080`. JMAP + DAV are on the HTTP API (8080). **Stalwart v0.16
+  binds TLS listeners only — IMAP is IMAPS on 993 (self-signed cert in tests; `rejectUnauthorized:
+  false`); there is no plaintext 143.** See `docs/stalwart-integration-fix.md`.
 - **Secrets:** none for this slice — everything runs against local Stalwart. Real O365 is
   manual/secret-gated only.
 - Small PRs, each green on lint + unit + integration; the arm64 e2e job is **manual** on the Spark.

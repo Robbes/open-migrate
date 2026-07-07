@@ -1,5 +1,11 @@
 # OpenHands start prompt — slice 0001
 
+> **Historical (superseded 2026-07-07).** This was the greenfield kickoff prompt. The slice is now
+> mid-flight: T0–T4 are done (the T4 idempotency gate is green — 11/11 integration tests). Do not
+> start from T0. Current state and the remaining tasks live in the **Status block** at the top of
+> `0001-first-slice-jmap-mail.md`; new sessions get a fresh prompt scoped to the open tasks.
+> Kept for provenance.
+
 Paste the block below into OpenHands as the initial task. It assumes the repo is cloned and
 `.openhands/setup.sh` has run (it installs deps and self-bootstraps Node 24 if the sandbox lacks
 it). The agent has docker-socket rights, so it brings the dev stack up itself.

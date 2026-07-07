@@ -1,72 +1,59 @@
 # AGENTS.md
 
-Single source of agent guidance for this repo. Works for Claude Code, OpenHands, and other coding agents. (Claude Code also reads `CLAUDE.md`, which just points here. OpenHands can be pointed at this file as repo instructions.)
+Agent guidance for this repo (Claude Code via `CLAUDE.md` pointer, OpenHands, others). **Read `docs/architecture/solution-architecture.md` first — the source of truth.** This file is the operational contract. Detail lives in the docs it points to (progressive disclosure), not here.
 
-**Before doing anything, read `docs/architecture/solution-architecture.md` — it is the source of truth.** This file is the operational contract; the architecture doc is the design.
+Before any Stalwart or integration-test work: read `docs/stalwart-integration-fix.md` in full and do not deviate (decisions in ADR-0022). Never change the pinned Stalwart version; never put accounts/domains/listeners in config.json; never skip the shadow-pass tests.
 
-Before any Stalwart or integration-test work, read docs/stalwart-integration-fix.md in full and do not deviate from it. Never change the pinned Stalwart version, never put accounts/domains/listeners in config.json, never skip the shadow-pass tests.
+## Session protocol (mandatory)
+1. **Start:** read the arch doc, then the active workplan in `docs/workplans/` — its top **Status block** is ground truth for done/open. Trust it; never redo completed tasks.
+2. **Plan:** create a task-tracker list before coding; keep it updated. Parallel subagents may do read-only audits; conclusions still need quoted evidence.
+3. **Evidence-first:** never claim something works without pasting proof (test run, logs, wire dialogue). Quote errors verbatim before proposing fixes.
+4. **Docker hygiene:** manual debug `docker run` uses `--rm` or is removed before session end.
+   One Stalwart container per data volume, ever (RocksDB lock). At end:
+   `docker ps -a | grep -i stalwart` + `docker volume ls | grep -i stalwart`, remove your debris.
+5. **End:** update the workplan Status block with what you proved; commit docs with code; all gates green.
+
+## Commands
+- Install: `pnpm install` · Lint: `pnpm lint` · Typecheck: `pnpm typecheck`
+- Unit: `pnpm test` · Integration: `pnpm test:integration` (self-manages its stack via Testcontainers) · E2E: `pnpm test:e2e`
+- Optional dev stack: `docker compose -f deploy/compose/dev.yml up -d`
 
 ## What we are building
-A sovereign migration/sync stack that moves families and SMBs off US cloud (O365/Google/Dropbox) to EU/CH targets. **Target protocols: JMAP is primary** (Stalwart reference; mosa.cloud / La Suite / MijnBureau), **IMAP/CalDAV/CardDAV/WebDAV is the parallel second family** (Soverin, openDesk, Nextcloud, Proton via import) — **both in MVP (ADR-0018)**. The **O365 source stays IMAP+OAuth2/Graph** (Microsoft has no JMAP), so JMAP is a target-side concern. Migration is **idempotent**, can **shadow-run** in parallel as long as the user wants, and the user stays **in control** via a clear UI.
+Sovereign migration/sync: families and SMBs move off US cloud (O365/Google/Dropbox) to EU targets. **JMAP is the primary target protocol** (Stalwart reference; mosa.cloud / La Suite / MijnBureau); **IMAP/CalDAV/CardDAV/WebDAV is the parallel second family** (Soverin, openDesk,
+Nextcloud) — both in MVP (ADR-0018). The **O365 source stays IMAP+OAuth2/Graph**. Migration is idempotent, shadow-runs as long as the user wants, and the user stays in control via the UI.
 
-## Tech stack (decided — see ADRs)
-- **Language:** TypeScript (Node 24), pnpm workspaces monorepo. (ADR-0002)
-- **Orchestration:** `Scheduler` interface with two impls — **in-process** (croner) for the self-host edition, **Trigger.dev** (Apache-2.0, self-hostable or cloud) for the managed edition. Self-host MUST stay possible, incl. local dev on an arm64 Spark. (ADR-0004)
-- **State:** ledger in **Postgres + RLS** (managed) or **SQLite / small Postgres** (self-host), same schema contract. (ADR-0010)
-- **Engines:** for **IMAP/DAV** targets, shell-out to **imapsync** (mail), **vdirsyncer** (cal/contacts), **rclone** (files) — do not reimplement; plus a custom **Microsoft Graph rich extractor** (versions/permissions/metadata/lists). For **JMAP** targets, a **JMAP writer** on a JS client (jmap-jam); the one-shot **JMAP migration utility** can seed the initial bulk copy. **Prefer JS-native engines where a maintained library gives equal fidelity** (portability / simpler packaging); keep the CLI engines for bulk and on Linux/container deployments. No commercial SharePoint tools. (ADR-0007, ADR-0018, ADR-0019)
-- **O365 access:** one multi-tenant Entra app; application permissions + Application Access Policy (org/SMB), delegated (individuals); IMAP+OAuth2 primary, Graph fallback. (ADR-0006)
-- **Targets:** provisioning behind a `TargetProvisioner` interface — `ManualProvisioner` + `ApiProvisioner`. (ADR-0008)
-- **License:** Apache-2.0. (ADR-0001)
+## Decided stack (details in the ADRs — follow them, don't re-decide)
+- TypeScript, Node 24, pnpm workspaces monorepo (ADR-0002); Apache-2.0 (ADR-0001).
+- `Scheduler` interface: in-process croner (self-host) / Trigger.dev (managed) (ADR-0004).
+- Ledger: Postgres+RLS (managed) or SQLite/small Postgres (self-host), one schema (ADR-0010/0016); migrations via Drizzle Kit + Atlas lint (ADR-0017).
+- Engines: JMAP writer (jmap-jam) for JMAP targets; imapsync/vdirsyncer/rclone shell-outs for IMAP/DAV; prefer JS-native where fidelity is equal (ADR-0007/0018/0019).
+- O365: one multi-tenant Entra app; IMAP+OAuth2 primary, Graph fallback (ADR-0006).
+- Target provisioning behind `TargetProvisioner` (manual + API) (ADR-0008).
 
-## Repo layout
-```
-docs/            # ALL documentation lives here (see docs/README.md)
-  architecture/  # solution-architecture.md = source of truth
-  adr/           # Architecture Decision Records (0000-template.md + numbered)
-  guides/        # how-tos
-  runbooks/      # cutover runbook, ops
-packages/        # shared libraries (the core, identical across editions)
-  core/          # reconcile loop + idempotency
-  ledger/        # ledger schema + migrations + access
-  connectors/    # source/target adapters (graph, imap, jmap, webdav, caldav, carddav, proton)
-  engines/       # wrappers around imapsync/rclone/vdirsyncer + graph extractor
-  scheduler/     # Scheduler interface + in-process (croner) + trigger.dev impls
-  provisioner/   # TargetProvisioner interface + manual + api impls
-  shared/        # types, config, logging, utils
-apps/
-  api/           # control-plane API (managed)
-  web/           # UI/portal: scope-manifest, status, decision queue (see arch doc §11.2)
-  worker/        # data-plane worker (runs engines; sees content)
-  selfhost/      # self-host entrypoint (in-process scheduler + embedded state + UI)
-deploy/
-  compose/       # docker-compose dev/test stack (arm64): postgres + stalwart (JMAP+IMAP+DAV reference target) + nextcloud (Trigger.dev added later)
-  helm/          # managed k8s charts
-  homeassistant/ # HA add-on
-test/            # fixtures, integration (against compose stack), e2e (incl. idempotency property tests)
-```
+## Repo map (top level; don't trust paths blindly — verify before editing)
+- `docs/` — all documentation: `architecture/` (source of truth), `adr/`, `workplans/` (Status blocks), canonical docs incl. `stalwart-integration-fix.md`, `testing.md`.
+- `packages/` — `core` (reconcile+idempotency), `ledger`, `connectors`, `engines`, `scheduler`, `provisioner`, `shared`.
+- `apps/` — `api`, `web`, `worker`, `selfhost`. `deploy/` — `compose/` (dev stack), `helm/`, `homeassistant/`. `test/` — fixtures, integration, e2e.
 
-## Commands (conventions — wire up as the project grows)
-- Install: `pnpm install`
-- Lint/format: `pnpm lint` / `pnpm format`
-- Unit tests: `pnpm test`
-- Test stack up (arm64): `docker compose -f deploy/compose/dev.yml up -d`
-- Integration/e2e: `pnpm test:integration` / `pnpm test:e2e`
+## Hard rules (each "don't" has its "do")
+1. **Idempotency is sacred.** Re-runs converge: no duplicates, no corruption. Keep the idempotency property tests green; extend them with new behavior.
+2. **Non-destructive by default.** Never auto-delete/overwrite on the target; surface source deletions as user decisions (arch doc §11.1).
+3. **No secrets in the repo.** Use `.env` (gitignored) / vault refs; never in code, tests, fixtures, or ADRs.
+4. **Respect provider limits.** Honor 429/`Retry-After`; keep per-tenant/provider concurrency budgets.
+5. **Self-host must keep working.** No managed-only dependency in `packages/` or `apps/selfhost`; orchestration stays behind `Scheduler`.
+6. **Docs discipline.** `docs/` is the only home for documentation; keep the root `.md` allowlist (CONTRIBUTING.md); Apache-2.0 headers on source files.
+7. **Decisions → ADRs** (append-only; supersede, don't delete). Operational findings → a Rule + one-line rationale in the relevant reference doc (e.g. the Stalwart fix doc).
+8. **Gates before "done":** lint + typecheck + unit + relevant integration; update docs.
+9. **Never mask errors.** No null-fallbacks or catch-and-continue that turn failures into empty results (`scanned=0` must be unreachable via a swallowed error) — unmask, quote, fix the root cause. Connector (IMAP/JMAP) failures must surface.
 
-## Hard rules for agents (do not violate)
-1. **Idempotency is sacred.** Any sync must converge: re-running produces no duplicates and no corruption. Add/keep idempotency property tests.
-2. **Non-destructive by default.** NEVER auto-delete or overwrite on the target. Source deletions are surfaced as a user decision, never propagated automatically. (arch doc §11.1)
-3. **Never commit secrets.** Use `.env` (gitignored) and a vault. No tokens/keys/credentials in code, tests, fixtures, or ADRs.
-4. **Respect provider limits.** Honor Graph 429/`Retry-After`; keep per-tenant/provider concurrency budgets.
-5. **Self-host must keep working.** No hard dependency on a managed-only service in shared `packages/` or in `apps/selfhost`. Orchestration stays behind the `Scheduler` interface.
-6. **Apache-2.0 headers** on source files; `docs/` is the only home for documentation; keep the root `.md` allowlist (see CONTRIBUTING.md).
-7. **Decisions → ADRs.** If you make or change an architectural decision, add/supersede an ADR in `docs/adr/` and reference it.
-8. **Test gates must pass** before a change is "done": lint + unit + relevant integration; update docs.
+## Safety notes
+- The test O365 source is a **real SMB tenant**: read-only, least-privilege, never write back.
+- The Spark arm64 runner has docker socket + root: trusted workflows only; build multi-arch (amd64+arm64) images.
 
-## Testing against the real source
-The test O365 source is a **real SMB tenant**. Treat it as production: **read-only, least-privilege** (Application Access Policy scoped to test mailboxes), never write back, never disrupt the live tenant. The one-way mirror + non-destructive defaults make this safe.
-
-## Self-hosted CI runner (Spark)
-The Spark is arm64 with a self-hosted GitHub runner and docker socket + root. Only run **trusted** workflows on it (no untrusted fork PRs) — docker+root = RCE risk. Build **multi-arch images (amd64 + arm64)**.
+## Prompts for other agent sessions
+Inline all code/commands/paths as backtick inline code within prose — no separate fenced blocks —
+so the whole prompt is one copy-pasteable unit.
 
 ## Definition of done
-Tests pass · docs updated · ADR added/updated if a decision changed · no secrets · idempotency + non-destructive invariants preserved · self-host path intact.
+Gates green · docs updated · workplan Status block updated · ADR if a decision changed ·
+no secrets · idempotency + non-destructive intact · self-host intact · no docker debris.
