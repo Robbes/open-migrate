@@ -151,7 +151,7 @@ export class JmapTargetWriter implements TargetWriter {
   /**
    * Make a JMAP API request using the stored apiUrl.
    */
-  private async apiRequest<T>(method: string, args: Record<string, any>): Promise<T> {
+  private async apiRequest<T>(method: string, args: Record<string, unknown>): Promise<T> {
     if (!this.apiUrl || !this.authHeader) {
       throw new Error("Not connected to JMAP server");
     }
@@ -240,7 +240,7 @@ export class JmapTargetWriter implements TargetWriter {
     console.log('[DEBUG JMAP] Mailbox query response:', JSON.stringify(queryResponse));
 
     // JMAP Mailbox/query returns IDs, we need to get the actual objects
-    const ids: string[] = (queryResponse as any).ids || [];
+    const ids: string[] = (queryResponse as { ids?: string[] }).ids || [];
     
     if (ids.length === 0) {
       // No mailboxes found, create one
@@ -256,7 +256,7 @@ export class JmapTargetWriter implements TargetWriter {
     console.log('[DEBUG JMAP] Mailbox get response:', JSON.stringify(getResponse));
 
     // JMAP Mailbox/get returns a 'list' property containing the mailbox objects
-    const mailboxes = (getResponse as any).list || [];
+    const mailboxes = (getResponse as { list?: Mailbox[] }).list || [];
     console.log('[DEBUG JMAP] Mailboxes found:', mailboxes.length);
 
     // Look for existing mailbox with matching path or role (case-insensitive for name)
@@ -355,7 +355,7 @@ export class JmapTargetWriter implements TargetWriter {
 
       console.log('[DEBUG JMAP] findByNaturalKey response:', JSON.stringify(response));
       
-      const ids = (response as any).ids || [];
+      const ids = (response as { ids?: string[] }).ids || [];
       const found = ids.length > 0 ? ids[0] : undefined;
       console.log('[DEBUG JMAP] findByNaturalKey found:', found);
       return found;
@@ -410,7 +410,7 @@ export class JmapTargetWriter implements TargetWriter {
 
     // Step 1: Upload the raw RFC822 message as a blob
     // The Blob/upload endpoint expects BodyInit (Blob, File, ArrayBuffer, string, etc.)
-    const blobFileName = messageId ? `${messageId}.eml` : `message.eml`;
+    // Note: blobFileName is computed but not used - uploadBlob doesn't require a filename
     
     // Convert Uint8Array to Blob for upload
     // Pass Uint8Array directly - it's a valid BlobPart

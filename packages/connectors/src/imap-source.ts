@@ -160,7 +160,8 @@ export class ImapSource implements SourceConnector {
           console.log('[DEBUG listFolders] Failed to open INBOX:', openMsg);
           throw new Error(
             'IMAP getBoxes() returned undefined and INBOX cannot be opened. ' +
-            'This indicates a server-side issue or missing account configuration.'
+            'This indicates a server-side issue or missing account configuration.',
+            { cause: openErr }
           );
         }
       }
