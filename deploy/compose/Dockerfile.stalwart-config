@@ -1,0 +1,2 @@
+FROM stalwartlabs/stalwart:v0.16.10
+COPY stalwart-config.json /etc/stalwart/config.json

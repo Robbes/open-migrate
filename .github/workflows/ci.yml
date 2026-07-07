@@ -127,8 +127,25 @@ jobs:
         run: |
           docker --version
           docker compose version
+      - name: Install stalwart-cli
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/stalwartlabs/cli/releases/latest/download/stalwart-cli-installer.sh | sh
+          # Add cargo bin to PATH for this step and future steps
+          export PATH="$HOME/.cargo/bin:$PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          # Verify installation
+          which stalwart-cli
+          stalwart-cli --version
       - name: Run integration tests (Testcontainers spins up Postgres/Stalwart/Nextcloud)
+        id: integration-tests
         run: pnpm test:integration
+      - name: Upload integration logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.0
+        with:
+          name: integration-logs-${{ github.run_id }}
+          path: test-logs/
+          retention-days: 3
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.0

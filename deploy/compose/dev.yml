@@ -28,17 +28,22 @@ services:
     networks: [dev-network]
 
   # Reference target: JMAP + IMAP/SMTP + CalDAV/CardDAV/WebDAV (Rust; base debian:trixie-slim; multi-arch incl. arm64).
-  # Bootstrap: a recovery admin is pinned via env to avoid the random first-run password.
+  # Running in normal mode (NOT recovery mode) to enable JMAP/IMAP listeners.
+  # Stalwart 0.16 uses declarative JSON configuration - see stalwart-config.json.
   # The image's built-in healthcheck targets TLS/443; disabled here for plain-HTTP dev — the
   # e2e workflow polls readiness instead. JMAP session + DAV are served over the HTTP API (8080); IMAP on 143.
   stalwart:
-    image: stalwartlabs/stalwart:v0.16.10 # pinned; v0.17+ renames bootstrap env (STALWART_PUBLIC_URL) — re-verify before bumping
-    environment:
-      STALWART_RECOVERY_MODE: "true"
-      STALWART_RECOVERY_ADMIN: "admin:admin_dev_pw"
-      STALWART_HOSTNAME: "stalwart"
-    volumes:
-      - stalwart-data:/opt/stalwart
+    build:
+      context: .
+      dockerfile: Dockerfile.stalwart-config
+    image: stalwart-custom:config
+    # No STALWART_RECOVERY_MODE - run in normal operation mode with listeners enabled
+    tmpfs:
+      - /opt/stalwart/data:mode=777
+    ports:
+      - "8180:8080"  # JMAP/DAV HTTP API (host:container)
+      - "143:143"    # IMAP (plain)
+      - "993:993"    # IMAPS (TLS)
     healthcheck:
       disable: true
     networks: [dev-network]
