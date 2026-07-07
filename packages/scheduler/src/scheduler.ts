@@ -1,12 +1,13 @@
-import { NotImplementedError, type Scheduler, type ScheduleHandle } from '@openmig/shared';
+import { type Scheduler, type ScheduleHandle } from '@openmig/shared';
 import { SingleFlight } from './single-flight';
+import { Cron } from 'croner';
 
 /**
  * In-process scheduler for the self-host edition (workplan 0001, T6).
  *
- * `runOnce` is implemented with **single-flight per jobId**: concurrent triggers for the same job
- * coalesce into one run (no overlapping runs). Cron scheduling (`schedule`) is wired with croner by
- * the agent; each tick should dispatch through the same `SingleFlight` so overlapping ticks coalesce.
+ * `runOnce` is implemented with **single-flight per jobId**: concurrent calls coalesce into one run.
+ * `schedule` uses croner; each tick dispatches through the same `SingleFlight` so overlapping ticks
+ * coalesce.
  */
 export class InProcessScheduler implements Scheduler {
   private readonly sf = new SingleFlight();
@@ -15,9 +16,18 @@ export class InProcessScheduler implements Scheduler {
     return this.sf.run(jobId, task);
   }
 
-  schedule(_jobId: string, _cron: string, _task: () => Promise<void>): ScheduleHandle {
-    // TODO(T6): wire croner. On each tick call `this.sf.run(jobId, task)` so overlapping ticks
-    // coalesce, and return a handle whose stop() cancels the croner job.
-    throw new NotImplementedError('InProcessScheduler.schedule (workplan 0001, T6) — needs croner');
+  schedule(jobId: string, cron: string, task: () => Promise<void>): ScheduleHandle {
+    // Use paused: true to prevent immediate execution, then resume to start
+    const job = new Cron(cron, { paused: true }, async () => {
+      await this.sf.run(jobId, task);
+    });
+
+    job.resume();
+
+    return {
+      stop: () => {
+        job.stop();
+      },
+    };
   }
 }

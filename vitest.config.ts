@@ -17,6 +17,8 @@ export default defineConfig({
     exclude: ['node_modules', 'dist'],
     globalSetup: './vitest.global-setup.ts',
     testTimeout: 180000,
+    // Root-level resolve alias applies to all projects
+    // Individual projects can't have their own resolve config
     projects: [
       {
         test: {

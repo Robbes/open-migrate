@@ -8,38 +8,70 @@ const __dirname = dirname(__filename);
 
 async function runMigration(postgresUrl: string): Promise<void> {
   const { default: postgres } = await import('postgres');
-  const sql = postgres(postgresUrl);
-
-  try {
-    await sql`SELECT pg_advisory_lock(727001)`;
+  
+  // Retry logic for connection stability
+  const maxRetries = 5;
+  const baseDelay = 200; // ms
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const sql = postgres(postgresUrl);
+    
     try {
-      const exists = await sql`SELECT EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = 'tenant'
-      )`;
+      await sql`SELECT pg_advisory_lock(727001)`;
+      try {
+        const exists = await sql`SELECT EXISTS (
+          SELECT 1 FROM information_schema.tables
+          WHERE table_schema = 'public' AND table_name = 'tenant'
+        )`;
 
-      if (exists[0].exists) {
-        console.log('[Migration] Schema already exists, skipping.');
-        return;
+        if (exists[0].exists) {
+          console.log('[Migration] Schema already exists, skipping.');
+          return;
+        }
+
+        const migrationPath = join(__dirname, 'packages/ledger/migrations/0001_init.sql');
+        const migrationSql = readFileSync(migrationPath, 'utf-8');
+
+        console.log('[Migration] Running ledger schema migration...');
+        await sql.unsafe(migrationSql);
+        console.log('[Migration] Schema migration complete.');
+        return; // Success
+      } finally {
+        await sql`SELECT pg_advisory_unlock(727001)`;
       }
-
-      const migrationPath = join(__dirname, 'packages/ledger/migrations/0001_init.sql');
-      const migrationSql = readFileSync(migrationPath, 'utf-8');
-
-      console.log('[Migration] Running ledger schema migration...');
-      await sql.unsafe(migrationSql);
-      console.log('[Migration] Schema migration complete.');
-    } finally {
-      await sql`SELECT pg_advisory_unlock(727001)`;
+    } catch (err) {
+      const error = err as Error;
+      console.warn(`[Migration] Attempt ${attempt}/${maxRetries} failed: ${error.message}`);
+      
+      if (attempt === maxRetries) {
+        await sql.end();
+        // Re-throw the original error to preserve the cause chain
+        throw error;
+      }
+      
+      await sql.end();
+      
+      // Exponential backoff
+      const delay = baseDelay * Math.pow(2, attempt - 1);
+      console.log(`[Migration] Retrying in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
-  } finally {
-    await sql.end();
   }
 }
 
 export default async function () {
   console.log('[Vitest Global Setup] Starting Testcontainers environment...');
-  const testEnv = await startTestEnvironment();
+  
+  // Detect which test project is running via environment variable
+  // CI workflows should set SKIP_STALWART=true for unit tests
+  const skipStalwart = process.env.SKIP_STALWART === 'true';
+  
+  if (skipStalwart) {
+    console.log('[Vitest Global Setup] Skipping Stalwart (unit test mode via SKIP_STALWART).');
+  }
+  
+  // Skip Stalwart for unit tests - they don't need it and it requires stalwart-cli
+  const testEnv = await startTestEnvironment(skipStalwart);
 
   process.env.TEST_DATABASE_URL = testEnv.postgres.connectionString;
 
@@ -59,13 +91,15 @@ export default async function () {
   if (testEnv.stalwart) {
     console.log(`  - STALWART_JMAP_URL: ${testEnv.stalwart.jmapUrl}`);
     console.log(`  - STALWART_IMAP: ${testEnv.stalwart.imapHost}:${testEnv.stalwart.imapPort}`);
+  } else {
+    console.log('  - Stalwart: Skipped');
   }
 
   return async (error?: Error) => {
     console.log('[Vitest Global Teardown] Cleaning up Testcontainers...');
     
-    // Capture diagnostics if there was an error
-    if (error) {
+    // Capture diagnostics if there was an error and stalwart exists
+    if (error && testEnv.stalwart) {
       console.error('[Vitest Global Teardown] Test failed with error:', error.message);
       console.error('[Vitest Global Teardown] Capturing diagnostics...');
       try {
