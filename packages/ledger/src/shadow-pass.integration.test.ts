@@ -67,6 +67,26 @@ const MAX_RETRIES = 10;
 const RETRY_DELAY_MS = 2000;
 
 /**
+ * Box interface for IMAP mailbox (from node-imap types)
+ */
+interface ImMapBox {
+  name: string;
+  readOnly?: boolean;
+  newKeywords: boolean;
+  uidvalidity: number;
+  uidnext: number;
+  flags: string[];
+  permFlags: string[];
+  persistentUIDs: boolean;
+  messages: {
+    total: number;
+    new: number;
+    unseen?: number;
+  };
+  highestmodseq?: string;
+}
+
+/**
  * Wait for IMAP server to be available with retry logic.
  */
 async function waitForImap(host: string, port: number): Promise<void> {
@@ -315,7 +335,7 @@ describe('Shadow Pass Integration (T4)', () => {
     };
     const conn1 = await imap.connect(config1);
     try {
-      const inbox1 = await conn1.openBox('INBOX');
+      const inbox1 = await conn1.openBox('INBOX') as unknown as ImMapBox;
       expect(inbox1.messages.total).toBe(3);
       console.log('[REGRESSION GUARD] Source INBOX count after first run: 3 ✓');
     } finally {
@@ -352,7 +372,7 @@ describe('Shadow Pass Integration (T4)', () => {
     };
     const conn2 = await imap.connect(config2);
     try {
-      const inbox2 = await conn2.openBox('INBOX');
+      const inbox2 = await conn2.openBox('INBOX') as unknown as ImMapBox;
       expect(inbox2.messages.total).toBe(3);
       console.log('[REGRESSION GUARD] Source INBOX count after second run: 3 ✓');
     } finally {
@@ -398,7 +418,7 @@ This is the fourth test message for delta testing.
     // REGRESSION GUARD: Verify source INBOX has exactly 4 messages before delta run
     const connPre = await imap.connect(config);
     try {
-      const inboxPre = await connPre.openBox('INBOX');
+      const inboxPre = await connPre.openBox('INBOX') as unknown as ImMapBox;
       expect(inboxPre.messages.total).toBe(4);
       console.log('[REGRESSION GUARD] Source INBOX count before delta run: 4 ✓');
     } finally {
@@ -423,7 +443,7 @@ This is the fourth test message for delta testing.
     // REGRESSION GUARD: Verify source INBOX still has exactly 4 messages after delta (no cross-account pollution)
     const connPost = await imap.connect(config);
     try {
-      const inboxPost = await connPost.openBox('INBOX');
+      const inboxPost = await connPost.openBox('INBOX') as unknown as ImMapBox;
       expect(inboxPost.messages.total).toBe(4);
       console.log('[REGRESSION GUARD] Source INBOX count after delta run: 4 ✓');
     } finally {

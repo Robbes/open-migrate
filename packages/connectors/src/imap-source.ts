@@ -277,7 +277,7 @@ export class ImapSource implements SourceConnector {
             });
             console.log('[DEBUG listSince] Filtered to', filteredResults.length, 'messages with UID >=', decoded.uidNext);
           }
-        } catch (err) {
+        } catch {
           // Invalid cursor, use all results
         }
       }
