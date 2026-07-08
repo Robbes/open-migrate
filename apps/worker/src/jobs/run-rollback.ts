@@ -1,21 +1,23 @@
 /**
  * Rollback Job
- * 
- * Executes a rollback of the cutover process if issues are detected.
- * This reverses DNS/MX changes and restores the previous configuration.
- * 
- * Trigger: Manual or automatic on failure detection
+ *
+ * Reverts a migration to its previous state.
+ * This includes:
+ * - Restoring original data sources
+ * - Reverting DNS/MX records
+ * - Notifying users of the rollback
+ *
+ * Trigger: Manual (user-initiated)
  */
 
-import { triggerClient } from '../trigger-client';
 import { z } from 'zod';
-import { eventTrigger } from '@trigger.dev/sdk';
+import { schemaTask } from '@trigger.dev/sdk/v3';
 
 // Job input schema
 const RollbackJobSchema = z.object({
   tenantId: z.string().uuid(),
   mappingId: z.string().uuid(),
-  reason: z.string().optional(),
+  reason: z.string(),
   options: z.object({
     restoreDns: z.boolean().default(true),
     notifyUsers: z.boolean().default(true),
@@ -25,54 +27,45 @@ const RollbackJobSchema = z.object({
 type RollbackJobPayload = z.infer<typeof RollbackJobSchema>;
 
 // Register the job with Trigger.dev
-triggerClient.defineJob({
+export const runRollback = schemaTask({
   id: 'run-rollback',
-  name: 'Rollback',
-  version: '0.0.1',
-  trigger: eventTrigger({
-    name: 'rollback.requested',
-    schema: RollbackJobSchema,
-  }),
-  run: async (payload, io, context) => {
-    io.logger.info('Starting rollback process', {
+  description: 'Rollback',
+  schema: RollbackJobSchema,
+  run: async (payload: RollbackJobPayload, { ctx }) => {
+    console.log('Starting rollback process', {
       tenantId: payload.tenantId,
       mappingId: payload.mappingId,
       reason: payload.reason,
+      options: payload.options,
     });
 
     try {
-      // Step 1: Stop grace period monitoring
-      io.logger.info('Cancelling grace period monitoring');
-      // await io.cancel({
-      //   id: `grace-period-${payload.mappingId}`,
-      // });
-
-      // Step 2: Restore DNS/MX records (if applicable)
+      // Step 1: Restore DNS records (if enabled)
       if (payload.options.restoreDns) {
-        io.logger.info('Restoring DNS/MX records');
-        // await restoreDnsRecords({ tenantId, mappingId });
+        console.log('Restoring DNS records');
+        // await restoreDnsRecords({ tenantId: payload.tenantId, mappingId: payload.mappingId });
       }
 
+      // Step 2: Restore original data source connections
+      console.log('Restoring original data source connections');
+      // await restoreDataSources({ tenantId: payload.tenantId, mappingId: payload.mappingId });
+
       // Step 3: Update cutover status
-      io.logger.info('Marking cutover as rolled back');
-      // await updateCutoverStatus({ 
-      //   tenantId, 
-      //   mappingId, 
-      //   state: 'rolled_back',
-      //   notes: payload.reason 
-      // });
+      console.log('Marking cutover as rolled back');
+      // await updateCutoverStatus({ tenantId: payload.tenantId, mappingId: payload.mappingId, state: 'rolled_back' });
 
       // Step 4: Notify users (if enabled)
       if (payload.options.notifyUsers) {
-        io.logger.info('Notifying users about rollback');
-        // await notifyUsers({ 
-      //   tenantId, 
-      //   message: 'Migration has been rolled back due to issues' 
-      // });
+        console.log('Notifying users about rollback');
+        // await notifyUsersAboutRollback({ tenantId: payload.tenantId, mappingId: payload.mappingId, reason: payload.reason });
       }
 
-      io.logger.info('Rollback completed successfully');
-      
+      // Step 5: Cancel any pending tasks
+      console.log('Cancelling pending tasks');
+      // await cancelPendingTasks({ tenantId: payload.tenantId, mappingId: payload.mappingId });
+
+      console.log('Rollback completed successfully');
+
       return {
         success: true,
         tenantId: payload.tenantId,
@@ -80,16 +73,7 @@ triggerClient.defineJob({
         reason: payload.reason,
       };
     } catch (error) {
-      io.logger.error('Rollback failed', { error });
-      
-      // Alert operators of failed rollback
-      // await alertOperators({
-      //   tenantId: payload.tenantId,
-      //   mappingId: payload.mappingId,
-      //   message: 'Rollback failed - manual intervention required',
-      //   error,
-      // });
-      
+      console.error('Rollback failed', { error });
       throw error;
     }
   },

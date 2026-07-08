@@ -19,16 +19,21 @@
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
+    "@trigger.dev/core": "^4.5.1",
+    "@trigger.dev/sdk": "^4.5.1",
     "croner": "^10.0.1",
     "imap-simple": "^5.1.0",
     "jmap-jam": "^0.13.2",
     "mollie-api-node": "^1.4.0"
   },
   "devDependencies": {
+    "@cyclonedx/cyclonedx-npm": "^6.0.0",
     "@eslint/js": "10.0.1",
     "@types/imap-simple": "^4.2.10",
     "@types/node": "^26.1.0",
     "@types/pg": "^8",
+    "@typescript-eslint/eslint-plugin": "^8.63.0",
+    "@typescript-eslint/parser": "^8.63.0",
     "@vitest/coverage-v8": "4.1.9",
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
@@ -40,6 +45,13 @@
     "tsx": "^4",
     "typescript": "5.9.2",
     "typescript-eslint": "^8.62.1",
-    "vitest": "4.1.9"
+    "vitest": "3.2.7"
+  },
+  "pnpm": {
+    "overrides": {
+      "ws": ">=8.21.0",
+      "socket.io-client": ">=4.8.0",
+      "engine.io-client": ">=6.6.0"
+    }
   }
 }

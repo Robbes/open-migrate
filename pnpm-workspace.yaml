@@ -12,7 +12,10 @@ allowBuilds:
   better-sqlite3: true
   cpu-features: true
   esbuild: true
+  libxmljs2: set this to true or false
   protobufjs: true
   ssh2: true
 overrides:
   semver: ^7.5.2
+patchedDependencies:
+  engine.io-client@6.5.4: patches/engine.io-client@6.5.4.patch

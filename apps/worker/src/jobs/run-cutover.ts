@@ -1,19 +1,18 @@
 /**
  * Cutover Job
- * 
+ *
  * Executes the final cutover process for a migration.
  * This includes:
  * - Final delta sync
  * - Verification checks
  * - DNS/MX record update (if applicable)
  * - Grace period monitoring
- * 
+ *
  * Trigger: Manual (user-initiated)
  */
 
-import { triggerClient } from '../trigger-client';
 import { z } from 'zod';
-import { eventTrigger } from '@trigger.dev/sdk';
+import { schemaTask } from '@trigger.dev/sdk/v3';
 
 // Job input schema
 const CutoverJobSchema = z.object({
@@ -29,16 +28,12 @@ const CutoverJobSchema = z.object({
 type CutoverJobPayload = z.infer<typeof CutoverJobSchema>;
 
 // Register the job with Trigger.dev
-triggerClient.defineJob({
+export const runCutover = schemaTask({
   id: 'run-cutover',
-  name: 'Cutover',
-  version: '0.0.1',
-  trigger: eventTrigger({
-    name: 'cutover.requested',
-    schema: CutoverJobSchema,
-  }),
-  run: async (payload, io, context) => {
-    io.logger.info('Starting cutover process', {
+  description: 'Cutover',
+  schema: CutoverJobSchema,
+  run: async (payload: CutoverJobPayload, { ctx }) => {
+    console.log('Starting cutover process', {
       tenantId: payload.tenantId,
       mappingId: payload.mappingId,
       options: payload.options,
@@ -47,13 +42,13 @@ triggerClient.defineJob({
     try {
       // Step 1: Final delta sync (if not skipped)
       if (!payload.options.skipFinalSync) {
-        io.logger.info('Running final delta sync');
+        console.log('Running final delta sync');
         // await executeDeltaSync({ tenantId, mappingId });
       }
 
       // Step 2: Verification (if not skipped)
       if (!payload.options.skipVerification) {
-        io.logger.info('Running verification checks');
+        console.log('Running verification checks');
         // const verification = await runVerification({ tenantId, mappingId });
         // if (!verification.pass) {
         //   throw new Error('Verification failed - cutover aborted');
@@ -61,11 +56,11 @@ triggerClient.defineJob({
       }
 
       // Step 3: Update cutover status
-      io.logger.info('Marking cutover as switched');
+      console.log('Marking cutover as switched');
       // await updateCutoverStatus({ tenantId, mappingId, state: 'switched' });
 
       // Step 4: Start grace period monitoring
-      io.logger.info(`Starting ${payload.options.gracePeriodHours}h grace period`);
+      console.log(`Starting ${payload.options.gracePeriodHours}h grace period`);
       // Schedule grace period end
       // await ctx.schedule({
       //   id: `grace-period-${mappingId}`,
@@ -74,8 +69,8 @@ triggerClient.defineJob({
       //   payload: { tenantId, mappingId },
       // });
 
-      io.logger.info('Cutover completed successfully');
-      
+      console.log('Cutover completed successfully');
+
       return {
         success: true,
         tenantId: payload.tenantId,
@@ -83,11 +78,11 @@ triggerClient.defineJob({
         gracePeriodEnd: new Date(Date.now() + payload.options.gracePeriodHours * 3600000),
       };
     } catch (error) {
-      io.logger.error('Cutover failed', { error });
-      
+      console.error('Cutover failed', { error });
+
       // Rollback cutover status
       // await updateCutoverStatus({ tenantId, mappingId, state: 'rolled_back' });
-      
+
       throw error;
     }
   },
