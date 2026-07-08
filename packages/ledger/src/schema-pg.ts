@@ -451,3 +451,114 @@ export const cursor = pgTable(
     ),
   ],
 );
+
+// ========================= Tenant Members =========================
+
+export const tenantMember = pgTable(
+  'tenant_member',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenant.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull(),
+    email: text('email').notNull(),
+    role: text('role', { enum: ['owner', 'admin', 'member', 'viewer'] }).notNull().default('member'),
+    status: text('status', { enum: ['active', 'invited', 'suspended', 'removed'] })
+      .notNull()
+      .default('active'),
+    invitedAt: timestamp('invited_at', { withTimezone: true }),
+    joinedAt: timestamp('joined_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('ix_tenant_member_tenant').on(t.tenantId),
+    index('ix_tenant_member_user').on(t.userId),
+    uniqueIndex('uk_tenant_member').on(t.tenantId, t.userId),
+  ],
+);
+
+// ========================= Usage Metrics (for billing) =========================
+
+export const usageMetric = pgTable(
+  'usage_metric',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenant.id, { onDelete: 'cascade' }),
+    periodStart: text('period_start').notNull(), // Using text for date
+    periodEnd: text('period_end').notNull(),
+    metricType: text('metric_type', {
+      enum: ['storage', 'egress', 'compute', 'api_calls'],
+    }).notNull(),
+    resource: text('resource'),
+    quantity: text('quantity').notNull(), // Using text for numeric
+    unit: text('unit').notNull(),
+    unitPrice: text('unit_price').notNull(),
+    totalCost: text('total_cost').notNull(),
+    metadata: jsonb('metadata').notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('ix_usage_tenant_period').on(t.tenantId, t.periodStart),
+    index('ix_usage_period_type').on(t.periodStart, t.metricType),
+    uniqueIndex('uk_usage_metric').on(t.tenantId, t.periodStart, t.metricType, t.resource),
+  ],
+);
+
+// ========================= Billing Invoices =========================
+
+export const invoice = pgTable(
+  'invoice',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenant.id, { onDelete: 'cascade' }),
+    periodStart: text('period_start').notNull(),
+    periodEnd: text('period_end').notNull(),
+    status: text('status', {
+      enum: ['draft', 'sent', 'paid', 'overdue', 'void'],
+    })
+      .notNull()
+      .default('draft'),
+    subtotal: text('subtotal').notNull(),
+    taxRate: text('tax_rate').notNull(),
+    taxAmount: text('tax_amount').notNull(),
+    total: text('total').notNull(),
+    currency: text('currency').notNull().default('EUR'),
+    paymentMethod: text('payment_method'),
+    paymentId: text('payment_id'),
+    paidAt: timestamp('paid_at', { withTimezone: true }),
+    dueDate: text('due_date'),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    metadata: jsonb('metadata').notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('ix_invoice_tenant').on(t.tenantId, t.periodStart),
+    index('ix_invoice_status').on(t.status, t.periodStart),
+    uniqueIndex('uk_invoice_tenant_period').on(t.tenantId, t.periodStart),
+  ],
+);
+
+// ========================= Payment Methods =========================
+
+export const paymentMethod = pgTable(
+  'payment_method',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenant.id, { onDelete: 'cascade' }),
+    mollieId: text('mollie_id').notNull().unique(),
+    type: text('type').notNull(),
+    brand: text('brand'),
+    lastFour: text('last_four'),
+    expiryMonth: integer('expiry_month'),
+    expiryYear: integer('expiry_year'),
+    isDefault: boolean('is_default').notNull().default(false),
+    status: text('status', { enum: ['active', 'expired', 'revoked'] })
+      .notNull()
+      .default('active'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_payment_method_tenant').on(t.tenantId)],
+);
