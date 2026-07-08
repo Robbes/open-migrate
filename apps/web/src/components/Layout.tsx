@@ -7,7 +7,8 @@ import {
   Settings, 
   LogOut,
   Menu,
-  X
+  X,
+  CreditCard
 } from 'lucide-react';
 import { useAuthStore } from '../stores/auth-store';
 
@@ -20,6 +21,7 @@ const Layout: React.FC = () => {
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     { name: 'Mappings', href: '/mappings', icon: FolderGit2 },
     { name: 'Tenants', href: '/tenants', icon: Building2 },
+    { name: 'Billing', href: '/billing', icon: CreditCard },
     { name: 'Settings', href: '/settings', icon: Settings },
   ];
 

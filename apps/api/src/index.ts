@@ -15,6 +15,7 @@ import { z } from 'zod';
 import webhookRoutes from './routes/trigger-webhook.js';
 import tenantRoutes from './routes/tenants/index.js';
 import mappingRoutes from './routes/migrations/index.js';
+import billingRoutes from './routes/billing/index.js';
 
 // Types
 export interface AuthenticatedRequest extends Request {
@@ -39,7 +40,7 @@ const PORT = process.env.API_PORT || 3001;
 // Middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  origin: process.env.CORS_ORIGIN || 'http://localhost:3123',
   credentials: true,
 }));
 app.use(morgan('combined'));
@@ -54,6 +55,7 @@ app.get('/health', (req: Request, res: Response) => {
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/tenants', tenantRoutes);
 app.use('/api/mappings', mappingRoutes);
+app.use('/api/billing', billingRoutes);
 
 // Error handling middleware
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {

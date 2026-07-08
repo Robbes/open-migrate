@@ -9,6 +9,7 @@ import Mappings from './pages/Mappings';
 import MappingDetail from './pages/MappingDetail';
 import CreateMapping from './pages/CreateMapping';
 import Tenants from './pages/Tenants';
+import Billing from './pages/Billing';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
 
@@ -53,6 +54,7 @@ const App: React.FC = () => {
             <Route path="mappings/new" element={<CreateMapping />} />
             <Route path="mappings/:id" element={<MappingDetail />} />
             <Route path="tenants" element={<Tenants />} />
+            <Route path="billing" element={<Billing />} />
             <Route path="settings" element={<Settings />} />
           </Route>
         </Routes>
