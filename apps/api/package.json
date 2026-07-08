@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@mollie/api-client": "^4.6.0",
     "@openmig/ledger": "workspace:*",
     "@openmig/shared": "workspace:*",
     "cors": "^2.8.5",

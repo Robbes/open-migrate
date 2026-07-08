@@ -30,8 +30,10 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401) {
       // Token expired or invalid - redirect to login
       localStorage.removeItem('auth_token');
-      if (typeof globalThis !== 'undefined' && 'location' in globalThis) {
-        (globalThis as unknown as { location: Location }).location.href = '/login';
+      // Use globalThis to access window in a type-safe way
+      const win = globalThis as unknown as { location?: { href: string } };
+      if (win.location) {
+        win.location.href = '/login';
       }
     }
     return Promise.reject(error);

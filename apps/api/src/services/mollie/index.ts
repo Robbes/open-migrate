@@ -5,7 +5,7 @@
  * Handles payment creation, webhook processing, and customer management.
  */
 
-import Mollie from 'mollie-api-node';
+import { createMollieClient, Mandate, Method, PaymentMethod, MandateMethod } from '@mollie/api-client';
 
 export interface MolliePayment {
   id: string;
@@ -15,8 +15,8 @@ export interface MolliePayment {
     currency: string;
   };
   description: string;
-  redirectUrl: string;
-  webhookUrl: string;
+  redirectUrl?: string;
+  webhookUrl?: string;
   createdAt: string;
   paidAt?: string;
   canceledAt?: string;
@@ -37,7 +37,7 @@ export interface CreatePaymentParams {
   redirectUrl: string;
   webhookUrl?: string;
   customerId?: string;
-  method?: string;
+  method?: PaymentMethod;
 }
 
 export interface CreateCustomerParams {
@@ -47,12 +47,10 @@ export interface CreateCustomerParams {
 }
 
 class MollieService {
-  private client: Mollie.MollieApi;
+  private client: ReturnType<typeof createMollieClient>;
 
   constructor(apiKey: string) {
-    this.client = Mollie.createClient({
-      apiKey,
-    });
+    this.client = createMollieClient({ apiKey });
   }
 
   /**
@@ -158,12 +156,27 @@ class MollieService {
   /**
    * Create a payment method (mandate) for recurring payments
    */
-  async createMandate(customerId: string, method: string): Promise<Mollie.Mandate> {
-    const mandate = await this.client.mandates.create(customerId, {
-      method,
-      metadata: {
-        description: 'Recurring billing mandate',
-      },
+  async createMandate(params: {
+    customerId: string;
+    method: MandateMethod;
+    consumerName?: string;
+    consumerAccount?: string;
+    consumerBic?: string;
+    consumerEmail?: string;
+    signatureDate?: string;
+    mandateReference?: string;
+    paypalBillingAgreementId?: string;
+  }): Promise<Mandate> {
+    const mandate = await this.client.customerMandates.create({
+      customerId: params.customerId,
+      method: params.method,
+      consumerName: params.consumerName,
+      consumerAccount: params.consumerAccount,
+      consumerBic: params.consumerBic,
+      consumerEmail: params.consumerEmail,
+      signatureDate: params.signatureDate,
+      mandateReference: params.mandateReference,
+      paypalBillingAgreementId: params.paypalBillingAgreementId,
     });
 
     return mandate;
@@ -172,9 +185,9 @@ class MollieService {
   /**
    * Get available payment methods
    */
-  async getMethods(): Promise<Mollie.Method[]> {
-    const methods = await this.client.methods.all();
-    return methods._embedded.methods;
+  async getMethods(): Promise<Method[]> {
+    const methods = await this.client.methods.list();
+    return methods;
   }
 
   /**
