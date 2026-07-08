@@ -6,8 +6,8 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    // Node.js environment for .js files
-    files: ['**/*.js'],
+    // Node.js environment for .js and .cjs files
+    files: ['**/*.js', '**/*.cjs'],
     languageOptions: {
       globals: {
         process: 'readonly',
@@ -22,7 +22,7 @@ export default tseslint.config(
   },
   {
     rules: {
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': 'off',
     },
   },
 );

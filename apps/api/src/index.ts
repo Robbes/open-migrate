@@ -10,7 +10,6 @@ import type { Request, Response, NextFunction, Application } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import { z } from 'zod';
 
 // Import types
 import type { AuthenticatedRequest, JwtPayload } from './types/api';
@@ -51,7 +50,7 @@ app.use('/api/billing', billingRoutes);
 app.use('/api/billing', billingWebhookRoutes);
 
 // Error handling middleware
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   console.error('API Error:', err);
   res.status(500).json({
     error: 'Internal server error',

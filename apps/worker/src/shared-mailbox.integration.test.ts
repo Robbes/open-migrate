@@ -64,7 +64,6 @@ const RETRY_DELAY_MS = 2000;
 /**
  * Box interface for IMAP mailbox (unused, kept for reference)
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 interface ImMapBox {
   name: string;
   readOnly?: boolean;
