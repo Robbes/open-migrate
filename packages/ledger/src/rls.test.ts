@@ -14,7 +14,7 @@ import * as schema from './schema-pg';
 
 describe('RLS Policies', () => {
   let pool: Pool;
-  let db: ReturnType<typeof drizzle<typeof schema>>;
+  let _db: ReturnType<typeof drizzle<typeof schema>>;
   
   // Test tenant IDs
   const tenantA = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
@@ -24,7 +24,7 @@ describe('RLS Policies', () => {
     pool = new Pool({
       connectionString: process.env.DATABASE_URL || 'postgresql://localhost/openmigrate_test',
     });
-    db = drizzle(pool, { schema });
+    _db = drizzle(pool, { schema });
     
     // Setup test data
     await setupTestData();

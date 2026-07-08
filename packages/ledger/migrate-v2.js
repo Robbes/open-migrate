@@ -13,11 +13,13 @@
  * 
  * Environment variables:
  *   DATABASE_URL - PostgreSQL connection string
+ * 
+ * @module ledger/migrate-v2
  */
 
 import { execSync } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
+import _fs from 'fs';
+import _path from 'path';
 
 const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://localhost/openmigrate';
 
@@ -26,7 +28,7 @@ function runCommand(cmd) {
     const output = execSync(cmd, { encoding: 'utf-8', stdio: 'pipe' });
     return output;
   } catch (error) {
-    throw new Error(`Command failed: ${cmd}\n${error.message}`);
+    throw new Error(`Command failed: ${cmd}\n${error.message}`, { cause: error });
   }
 }
 
@@ -36,7 +38,7 @@ async function main() {
   try {
     // Step 1: Apply migration SQL using psql
     console.log('Step 1: Applying migration 0002_multi_tenant_rls.sql...');
-    const migrationPath = path.join(
+    const migrationPath = _path.join(
       import.meta.dirname,
       'migrations',
       '0002_multi_tenant_rls.sql'
