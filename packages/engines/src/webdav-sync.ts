@@ -161,9 +161,6 @@ export async function runWebDAVSync(config: WebDAVSyncConfig): Promise<WebDAVSyn
   try {
     // Generate rclone config
     const { configPath, sourceRemote, targetRemote } = generateRcloneConfig(config);
-    
-    // Set rclone config environment
-    const rcloneConfigEnv = `RCLONE_CONFIG=${configPath}`;
 
     // Build rclone command
     const mode = config.mode || 'copy';
@@ -221,7 +218,7 @@ export async function runWebDAVSync(config: WebDAVSyncConfig): Promise<WebDAVSyn
     const durationSeconds = Math.round((Date.now() - startTime) / 1000);
     
     // Parse any output that might have been captured
-    const { successCount, failureCount, skippedCount, bytesTransferred, failures: parseFailures } = parseRcloneOutput(
+    const { successCount, failureCount, skippedCount, failures: parseFailures } = parseRcloneOutput(
       err.stdout || err.stderr || err.message
     );
     failures.push(...parseFailures);

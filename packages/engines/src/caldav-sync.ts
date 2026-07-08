@@ -145,8 +145,7 @@ export async function runCalDAVSync(config: CalDAVSyncConfig): Promise<CalDAVSyn
     const { configPath } = generateVdirsyncerConfig(config);
 
     // Build vdirsyncer command
-    const dryRunFlag = config.dryRun ? '--dry' : '';
-    const command = `vdirsyncer -c "${configPath}" sync 2>&1`;
+    const command = `vdirsyncer -c "${configPath}" sync${config.dryRun ? ' --dry' : ''} 2>&1`;
 
     // Execute vdirsyncer
     const output = execSync(command, { 

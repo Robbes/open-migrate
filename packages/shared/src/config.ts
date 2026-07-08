@@ -40,8 +40,56 @@ export interface ImapDavTarget {
   readonly auth: SourceAuth;
 }
 
-export type SourceConfig = ImapOAuth2Source;
-export type TargetConfig = JmapTarget | ImapDavTarget;
+/** CalDAV source for calendar data */
+export interface CalDAVSource {
+  readonly type: 'caldav';
+  readonly url: string;
+  readonly user: string;
+  readonly auth: SourceAuth;
+}
+
+/** CardDAV source for contact data */
+export interface CardDAVSource {
+  readonly type: 'carddav';
+  readonly url: string;
+  readonly user: string;
+  readonly auth: SourceAuth;
+}
+
+/** WebDAV source for file data */
+export interface WebDAVSource {
+  readonly type: 'webdav';
+  readonly url: string;
+  readonly user: string;
+  readonly auth: SourceAuth;
+}
+
+/** CalDAV target for calendar data */
+export interface CalDAVTarget {
+  readonly type: 'caldav';
+  readonly url: string;
+  readonly user: string;
+  readonly auth: SourceAuth;
+}
+
+/** CardDAV target for contact data */
+export interface CardDAVTarget {
+  readonly type: 'carddav';
+  readonly url: string;
+  readonly user: string;
+  readonly auth: SourceAuth;
+}
+
+/** WebDAV target for file data */
+export interface WebDAVTarget {
+  readonly type: 'webdav';
+  readonly url: string;
+  readonly user: string;
+  readonly auth: SourceAuth;
+}
+
+export type SourceConfig = ImapOAuth2Source | CalDAVSource | CardDAVSource | WebDAVSource;
+export type TargetConfig = JmapTarget | ImapDavTarget | CalDAVTarget | CardDAVTarget | WebDAVTarget;
 
 export interface ScheduleConfig {
   readonly cron: string;
@@ -89,16 +137,40 @@ function parseSourceAuth(obj: Record<string, unknown>): SourceAuth {
 
 function parseSource(obj: Record<string, unknown>): SourceConfig {
   const type = reqString(obj, 'type', 'source.type');
-  if (type !== 'imap-oauth2') {
-    throw new ConfigError(`source.type: unsupported "${type}" (expected "imap-oauth2")`);
+  if (type === 'imap-oauth2') {
+    return {
+      type: 'imap-oauth2',
+      host: reqString(obj, 'host', 'source.host'),
+      port: reqInt(obj, 'port', 'source.port'),
+      user: reqString(obj, 'user', 'source.user'),
+      auth: parseSourceAuth(asRecord(obj.auth, 'source.auth')),
+    };
   }
-  return {
-    type: 'imap-oauth2',
-    host: reqString(obj, 'host', 'source.host'),
-    port: reqInt(obj, 'port', 'source.port'),
-    user: reqString(obj, 'user', 'source.user'),
-    auth: parseSourceAuth(asRecord(obj.auth, 'source.auth')),
-  };
+  if (type === 'caldav') {
+    return {
+      type: 'caldav',
+      url: reqString(obj, 'url', 'source.url'),
+      user: reqString(obj, 'user', 'source.user'),
+      auth: parseSourceAuth(asRecord(obj.auth, 'source.auth')),
+    };
+  }
+  if (type === 'carddav') {
+    return {
+      type: 'carddav',
+      url: reqString(obj, 'url', 'source.url'),
+      user: reqString(obj, 'user', 'source.user'),
+      auth: parseSourceAuth(asRecord(obj.auth, 'source.auth')),
+    };
+  }
+  if (type === 'webdav') {
+    return {
+      type: 'webdav',
+      url: reqString(obj, 'url', 'source.url'),
+      user: reqString(obj, 'user', 'source.user'),
+      auth: parseSourceAuth(asRecord(obj.auth, 'source.auth')),
+    };
+  }
+  throw new ConfigError(`source.type: unsupported "${type}" (expected "imap-oauth2", "caldav", "carddav", or "webdav")`);
 }
 
 function parseJmapAuth(obj: Record<string, unknown>): JmapAuth {
@@ -127,7 +199,31 @@ function parseTarget(obj: Record<string, unknown>): TargetConfig {
       auth: parseSourceAuth(asRecord(obj.auth, 'target.auth')),
     };
   }
-  throw new ConfigError(`target.type: unsupported "${type}" (expected "jmap" or "imap-dav")`);
+  if (type === 'caldav') {
+    return {
+      type: 'caldav',
+      url: reqString(obj, 'url', 'target.url'),
+      user: reqString(obj, 'user', 'target.user'),
+      auth: parseSourceAuth(asRecord(obj.auth, 'target.auth')),
+    };
+  }
+  if (type === 'carddav') {
+    return {
+      type: 'carddav',
+      url: reqString(obj, 'url', 'target.url'),
+      user: reqString(obj, 'user', 'target.user'),
+      auth: parseSourceAuth(asRecord(obj.auth, 'target.auth')),
+    };
+  }
+  if (type === 'webdav') {
+    return {
+      type: 'webdav',
+      url: reqString(obj, 'url', 'target.url'),
+      user: reqString(obj, 'user', 'target.user'),
+      auth: parseSourceAuth(asRecord(obj.auth, 'target.auth')),
+    };
+  }
+  throw new ConfigError(`target.type: unsupported "${type}" (expected "jmap", "imap-dav", "caldav", "carddav", or "webdav")`);
 }
 
 /** Validate a parsed config object into a typed MappingConfig (throws ConfigError on the first issue). */
