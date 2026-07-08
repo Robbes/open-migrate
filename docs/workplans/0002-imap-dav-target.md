@@ -1,4 +1,30 @@
-# Workplan 0002 (sketch) — IMAP/DAV target family (O365 → Soverin / openDesk mail)
+# Workplan 0002 — IMAP/DAV Target Family (O365 → Soverin / openDesk mail)
+
+---
+
+## Status
+
+**Status:** ✅ **COMPLETE**  
+**Completed:** 2026-07-08  
+**PR:** https://github.com/Robbes/open-migrate/pull/21  
+**Branch:** feat/imap-dav-target-implementation (merged & deleted)
+
+**Gates:**
+- ✅ Lint: `pnpm lint` passes
+- ✅ Typecheck: `pnpm typecheck` passes  
+- ✅ Unit Tests: `pnpm test` passes
+- ✅ Integration Tests: `pnpm test:integration` passes (24/24 tests)
+
+**Evidence:**
+- All 24 integration tests passing (JMAP + IMAP targets, ledger, shared mailboxes)
+- Idempotency verified: re-run creates 0 messages
+- Delta handling verified: adding 1 message creates exactly 1
+- Flag preservation verified (`\Seen`, `\Answered`, etc.)
+- INTERNALDATE preservation verified
+- `buildTargetWriter` now supports both `jmap` and `imap-dav` target types
+- Comprehensive provider documentation created (`docs/target-providers.md`)
+
+---
 
 > **Sketch for later** — refine before handing to the agent. Depends on **0001** (the JMAP slice)
 > being green: 0002 reuses the same `SourceConnector`, reconcile loop, ledger, cursors, Pattern-S

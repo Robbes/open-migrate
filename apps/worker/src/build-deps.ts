@@ -9,7 +9,7 @@ import {
   type SourceConnector,
   type TargetWriter,
 } from '@openmig/shared';
-import { ImapSource } from '@openmig/connectors';
+import { ImapSource, ImapDavMailTarget, type ImapDavTargetConfig } from '@openmig/connectors';
 import { JmapTargetWriter } from '@openmig/connectors';
 import { PgLedger } from '@openmig/ledger';
 import { PgCursorStore } from '@openmig/ledger';
@@ -79,40 +79,76 @@ function buildSourceConnector(sourceConfig: MappingConfig['source']): SourceConn
 
 /**
  * Build a target writer from the mapping config.
- * Currently only supports jmap targets.
+ * Supports both JMAP and IMAP/DAV target types.
  */
 function buildTargetWriter(targetConfig: MappingConfig['target']): TargetWriter {
-  if (targetConfig.type !== 'jmap') {
-    throw new Error(`Unsupported target type: ${targetConfig.type}. Only 'jmap' is supported.`);
+  switch (targetConfig.type) {
+    case 'jmap': {
+      // For JMAP targets, we need to determine the password based on auth type
+      // - basic: password from environment variable
+      // - bearer: we use the token as password (JMAP library accepts it)
+      let password: string;
+      if (targetConfig.auth.kind === 'basic') {
+        password = process.env[targetConfig.auth.passwordFromEnv] ?? '';
+      } else if (targetConfig.auth.kind === 'bearer') {
+        // For bearer token auth, we use the token as the password
+        password = process.env[targetConfig.auth.tokenFromEnv] ?? '';
+      } else {
+        throw new Error(`Unsupported JMAP auth kind: ${(targetConfig.auth as {kind: string}).kind}`);
+      }
+
+      if (!password) {
+        throw new Error(
+          `JMAP target password/token not found in environment: ` +
+          `check ${targetConfig.auth.kind === 'basic' 
+            ? targetConfig.auth.passwordFromEnv 
+            : targetConfig.auth.tokenFromEnv}`
+        );
+      }
+
+      const jmapConfig = {
+        baseUrl: targetConfig.baseUrl,
+        username: targetConfig.user,
+        password,
+      };
+
+      return new JmapTargetWriter(jmapConfig);
+    }
+
+    case 'imap-dav': {
+      // For IMAP/DAV targets, get password from environment
+      // Auth can be 'login' (password) or 'xoauth2' (access token)
+      let password: string;
+      if (targetConfig.auth.kind === 'login') {
+        password = process.env[targetConfig.auth.passwordFromEnv] ?? '';
+      } else if (targetConfig.auth.kind === 'xoauth2') {
+        password = process.env[targetConfig.auth.tokenFromEnv] ?? '';
+      } else {
+        throw new Error(`Unsupported IMAP/DAV auth kind: ${(targetConfig.auth as {kind: string}).kind}`);
+      }
+      
+      if (!password) {
+        throw new Error(
+          `IMAP/DAV target credentials not found in environment: ` +
+          `check ${targetConfig.auth.kind === 'login' 
+            ? targetConfig.auth.passwordFromEnv 
+            : targetConfig.auth.tokenFromEnv}`
+        );
+      }
+
+      const imapConfig: ImapDavTargetConfig = {
+        host: targetConfig.host,
+        port: targetConfig.port,
+        tls: targetConfig.port === 993, // Use TLS for IMAPS
+        username: targetConfig.user,
+        password,
+      };
+
+      return new ImapDavMailTarget(imapConfig);
+    }
+
+    default: {
+      throw new Error(`Unsupported target type: ${(targetConfig as {type: string}).type}`);
+    }
   }
-
-  // For JMAP targets, we need to determine the password based on auth type
-  // - basic: password from environment variable
-  // - bearer: we use the token as password (JMAP library accepts it)
-  let password: string;
-  if (targetConfig.auth.kind === 'basic') {
-    password = process.env[targetConfig.auth.passwordFromEnv] ?? '';
-  } else if (targetConfig.auth.kind === 'bearer') {
-    // For bearer token auth, we use the token as the password
-    password = process.env[targetConfig.auth.tokenFromEnv] ?? '';
-  } else {
-    throw new Error(`Unsupported JMAP auth kind: ${(targetConfig.auth as {kind: string}).kind}`);
-  }
-
-  if (!password) {
-    throw new Error(
-      `JMAP target password/token not found in environment: ` +
-      `check ${targetConfig.auth.kind === 'basic' 
-        ? targetConfig.auth.passwordFromEnv 
-        : targetConfig.auth.tokenFromEnv}`
-    );
-  }
-
-  const jmapConfig = {
-    baseUrl: targetConfig.baseUrl,
-    username: targetConfig.user,
-    password,
-  };
-
-  return new JmapTargetWriter(jmapConfig);
 }
