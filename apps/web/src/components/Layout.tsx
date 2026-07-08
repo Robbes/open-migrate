@@ -8,7 +8,8 @@ import {
   LogOut,
   Menu,
   X,
-  CreditCard
+  CreditCard,
+  Server
 } from 'lucide-react';
 import { useAuthStore } from '../stores/auth-store';
 
@@ -22,6 +23,7 @@ const Layout: React.FC = () => {
     { name: 'Mappings', href: '/mappings', icon: FolderGit2 },
     { name: 'Tenants', href: '/tenants', icon: Building2 },
     { name: 'Billing', href: '/billing', icon: CreditCard },
+    { name: 'Operator', href: '/operator', icon: Server },
     { name: 'Settings', href: '/settings', icon: Settings },
   ];
 
