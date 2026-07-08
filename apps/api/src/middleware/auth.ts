@@ -5,9 +5,9 @@
  * Supports both self-hosted (local JWT) and managed (Auth0/Clerk) providers.
  */
 
-import { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { AuthenticatedRequest } from '../index.js';
+import type { AuthenticatedRequest } from '../types/api';
 
 export interface JwtPayload {
   sub: string;

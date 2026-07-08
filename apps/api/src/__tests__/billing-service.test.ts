@@ -1,4 +1,5 @@
-import { calculateCost, UsageMetrics } from '../services/billing-service';
+import type { UsageMetrics } from '../services/billing-service';
+import { calculateCost } from '../services/billing-service';
 
 describe('Billing Service', () => {
   describe('calculateCost', () => {

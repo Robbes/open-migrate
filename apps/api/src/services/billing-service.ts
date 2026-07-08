@@ -110,7 +110,7 @@ export const PaymentMethodSchema = z.object({
 export type PaymentMethodType = z.infer<typeof PaymentMethodSchema>;
 
 // Cost calculation
-export function calculateCost(metrics: UsageMetrics, pricing: PricingConfig = defaultPricing): {
+export function calculateCost(metrics: Partial<UsageMetrics>, pricing: PricingConfig = defaultPricing): {
   storage: number;
   egress: number;
   compute: number;
@@ -118,9 +118,9 @@ export function calculateCost(metrics: UsageMetrics, pricing: PricingConfig = de
   tax: number;
   total: number;
 } {
-  const storageCost = Math.round(metrics.storageUsedGB * pricing.storagePricePerGB);
-  const egressCost = Math.round(metrics.egressGB * pricing.egressPricePerGB);
-  const computeCost = Math.round(metrics.computeHours * pricing.computePricePerHour);
+  const storageCost = Math.round((metrics.storageUsedGB ?? 0) * pricing.storagePricePerGB);
+  const egressCost = Math.round((metrics.egressGB ?? 0) * pricing.egressPricePerGB);
+  const computeCost = Math.round((metrics.computeHours ?? 0) * pricing.computePricePerHour);
   
   const subtotal = pricing.baseFee + storageCost + egressCost + computeCost;
   const tax = Math.round(subtotal * 0.21); // 21% VAT

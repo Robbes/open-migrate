@@ -5,10 +5,11 @@
  * Integrates with Trigger.dev for job orchestration.
  */
 
-import { Router, Response } from 'express';
+import { Router } from 'express';
+import type { Response } from 'express';
 import { z } from 'zod';
-import { authenticate, requireRole } from '../middleware/auth.js';
-import type { AuthenticatedRequest } from '../index.js';
+import { authenticate, requireRole } from '../../middleware/auth';
+import type { AuthenticatedRequest } from '../../types/api';
 
 const router = Router();
 

@@ -2,7 +2,7 @@
 // Unit tests for imapsync wrapper - basic validation tests.
 
 import { describe, test, expect } from 'vitest';
-import { checkImapsyncAvailable, getImapsyncVersion } from './imapsync-wrapper.js';
+import { checkImapsyncAvailable, getImapsyncVersion } from './imapsync-wrapper';
 
 describe('imapsync-wrapper', () => {
   describe('checkImapsyncAvailable', () => {

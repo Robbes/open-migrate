@@ -5,34 +5,25 @@
  * Provides tenant management, migration control, and billing endpoints.
  */
 
-import express, { Request, Response, NextFunction, Application } from 'express';
+import express from 'express';
+import type { Request, Response, NextFunction, Application } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import { z } from 'zod';
 
+// Import types
+import type { AuthenticatedRequest, JwtPayload } from './types/api';
+
 // Import routes
-import webhookRoutes from './routes/trigger-webhook.js';
-import tenantRoutes from './routes/tenants/index.js';
-import mappingRoutes from './routes/migrations/index.js';
-import billingRoutes from './routes/billing/index.js';
-import billingWebhookRoutes from './routes/billing/webhooks.js';
+import webhookRoutes from './routes/trigger-webhook';
+import tenantRoutes from './routes/tenants/index';
+import mappingRoutes from './routes/migrations/index';
+import billingRoutes from './routes/billing/index';
+import billingWebhookRoutes from './routes/billing/webhooks';
 
-// Types
-export interface AuthenticatedRequest extends Request {
-  tenantId?: string;
-  userId?: string;
-  userRole?: string;
-}
-
-export interface JwtPayload {
-  sub: string;
-  email: string;
-  tenantId: string;
-  role: string;
-  iat?: number;
-  exp?: number;
-}
+// Re-export for backwards compatibility
+export type { AuthenticatedRequest, JwtPayload };
 
 // Configuration
 const app: Application = express();

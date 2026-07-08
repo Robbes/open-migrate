@@ -5,12 +5,13 @@
  * All endpoints require authentication and enforce tenant isolation.
  */
 
-import { Router, Response } from 'express';
+import { Router } from 'express';
+import type { Response } from 'express';
 import { z } from 'zod';
-import { authenticate } from '../middleware/auth.js';
-import type { AuthenticatedRequest } from '../index.js';
-import { billingApi, UsageMetrics, calculateCost } from '../services/billing-service.js';
-import { getMollieService } from '../services/mollie/index.js';
+import { authenticate } from '../../middleware/auth';
+import type { AuthenticatedRequest } from '../../types/api';
+import { billingApi, UsageMetrics, calculateCost } from '../../services/billing-service';
+import { getMollieService } from '../../services/mollie/index';
 
 const router = Router();
 

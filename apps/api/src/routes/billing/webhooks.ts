@@ -5,9 +5,10 @@
  * Updates invoice status based on payment events.
  */
 
-import { Router, Request, Response } from 'express';
-import { getMollieService } from '../services/mollie/index.js';
-import { billingApi } from '../services/billing-service.js';
+import { Router } from 'express';
+import type { Request, Response } from 'express';
+import { getMollieService } from '../../services/mollie/index';
+import { billingApi } from '../../services/billing-service';
 
 const router = Router();
 

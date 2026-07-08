@@ -13,11 +13,11 @@ import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import type { ImapSimpleOptions } from 'imap-simple';
 import { sql } from 'drizzle-orm';
-import { createPgDb } from '../../../packages/ledger/src/db.ts';
-import { PgLedger } from '../../../packages/ledger/src/ledger.ts';
-import { ImapSource } from '../../../packages/connectors/src/imap-source.ts';
-import { ImapDavMailTarget } from '../../../packages/connectors/src/imap-dav-target.ts';
-import { runShadowPass } from '../../../packages/core/src/reconcile.ts';
+import { createPgDb } from '../../../packages/ledger/src/db';
+import { PgLedger } from '../../../packages/ledger/src/ledger';
+import { ImapSource } from '../../../packages/connectors/src/imap-source';
+import { ImapDavMailTarget } from '../../../packages/connectors/src/imap-dav-target';
+import { runShadowPass } from '../../../packages/core/src/reconcile';
 import { asTenantId, asMappingId, type RawMessage } from '@openmig/shared';
 import imap from 'imap-simple';
 

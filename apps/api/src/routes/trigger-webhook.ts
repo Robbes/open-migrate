@@ -5,7 +5,8 @@
  * These webhooks are used to track job execution and update the database.
  */
 
-import { Router, Request, Response } from 'express';
+import { Router } from 'express';
+import type { Request, Response } from 'express';
 import crypto from 'crypto';
 
 const router = Router();

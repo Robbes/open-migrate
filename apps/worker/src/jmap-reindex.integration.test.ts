@@ -13,12 +13,12 @@ import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import type { ImapSimpleOptions } from 'imap-simple';
 import { sql } from 'drizzle-orm';
-import { createPgDb } from '../../../packages/ledger/src/db.ts';
-import { PgLedger } from '../../../packages/ledger/src/ledger.ts';
-import { ImapSource } from '../../../packages/connectors/src/imap-source.ts';
-import { JmapTargetWriter } from '../../../packages/connectors/src/jmap-target.ts';
-import { runShadowPass } from '../../../packages/core/src/reconcile.ts';
-import { reindexFromTarget } from '../../../packages/core/src/reindex.ts';
+import { createPgDb } from '../../../packages/ledger/src/db';
+import { PgLedger } from '../../../packages/ledger/src/ledger';
+import { ImapSource } from '../../../packages/connectors/src/imap-source';
+import { JmapTargetWriter } from '../../../packages/connectors/src/jmap-target';
+import { runShadowPass } from '../../../packages/core/src/reconcile';
+import { reindexFromTarget } from '../../../packages/core/src/reindex';
 import { asTenantId, asMappingId, type MailItem } from '@openmig/shared';
 import imap from 'imap-simple';
 

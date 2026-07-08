@@ -8,7 +8,6 @@
  */
 
 import { type Scheduler, type ScheduleHandle } from '@openmig/shared';
-import _triggerClient from './trigger-client';
 
 /**
  * Trigger.dev implementation of the Scheduler interface.
