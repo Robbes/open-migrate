@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { authenticate } from '../middleware/auth.js';
 import type { AuthenticatedRequest } from '../index.js';
 import { billingApi, UsageMetrics, calculateCost } from '../services/billing-service.js';
+import { getMollieService } from '../services/mollie/index.js';
 
 const router = Router();
 
@@ -223,7 +224,7 @@ router.get('/invoices/:invoiceId', authenticate, async (req: AuthenticatedReques
 /**
  * POST /api/billing/invoices/:invoiceId/pay
  * 
- * Create payment for invoice (Mollie integration)
+ * Create payment for invoice using Mollie
  */
 router.post('/invoices/:invoiceId/pay', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -248,28 +249,41 @@ router.post('/invoices/:invoiceId/pay', authenticate, async (req: AuthenticatedR
       return;
     }
 
-    // TODO: Integrate with Mollie API
-    // const payment = await mollieClient.payments.create({
-    //   amount: {
-    //     value: (invoice.total / 100).toFixed(2),
-    //     currency: 'EUR',
-    //   },
-    //   description: `Invoice ${invoice.id} for ${invoice.period}`,
-    //   redirectUrl: `${process.env.WEB_URL}/billing/invoices/${invoiceId}`,
-    //   webhookUrl: `${process.env.API_URL}/api/billing/webhooks/mollie`,
-    // });
+    // Get Mollie service
+    const mollieService = getMollieService();
 
-    // For now, return mock payment URL
+    // Create payment via Mollie
+    const payment = await mollieService.createPayment({
+      tenantId,
+      amount: invoice.total, // Amount in cents
+      description: `Invoice ${invoice.id} for period ${invoice.period}`,
+      redirectUrl: `${process.env.WEB_URL || 'http://localhost:3123'}/billing/invoices/${invoiceId}`,
+      webhookUrl: `${process.env.API_URL || 'http://localhost:3001'}/api/billing/webhooks/mollie`,
+    });
+
+    // Store mollie payment ID
+    invoice.mollieInvoiceId = payment.id;
+    billingApi.updateInvoiceStatus(invoiceId, 'open');
+
     res.json({
-      paymentUrl: 'https://mock-mollie-payment.com/mock',
-      paymentId: `mock-payment-${Date.now()}`,
+      paymentUrl: payment.redirectUrl,
+      paymentId: payment.id,
+      status: payment.status,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating payment:', error);
-    res.status(500).json({
-      error: 'Internal server error',
-      message: 'Failed to create payment',
-    });
+    
+    if (error.message?.includes('MOLLIE_API_KEY')) {
+      res.status(500).json({
+        error: 'Configuration error',
+        message: 'Mollie API key not configured',
+      });
+    } else {
+      res.status(500).json({
+        error: 'Internal server error',
+        message: 'Failed to create payment',
+      });
+    }
   }
 });
 

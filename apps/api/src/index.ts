@@ -16,6 +16,7 @@ import webhookRoutes from './routes/trigger-webhook.js';
 import tenantRoutes from './routes/tenants/index.js';
 import mappingRoutes from './routes/migrations/index.js';
 import billingRoutes from './routes/billing/index.js';
+import billingWebhookRoutes from './routes/billing/webhooks.js';
 
 // Types
 export interface AuthenticatedRequest extends Request {
@@ -56,6 +57,7 @@ app.use('/api/webhooks', webhookRoutes);
 app.use('/api/tenants', tenantRoutes);
 app.use('/api/mappings', mappingRoutes);
 app.use('/api/billing', billingRoutes);
+app.use('/api/billing', billingWebhookRoutes);
 
 // Error handling middleware
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {

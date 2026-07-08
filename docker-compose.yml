@@ -1,0 +1,169 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: open-migrate-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-openmigrate}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openmigrate_password}
+      POSTGRES_DB: ${POSTGRES_DB:-openmigrate}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./packages/ledger/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-openmigrate}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - open-migrate-network
+
+  # Trigger.dev Backend
+  trigger-db:
+    image: postgres:15-alpine
+    container_name: trigger-db
+    environment:
+      POSTGRES_USER: trigger
+      POSTGRES_PASSWORD: trigger_password
+      POSTGRES_DB: triggerdb
+    volumes:
+      - trigger_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trigger"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - open-migrate-network
+
+  trigger-redis:
+    image: redis:7-alpine
+    container_name: trigger-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - open-migrate-network
+
+  trigger-api:
+    image: ghcr.io/triggerdotdev/trigger.dev:latest
+    container_name: trigger-api
+    environment:
+      DATABASE_URL: postgresql://trigger:trigger_password@trigger-db:5432/triggerdb
+      REDIS_URL: redis://trigger-redis:6379
+      ENCRYPTION_KEY: ${TRIGGER_ENCRYPTION_KEY:-dev-key-change-in-production}
+      LOGIN_SECRET: ${TRIGGER_LOGIN_SECRET:-dev-login-secret-change-in-production}
+      PORT: 3000
+    ports:
+      - "${TRIGGER_PORT:-3090}:3000"
+    depends_on:
+      trigger-db:
+        condition: service_healthy
+      trigger-redis:
+        condition: service_healthy
+    networks:
+      - open-migrate-network
+
+  trigger-worker:
+    image: ghcr.io/triggerdotdev/trigger.dev:latest
+    container_name: trigger-worker
+    command: ["node", "packages/worker/dist/cli.js", "worker:start"]
+    environment:
+      DATABASE_URL: postgresql://trigger:trigger_password@trigger-db:5432/triggerdb
+      REDIS_URL: redis://trigger-redis:6379
+      ENCRYPTION_KEY: ${TRIGGER_ENCRYPTION_KEY:-dev-key-change-in-production}
+      LOGIN_SECRET: ${TRIGGER_LOGIN_SECRET:-dev-login-secret-change-in-production}
+      PORT: 3001
+    depends_on:
+      trigger-db:
+        condition: service_healthy
+      trigger-redis:
+        condition: service_healthy
+      trigger-api:
+        condition: service_started
+    networks:
+      - open-migrate-network
+
+  # Open Migration API
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: open-migrate-api
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3001
+      DATABASE_URL: postgresql://${POSTGRES_USER:-openmigrate}:${POSTGRES_PASSWORD:-openmigrate_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
+      JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
+      JWT_EXPIRY: ${JWT_EXPIRY:-24h}
+      TRIGGER_API_URL: http://trigger-api:3000
+      TRIGGER_API_KEY: ${TRIGGER_API_KEY:-dev-api-key}
+      MOLLIE_API_KEY: ${MOLLIE_API_KEY:-}
+      MOLLIE_WEBHOOK_SECRET: ${MOLLIE_WEBHOOK_SECRET:-}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3123}
+      WEB_URL: ${WEB_URL:-http://localhost:3123}
+      API_URL: ${API_URL:-http://localhost:3001}
+    ports:
+      - "${API_PORT:-3001}:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      trigger-api:
+        condition: service_started
+    networks:
+      - open-migrate-network
+
+  # Open Migration Worker
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    container_name: open-migrate-worker
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-openmigrate}:${POSTGRES_PASSWORD:-openmigrate_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
+      TRIGGER_API_URL: http://trigger-api:3000
+      TRIGGER_API_KEY: ${TRIGGER_API_KEY:-dev-api-key}
+      IMAP_TIMEOUT: ${IMAP_TIMEOUT:-300}
+      JMAP_TIMEOUT: ${JMAP_TIMEOUT:-300}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      trigger-worker:
+        condition: service_started
+    networks:
+      - open-migrate-network
+
+  # Web Application
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: open-migrate-web
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:3001/api}
+      VITE_AUTH_URL: ${VITE_AUTH_URL:-http://localhost:3001/auth}
+    ports:
+      - "${WEB_PORT:-3123}:80"
+    depends_on:
+      - api
+    networks:
+      - open-migrate-network
+
+networks:
+  open-migrate-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  trigger_db_data:
+  redis_data:
