@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Mapping, Run } from '../services/mapping-service';
+import type { Mapping, Run } from '../services/mapping-service';
 
 interface MappingState {
   mappings: Mapping[];

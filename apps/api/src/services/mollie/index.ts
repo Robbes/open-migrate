@@ -83,13 +83,13 @@ class MollieService {
       },
       description: params.description,
       redirectUrl: params.redirectUrl,
-      webhookUrl: params.webhookUrl || `${process.env.API_URL}/api/billing/webhooks/mollie`,
+      webhookUrl: params.webhookUrl || `${(process as any).env.API_URL}/api/billing/webhooks/mollie`,
       customerId: params.customerId,
       method: params.method,
       metadata: {
         tenantId: params.tenantId,
       },
-    });
+    } as any);
 
     return {
       id: payment.id,
@@ -155,7 +155,7 @@ class MollieService {
   /**
    * Create a payment method (mandate) for recurring payments
    */
-  async createMandate(customerId: string, method: string): Promise<any> {
+  async createMandate(customerId: string, method: string): Promise<Mollie.Mandate> {
     const mandate = await this.client.mandates.create(customerId, {
       method,
       metadata: {
@@ -169,7 +169,7 @@ class MollieService {
   /**
    * Get available payment methods
    */
-  async getMethods(): Promise<any[]> {
+  async getMethods(): Promise<Mollie.Method[]> {
     const methods = await this.client.methods.all();
     return methods._embedded.methods;
   }

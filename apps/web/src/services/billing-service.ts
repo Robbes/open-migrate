@@ -4,7 +4,7 @@
  * API client for billing-related operations.
  */
 
-import { apiClient } from './api.js';
+import apiClient from './api.js';
 
 export interface UsageMetrics {
   id: string;

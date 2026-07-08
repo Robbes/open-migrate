@@ -24,6 +24,7 @@ export const defaultPricing: PricingConfig = {
 
 // Usage metrics
 export interface UsageMetrics {
+  id: string;
   tenantId: string;
   period: string; // YYYY-MM
   storageUsedGB: number;

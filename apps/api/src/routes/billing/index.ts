@@ -270,10 +270,12 @@ router.post('/invoices/:invoiceId/pay', authenticate, async (req: AuthenticatedR
       paymentId: payment.id,
       status: payment.status,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error creating payment:', error);
     
-    if (error.message?.includes('MOLLIE_API_KEY')) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    
+    if (errorMessage.includes('MOLLIE_API_KEY')) {
       res.status(500).json({
         error: 'Configuration error',
         message: 'Mollie API key not configured',

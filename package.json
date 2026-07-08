@@ -21,7 +21,8 @@
   "dependencies": {
     "croner": "^10.0.1",
     "imap-simple": "^5.1.0",
-    "jmap-jam": "^0.13.2"
+    "jmap-jam": "^0.13.2",
+    "mollie-api-node": "^1.4.0"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
