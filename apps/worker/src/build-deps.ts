@@ -60,7 +60,11 @@ export async function buildDeps(config: MappingConfig): Promise<ReconcileDeps> {
  * Currently only supports imap-oauth2 (O365 with XOAUTH2).
  */
 function buildSourceConnector(sourceConfig: MappingConfig['source']): SourceConnector {
-  // SourceConfig is currently ImapOAuth2Source (only type supported)
+  // Only ImapOAuth2Source is supported for now
+  if (sourceConfig.type !== 'imap-oauth2') {
+    throw new Error(`Unsupported source type: ${sourceConfig.type}. Only 'imap-oauth2' is currently supported.`);
+  }
+  
   const imapConfig = {
     host: sourceConfig.host,
     port: sourceConfig.port,

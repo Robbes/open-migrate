@@ -112,7 +112,11 @@ importers:
         specifier: workspace:*
         version: link:../shared
 
-  packages/engines: {}
+  packages/engines:
+    dependencies:
+      '@openmig/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/ledger:
     dependencies:

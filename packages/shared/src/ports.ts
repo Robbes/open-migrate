@@ -1,5 +1,8 @@
 import type { TenantId, MappingId } from './ids';
 import type { MailFolder, MailItem, RawMessage, MailKeyword } from './mail';
+import type { CalendarFolder, RawCalendarEvent } from './calendar';
+import type { ContactFolder, RawContact } from './contact';
+import type { FileFolder, RawFileItem } from './file';
 
 /** Opaque, source-defined cursor for incremental listing (e.g. UIDVALIDITY+UIDNEXT). */
 export interface SyncCursor {
@@ -64,6 +67,64 @@ export interface TargetWriter {
    */
   findByNaturalKey(mailboxId: string, naturalKey: string): Promise<string | undefined>;
 }
+
+/**
+ * Calendar target writer for CalDAV sync.
+ */
+export interface CalendarTargetWriter {
+  /** Ensure a calendar collection exists; return its target id. */
+  ensureCalendar(folder: CalendarFolder): Promise<string>;
+  /**
+   * Idempotently write a calendar event.
+   */
+  upsertCalendarEvent(
+    calendarId: string,
+    raw: RawCalendarEvent,
+  ): Promise<UpsertResult>;
+  /**
+   * Existence check for create-if-absent.
+   */
+  findCalendarByNaturalKey(calendarId: string, naturalKey: string): Promise<string | undefined>;
+}
+
+/**
+ * Contact target writer for CardDAV sync.
+ */
+export interface ContactTargetWriter {
+  /** Ensure an address book collection exists; return its target id. */
+  ensureContactFolder(folder: ContactFolder): Promise<string>;
+  /**
+   * Idempotently write a contact.
+   */
+  upsertContact(
+    folderId: string,
+    raw: RawContact,
+  ): Promise<UpsertResult>;
+  /**
+   * Existence check for create-if-absent.
+   */
+  findContactByNaturalKey(folderId: string, naturalKey: string): Promise<string | undefined>;
+}
+
+/**
+ * File target writer for WebDAV sync.
+ */
+export interface FileTargetWriter {
+  /** Ensure a directory exists; return its target id. */
+  ensureDirectory(folder: FileFolder): Promise<string>;
+  /**
+   * Idempotently write a file.
+   */
+  upsertFile(
+    parentId: string,
+    raw: RawFileItem,
+  ): Promise<UpsertResult>;
+  /**
+   * Existence check for create-if-absent.
+   */
+  findFileByNaturalKey(parentId: string, naturalKey: string): Promise<string | undefined>;
+}
+
 
 /** One existing item discovered on the target during reindex/adoption (ADR-0020). */
 export interface TargetEntry {

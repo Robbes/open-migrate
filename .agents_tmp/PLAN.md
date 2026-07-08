@@ -1,415 +1,452 @@
-# Workplan 0002 — IMAP/DAV Target Family Implementation Plan
-
-## 1. OBJECTIVE
-
-Implement Workplan 0002: Add IMAP/DAV target family support (O365 → Soverin/openDesk mail) as a parallel target to JMAP, maintaining the same idempotency, non-destructive, and shadow-running guarantees established in Workplan 0001.
+# Workplan 0003 — Calendar, Contacts & Files (CalDAV, CardDAV, WebDAV)
 
 ---
 
-## 2. CONTEXT SUMMARY
+## Status
 
-**Repository:** open-migrate - Sovereign migration tool for moving from O365/Google to EU sovereign platforms
+**Status:** 🚧 **IN PROGRESS**  
+**Target Completion:** TBD  
+**Branch:** `feat/0003-caldav-carddav-webdav`  
+**PR:** TBD (created upon completion)
 
-**Workplan 0002:** IMAP/DAV target family (O365 → Soverin / openDesk mail)
-
-**Prerequisites (Workplan 0001 - Complete):**
-- `packages/core` - `runShadowPass` reconcile loop with idempotency guarantees ✅
-- `packages/connectors` - `ImapSource` (O365 IMAP+OAuth2), `JmapTargetWriter` ✅
-- `packages/ledger` - `SqlLedger`, `PgCursorStore` for idempotency state ✅
-- `packages/scheduler` - `InProcessScheduler` with croner ✅
-- `apps/worker` - CLI entrypoint ✅
-- Idempotency property tests: run twice → zero creates; delta: add 1 → create 1 ✅
-
-**Key Architecture Decisions:**
-- **ADR-0018:** JMAP is primary target protocol; IMAP/DAV is parallel second family — both in MVP
-- **ADR-0007:** Reuse proven engines (imapsync for bulk, direct IMAP for incremental)
-- **ADR-0011:** Targets are managed EU/CH platforms (Soverin, openDesk); self-hosted targets are user-operated
-- **ADR-0006:** O365 source uses IMAP+OAuth2 (unchanged for 0002)
-
-**Target Platforms:**
-- **Soverin:** IMAP/CalDAV/CardDAV/WebDAV based (OX/Nextcloud)
-- **openDesk:** OX-based suites with IMAP/DAV
-- **Stalwart:** Reference server for local dev (speaks both JMAP and IMAP/DAV)
-
-**Current State:**
-- JMAP target writer is fully implemented and tested
-- IMAP source connector is fully implemented
-- Core engine, ledger, and scheduler are complete
-- **Missing:** IMAP target writer (`ImapDavMailTarget`) for writing to IMAP servers
+**Gates (must all pass before merge):**
+- ✅ **Lint:** `pnpm lint` passes
+- ✅ **Typecheck:** `pnpm typecheck` passes
+- ✅ **Unit Tests:** `pnpm test` passes
+- ✅ **Integration Tests:** `pnpm test:integration` passes
+- ✅ **Idempotency Tests:** Property tests pass for all three data types
+- ✅ **Documentation:** `docs/` updated with provider specifics and usage
 
 ---
 
-## 3. APPROACH OVERVIEW
+> **Sketch for later** — refine before handing to the agent. Depends on **0001** (JMAP mail) and **0002** (IMAP/DAV mail) being green.
+> This slice adds the remaining data families: calendar (CalDAV), contacts (CardDAV), and files (WebDAV).
+> The same idempotency + ledger pattern applies, but using **vdirsyncer** for CalDAV/CardDAV and **rclone** for WebDAV.
 
-**Chosen Approach:**
-Implement `ImapDavMailTarget` as a `TargetWriter` that uses IMAP APPEND for mail import, with ledger-gated idempotency. This mirrors the JMAP target's architecture but uses IMAP protocol instead.
+## Goal / Definition of Done
 
-**Rationale:**
-1. **Minimal architecture change:** Reuses the existing reconcile loop, ledger, cursors, and scheduler from 0001
-2. **Proven technology:** IMAP is mature and universally supported; imapsync is battle-tested
-3. **Idempotency via ledger:** Same pattern as JMAP — check ledger first, then verify on target via SEARCH HEADER Message-ID
-4. **Parallel to JMAP:** Both target types can coexist; mapping config selects which to use
+Extend the migration engine to handle **three additional data types** beyond email:
 
-**Two-Path Strategy:**
-- **Bulk (optional):** Shell out to `imapsync` for initial full copy (faster for large mailboxes)
-- **Incremental:** Direct IMAP client using APPEND with ledger-gated idempotency (for shadow/delta sync)
+1. **Calendar (CalDAV):** One-way or bidirectional sync of calendar events, respecting idempotency via ledger
+2. **Contacts (CardDAV):** One-way or bidirectional sync of address book entries, respecting idempotency via ledger
+3. **Files (WebDAV):** One-way mirror of files/folders, respecting idempotency via ledger
 
-**Why Not imapsync-Only:**
-- imapsync is excellent for one-shot bulk copy but doesn't integrate cleanly with our ledger-based idempotency
-- Incremental shadow runs need fine-grained control (per-message ledger checks, flag preservation, INTERNALDATE)
-- Best of both: imapsync for initial bulk, direct IMAP for incremental deltas
+**Definition of Done:**
+- All three data types can be synced from O365 (Graph/Exchange) or generic sources to JMAP/Nextcloud/Soverin targets
+- **Idempotency property tests pass** for each data type (run twice → zero creates on second run)
+- **Delta handling verified** (adding one item creates exactly one)
+- **Non-destructive by default** (source deletions logged as drift, not propagated)
+- **Provider documentation** updated with CalDAV/CardDAV/WebDAV specifics
+- All gates green: lint, typecheck, unit tests, integration tests
 
 ---
 
-## 4. IMPLEMENTATION STEPS
+## Approach
 
-### Step U1 — Core ImapDavMailTarget Implementation
+Following the established pattern from workplans 0001 and 0002:
 
-**Goal:** Implement `ImapDavMailTarget` as a `TargetWriter` for IMAP mail targets
+### Core Principles
+1. **Reuse proven engines:** 
+   - **vdirsyncer** for CalDAV/CardDAV (battle-tested, idempotent by design)
+   - **rclone** for WebDAV (robust file sync with checksum verification)
+2. **Ledger-gated idempotency:** Same pattern as mail — check ledger before sync, record after
+3. **Shell-out architecture:** Engines run as subprocesses, orchestrated by TypeScript wrappers
+4. **Config-driven:** Same mapping config pattern, extended for new data types
+
+### Data Type Strategies
+
+#### Calendar (CalDAV)
+- **Source:** O365 Calendar via Microsoft Graph API (primary) or CalDAV source
+- **Target:** CalDAV servers (Nextcloud, Soverin, Stalwart, Proton via bridge)
+- **Engine:** vdirsyncer with CalDAV backend
+- **Idempotency:** UID-based, ledger tracks `calendar_uid + content_hash`
+- **Special handling:** Recurring events, timezones, attachments
+
+#### Contacts (CardDAV)
+- **Source:** O365 Contacts/People via Microsoft Graph API
+- **Target:** CardDAV servers (Nextcloud, Soverin, Stalwart)
+- **Engine:** vdirsyncer with CardDAV backend
+- **Idempotency:** UID-based, ledger tracks `contact_uid + content_hash`
+- **Special handling:** vCard version compatibility (3.0 vs 4.0), photos, custom fields
+
+#### Files (WebDAV)
+- **Source:** OneDrive/SharePoint via Graph API or direct WebDAV
+- **Target:** WebDAV servers (Nextcloud, ownCloud, Stalwart Files)
+- **Engine:** rclone with WebDAV backend
+- **Idempotency:** Size + checksum verification, ledger tracks `file_path + content_hash`
+- **Special handling:** Directory structure, file permissions, large files, conflicts
+
+### Target Support Matrix
+
+| Data Type | JMAP | Nextcloud | Soverin | Stalwart | Proton |
+|-----------|------|-----------|---------|----------|--------|
+| Calendar  | ✅   | ✅        | ✅      | ✅       | ⚠️ (snapshot only) |
+| Contacts  | ✅   | ✅        | ✅      | ✅       | ⚠️ (snapshot only) |
+| Files     | ⚠️   | ✅        | ⚠️      | ✅       | ✅ |
+
+**Note:** Proton calendar/contacts lack open protocols — we offer **snapshot export** (vCalendar/vCard bundles) as the best achievable.
+
+---
+
+## Tasks
+
+### T1 — Calendar (CalDAV) foundation
+
+**Goal:** Implement calendar sync using vdirsyncer
 
 **Method:**
-Create `packages/connectors/src/imap-dav-target.ts` with:
+1. Create `packages/engines/src/caldav-sync.ts` — vdirsyncer wrapper with TypeScript API
+2. Implement `CalendarTargetWriter` interface (extends `TargetWriter`)
+3. Define `CalendarEvent` model with UID, summary, description, start/end, recurrence, timezone
+4. Implement `naturalKey = calendar_uid`, `contentHash = sha256(normalized event data)`
+5. Create vdirsyncer config generator (temp files per sync job)
+6. Parse vdirsyncer output for sync status
 
-1. **Configuration interface:**
-   ```typescript
-   export interface ImapDavTargetConfig {
-     host: string;
-     port: number;
-     tls: boolean;
-     auth: {
-       user: string;
-       password: string; // or accessToken for OAuth2
-     };
-     authType?: "LOGIN" | "XOAUTH2";
-   }
-   ```
+**Acceptance:**
+- Can sync a calendar from source to CalDAV target
+- Idempotency verified: re-run creates 0 events
+- Delta handling: adding one event creates exactly one
+- Recurring events handled correctly (master + instances)
+- Integration test against Stalwart/Nextcloud CalDAV
 
-2. **`connect()` / `disconnect()`:** IMAP connection management using the `imap` package (same as ImapSource)
-
-3. **`ensureMailbox(folder: MailFolder): Promise<string>`:**
-   - Check if mailbox exists using `conn.getBoxes()`
-   - Create if absent using CREATE command
-   - Set special-use flags where server supports it (RFC 6154)
-   - Return mailbox path as the target ID
-
-4. **`upsertEmail(mailboxId, raw, keywords): Promise<UpsertResult>`:**
-   - Extract Message-ID from raw RFC822
-   - **Idempotency check:** `SEARCH HEADER Message-ID:<id>` on target mailbox
-   - If found, return `{ targetId, created: false }`
-   - If not found:
-     - Parse headers to extract `Date:` for INTERNALDATE
-     - Map keywords to IMAP flags (`$seen` → `\Seen`, etc.)
-     - Use `APPEND` with:
-       - Mailbox path
-       - Flags (if any)
-       - INTERNALDATE (ISO 8601 → IMAP date format)
-       - RFC822 message bytes
-   - Return `{ targetId: uid, created: true }`
-
-5. **`findByNaturalKey(mailboxId, naturalKey): Promise<string | undefined>`:**
-   - SEARCH for `HEADER Message-ID <naturalKey>`
-   - Return UID if found, undefined otherwise
-
-6. **`listEntries(mailboxId?): AsyncIterable<TargetEntry>`:**
-   - For reindex/ledger recovery (ADR-0020)
-   - FETCH all UIDs with headers (Message-ID)
-   - Yield `{ naturalKey: messageId, targetId: uid, mailboxId }`
-
-7. **Helper functions:**
-   - `mapKeywordsToImapFlags()`: Convert `MailKeyword` → IMAP flags
-   - `formatImapDate()`: Convert ISO 8601 → IMAP date format (`"01-Jan-2024 12:34:56 +0000"`)
-   - `extractMessageIdFromRfc822()`: Parse Message-ID from raw RFC822
-
-**Acceptance Criteria:**
-- Unit tests for flag mapping and date formatting
-- Integration test against Stalwart (IMAPS 993):
-  - Write N messages to target
-  - Re-run → creates 0 (idempotency)
-  - Add 1 message → creates exactly 1 (delta)
-  - Verify flags preserved
-  - Verify INTERNALDATE preserved
-
-**Reference Files:**
-- `packages/connectors/src/jmap-target.ts` (reference for TargetWriter pattern)
-- `packages/connectors/src/imap-source.ts` (reference for IMAP client usage)
-- `packages/shared/src/ports.ts` (TargetWriter interface)
+**Reference:** `packages/engines/src/caldav-sync.ts`, `packages/shared/src/types/calendar.ts`
 
 ---
 
-### Step U2 — imapsync Bulk Path (Optional Enhancement)
+### T2 — Contacts (CardDAV) foundation
 
-**Goal:** Add optional bulk copy capability using imapsync shell-out
+**Goal:** Implement contacts sync using vdirsyncer
 
 **Method:**
-Create `packages/engines/src/imapsync-wrapper.ts`:
+1. Create `packages/engines/src/carddav-sync.ts` — vdirsyncer wrapper (can share base with CalDAV)
+2. Implement `ContactTargetWriter` interface
+3. Define `Contact` model with UID, name, email, phone, org, custom fields
+4. Implement `naturalKey = contact_uid`, `contentHash = sha256(normalized vCard)`
+5. Handle vCard version negotiation (3.0/4.0)
+6. Parse vdirsyncer output for contact sync status
 
-1. **Wrapper function:**
-   ```typescript
-   async function runImapsyncBulk(source: ImapSourceConfig, target: ImapDavTargetConfig): Promise<BulkResult>
-   ```
+**Acceptance:**
+- Can sync contacts from source to CardDAV target
+- Idempotency verified: re-run creates 0 contacts
+- Delta handling: adding one contact creates exactly one
+- vCard compatibility verified (both 3.0 and 4.0 targets)
+- Integration test against Stalwart/Nextcloud CardDAV
 
-2. **Command construction:**
-   ```bash
-   imapsync \
-     --host1 <source-host> --user1 <source-user> --passfile1 <source-pass> \
-     --host2 <target-host> --user2 <target-user> --passfile2 <target-pass> \
-     --automap --skipmessagesize 0 --maxbytespersecond 100000
-   ```
-
-3. **Integration with reconcile loop:**
-   - Before incremental sync, check if target is empty
-   - If yes, optionally run imapsync for bulk copy
-   - After imapsync, run normal reconcile to ensure ledger is populated
-   - Ledger guards against duplicates from imapsync
-
-4. **Configuration flag:**
-   - Add `bulkMethod?: "imapsync" | "direct"` to mapping config
-   - Default: "direct" (simpler, more controlled)
-
-**Acceptance Criteria:**
-- imapsync command executes successfully against Stalwart
-- Bulk copy followed by incremental pass converges with no duplicates
-- Ledger is properly populated after bulk + incremental
-- Documentation on when to use imapsync vs. direct
-
-**Note:** This is optional for MVP. The direct APPEND path is sufficient; imapsync is a performance optimization for large mailboxes.
+**Reference:** `packages/engines/src/carddav-sync.ts`, `packages/shared/src/types/contact.ts`
 
 ---
 
-### Step U3 — Target Selection Wiring
+### T3 — Files (WebDAV) foundation
 
-**Goal:** Wire the mapping config to select between JMAP and IMAP/DAV target types
+**Goal:** Implement file sync using rclone
 
 **Method:**
+1. Create `packages/engines/src/webdav-sync.ts` — rclone wrapper with TypeScript API
+2. Implement `FileTargetWriter` interface
+3. Define `FileItem` model with path, size, contentHash, modifiedAt, isDirectory
+4. Implement `naturalKey = file_path`, `contentHash = sha256(file content)`
+5. Handle directory traversal, recursive sync
+6. Support exclude/include patterns
+7. Parse rclone output for sync status
 
-1. **Update mapping config schema** (`packages/shared/src/config.ts`):
-   ```typescript
-   export type TargetType = "jmap" | "imapdav";
-   
-   export interface TargetConfig {
-     type: TargetType;
-     // JMAP-specific
-     baseUrl?: string;
-     username?: string;
-     password?: string;
-     // IMAP/DAV-specific
-     imapHost?: string;
-     imapPort?: number;
-     imapTls?: boolean;
-     // Shared
-     mailbox: string;
-   }
-   ```
+**Acceptance:**
+- Can sync files/folders from source to WebDAV target
+- Idempotency verified: re-run creates 0 files
+- Delta handling: adding one file creates exactly one
+- Large files handled (chunked upload, progress tracking)
+- Directory structure preserved
+- Integration test against Nextcloud/Stalwart WebDAV
 
-2. **Target factory function:**
-   ```typescript
-   // packages/connectors/src/target-factory.ts
-   export function createTargetWriter(config: TargetConfig): TargetWriter {
-     switch (config.type) {
-       case "jmap":
-         return new JmapTargetWriter({ baseUrl: config.baseUrl!, username: config.username!, password: config.password! });
-       case "imapdav":
-         return new ImapDavMailTarget({
-           host: config.imapHost!,
-           port: config.imapPort!,
-           tls: config.imapTls!,
-           auth: { user: config.username!, password: config.password! }
-         });
-       default:
-         throw new Error(`Unknown target type: ${config.type}`);
-     }
-   }
-   ```
-
-3. **Update worker CLI** (`apps/worker/src/index.ts`):
-   - Use `createTargetWriter()` to instantiate the correct target based on config
-   - No changes needed to the reconcile loop — it's target-agnostic
-
-4. **Parametrize property tests:**
-   - Create test fixtures for both JMAP and IMAP/DAV targets
-   - Run the same idempotency and delta tests against both target types
-   - Verify both pass with identical semantics
-
-**Acceptance Criteria:**
-- Mapping config with `type: "jmap"` creates JmapTargetWriter
-- Mapping config with `type: "imapdav"` creates ImapDavMailTarget
-- Same idempotency tests pass for both target types
-- Worker CLI works with both target types
-
-**Reference Files:**
-- `packages/shared/src/config.ts` (config schema)
-- `apps/worker/src/index.ts` (CLI wiring)
-- `packages/ledger/src/shadow-pass.integration.test.ts` (property tests to parametrize)
+**Reference:** `packages/engines/src/webdav-sync.ts`, `packages/shared/src/types/file.ts`
 
 ---
 
-### Step U4 — Provider Specifics & Documentation
+### T4 — Unified target writer factory
 
-**Goal:** Document and handle quirks for Soverin and openDesk providers
+**Goal:** Extend the target writer factory to support all data types
 
 **Method:**
+1. Update `buildTargetWriter()` to accept `dataType: 'mail' | 'calendar' | 'contact' | 'file'`
+2. Implement factory logic that returns appropriate writer based on:
+   - Target type (jmap, imap-dav, nextcloud, etc.)
+   - Data type (mail, calendar, contact, file)
+3. Create unified `SyncEngine` orchestrator that can run multiple data types in parallel
+4. Extend ledger schema to support all data types (or create type-specific tables)
 
-1. **Create `docs/target-providers.md`:**
-   - **Soverin:**
-     - IMAP server details (host, port, TLS requirements)
-     - Special-use folder support (which RFC 6154 features are advertised)
-     - Folder naming conventions (e.g., "Sent Messages" vs. "Sent")
-     - Throttling/limits (if known)
-     - Authentication method (password vs. OAuth2)
-   
-   - **openDesk (OX-based):**
-     - IMAP server details
-     - Special-use folder handling
-     - Known quirks (e.g., folder creation requirements)
-     - Throttling/limits
-   
-   - **Stalwart (reference):**
-     - Already documented in `docs/stalwart-integration-fix.md`
-     - IMAPS on 993, TLS required
-     - Full RFC 6154 support
+**Acceptance:**
+- Config can specify multiple data types per mapping
+- Factory returns correct writer for each combination
+- All data types can be synced in a single run or independently
+- Ledger tracks all data types with consistent idempotency
 
-2. **Handle provider quirks in code:**
-   - Folder name normalization (e.g., "Sent Messages" → "Sent")
-   - Graceful handling of servers that don't advertise special-use
-   - Retry logic for throttled requests (429 responses)
-
-3. **Manual smoke test guide:**
-   - Steps to test against real Soverin/openDesk accounts
-   - Secret-gated environment setup (never commit credentials)
-   - Expected behavior and verification steps
-
-**Acceptance Criteria:**
-- `docs/target-providers.md` documents Soverin and openDesk specifics
-- Code handles missing special-use support gracefully
-- Manual smoke test against real provider accounts succeeds
-- Idempotency verified on real targets (run twice → zero creates)
+**Reference:** `packages/connectors/src/target-factory.ts`, `packages/core/src/sync-engine.ts`
 
 ---
 
-### Step 5 — Integration & End-to-End Testing
+### T5 — Provider-specific handling
 
-**Goal:** Ensure the full IMAP/DAV stack works end-to-end
+**Goal:** Document and handle provider quirks for CalDAV/CardDAV/WebDAV
 
 **Method:**
+1. Update `docs/target-providers.md` with CalDAV/CardDAV/WebDAV specifics
+2. Document known issues per provider:
+   - **Nextcloud:** Full support for all three, well-tested
+   - **Soverin:** CalDAV/CardDAV supported, files via Nextcloud backend
+   - **Stalwart:** All three supported as reference implementation
+   - **Proton:** Snapshot-only for calendar/contacts (no live sync)
+3. Add provider detection and auto-configuration
+4. Handle throttling/limits per provider
 
-1. **Add IMAP target integration tests** (`packages/connectors/src/imap-dav-target.test.ts`):
-   - Test against Stalwart (which supports IMAP)
-   - Test mailbox creation with special-use
-   - Test email APPEND with flags and INTERNALDATE
-   - Test idempotency (write twice → second is no-op)
-   - Test reindex (`listEntries`)
+**Acceptance:**
+- Documentation complete for all major providers
+- Provider-specific quirks documented with workarounds
+- Manual/secret-gated smoke tests pass against real accounts
 
-2. **Parametrize existing shadow-pass tests:**
-   - Create test fixtures for IMAP target
-   - Run same property tests as JMAP target
-   - Verify identical semantics
-
-3. **End-to-end test** (`apps/worker/src/imap-dav-e2e.test.ts`):
-   - Source: Stalwart IMAP (as O365 proxy)
-   - Target: Stalwart IMAP (as Soverin proxy)
-   - Run full shadow pass
-   - Verify idempotency and delta
-
-4. **Update `docs/testing.md`:**
-   - Add IMAP/DAV target test section
-   - Document how to run IMAP-specific tests
-   - Add provider-specific test notes
-
-**Acceptance Criteria:**
-- All integration tests pass (JMAP + IMAP targets)
-- E2E test demonstrates full O365→IMAP migration flow
-- Idempotency property verified for IMAP target
-- Documentation updated with IMAP/DAV testing guidance
+**Reference:** `docs/target-providers.md`, `docs/caldav-carddav-webdav.md`
 
 ---
 
-## 5. TESTING AND VALIDATION
+### T6 — Idempotency property tests
 
-**Definition of Done for Workplan 0002:**
+**Goal:** Extend idempotency tests to cover all three data types
 
-1. **ImapDavMailTarget Implementation (U1):**
-   - ✅ `ImapDavMailTarget` class implements `TargetWriter` interface
-   - ✅ `ensureMailbox()` creates mailbox and sets special-use
-   - ✅ `upsertEmail()` uses APPEND with INTERNALDATE and flags
-   - ✅ `findByNaturalKey()` searches by Message-ID
-   - ✅ `listEntries()` supports reindex/ledger recovery
-   - ✅ Unit tests for flag mapping and date formatting
-   - ✅ Integration tests against Stalwart IMAPS
+**Method:**
+1. Create property tests for calendar:
+   - Sync calendar → re-run → 0 creates
+   - Add one event → re-run → exactly 1 create
+   - Modify event → re-run → update only changed
+2. Create property tests for contacts:
+   - Sync contacts → re-run → 0 creates
+   - Add one contact → re-run → exactly 1 create
+3. Create property tests for files:
+   - Sync files → re-run → 0 creates
+   - Add one file → re-run → exactly 1 create
+   - Modify file → re-run → update only changed
 
-2. **Idempotency Property (Critical):**
-   - ✅ First run: N messages created
-   - ✅ Second run: 0 messages created (idempotent skip)
-   - ✅ Add 1 message, re-run: exactly 1 created (delta)
-   - ✅ Flags and INTERNALDATE preserved across runs
+**Acceptance:**
+- All property tests pass against real targets (Stalwart/Nextcloud)
+- Tests verify idempotency, delta handling, and non-destructive behavior
+- Tests included in `pnpm test:integration`
 
-3. **Target Selection (U3):**
-   - ✅ Mapping config supports `type: "jmap"` or `type: "imapdav"`
-   - ✅ Factory creates correct TargetWriter implementation
-   - ✅ Worker CLI works with both target types
-   - ✅ Same reconcile loop used for both target types
+**Reference:** `packages/ledger/src/caldav-idempotency.test.ts`, `packages/ledger/src/carddav-idempotency.test.ts`, `packages/ledger/src/webdav-idempotency.test.ts`
 
-4. **Property Tests Parametrized:**
-   - ✅ Idempotency tests pass for JMAP target
-   - ✅ Idempotency tests pass for IMAP/DAV target
-   - ✅ Delta tests pass for both target types
-   - ✅ Reindex tests work for both target types
+---
 
-5. **Provider Documentation (U4):**
-   - ✅ `docs/target-providers.md` documents Soverin and openDesk
-   - ✅ Special-use folder handling documented
-   - ✅ Known quirks and workarounds documented
-   - ✅ Manual smoke test guide provided
+### T7 — Worker CLI & config extension
 
-6. **Gates Green:**
-   - ✅ `pnpm lint` passes
-   - ✅ `pnpm typecheck` passes
-   - ✅ `pnpm test` (unit tests) passes
-   - ✅ `pnpm test:integration` passes (JMAP + IMAP targets)
-   - ✅ Workplan 0002 Status block updated with evidence
+**Goal:** Extend worker CLI to support calendar/contacts/files
 
-7. **Out of Scope (Confirmed):**
-   - ❌ Calendar/contacts via CalDAV/CardDAV (slice 0003)
-   - ❌ Files via WebDAV (slice 0003)
-   - ❌ Graph rich extractor (later)
-   - ❌ Pattern-D distribution lists (later)
-   - ❌ Two-way sync (later)
-   - ❌ Cutover UI (later)
+**Method:**
+1. Extend `MappingConfig` schema to include:
+   - `dataTypes: ('mail' | 'calendar' | 'contact' | 'file')[]`
+   - Per-data-type configuration (source/target endpoints, credentials)
+   - Sync options (one-way vs bidirectional, date ranges, filters)
+2. Update worker CLI to handle multiple data types
+3. Create `mapping.example.json` with all data type examples
+4. Add CLI flags for selecting specific data types
 
-**Validation Commands:**
+**Acceptance:**
+- Config can specify any combination of data types
+- Worker can sync mail, calendar, contacts, and files in one run
+- `mapping.example.json` provides complete reference
+- CLI documentation updated
+
+**Reference:** `apps/worker/src/index.ts`, `packages/shared/src/config.ts`
+
+---
+
+### T8 — Documentation & ADRs
+
+**Goal:** Complete documentation for the new data types
+
+**Method:**
+1. Create `docs/caldav-carddav-webdav.md` with:
+   - Overview of CalDAV/CardDAV/WebDAV protocols
+   - Engine choices (vdirsyncer, rclone) and rationale
+   - Configuration examples
+   - Troubleshooting guide
+2. Update `docs/testing.md` with new test patterns
+3. Consider ADR if new decisions crystallize (e.g., engine choices, data models)
+4. Update README.md quickstart to include all data types
+
+**Acceptance:**
+- Documentation complete and accurate
+- Quickstart works for all data types
+- Gates green (docs-hygiene check)
+
+**Reference:** `docs/caldav-carddav-webdav.md`, `docs/testing.md`, `README.md`
+
+---
+
+## Out of scope (this slice)
+
+- **Bidirectional sync conflict resolution** — MVP is one-way mirror; bidirectional with conflict handling is future work
+- **Proton live sync** — Proton calendar/contacts lack open protocols; snapshot-only for now
+- **Advanced calendar features:** 
+  - Attendee management (invites, responses)
+  - Free/busy queries
+  - Calendar sharing
+- **Advanced contact features:**
+  - Contact groups/lists
+  - Photo synchronization
+  - vCard extensions
+- **Advanced file features:**
+  - File versioning
+  - Conflict file creation (.sync-conflict)
+  - Selective sync (folder filtering beyond basic patterns)
+- **Graph-rich extraction** for calendar/contacts (beyond basic API)
+- **Managed edition specifics** (Trigger.dev workflows, multi-tenant billing)
+
+---
+
+## Reuse vs new
+
+**Reuses:**
+- `Ledger` — same idempotency pattern, extended schema
+- `Scheduler` — same orchestration layer
+- `SourceConnector` — extended to support calendar/contacts/files via Graph
+- Reconcile loop pattern — same architecture, different data models
+- Idempotency + delta property tests — parametrized over data type
+
+**New:**
+- Three engine wrappers: `vdirsyncer` (CalDAV/CardDAV), `rclone` (WebDAV)
+- Three data models: `CalendarEvent`, `Contact`, `FileItem`
+- Three target writer implementations
+- Unified `SyncEngine` orchestrator
+- Provider-specific handling for CalDAV/CardDAV/WebDAV
+
+**ADRs:**
+- If engine choices (vdirsyncer/rclone) need formalization, create ADR
+- If data model decisions differ significantly from mail pattern, document in ADR
+
+---
+
+## Testing strategy
+
+### Unit Tests
+- Data model serialization/deserialization
+- Natural key + content hash computation
+- vdirsyncer/rclone config generation
+- Provider-specific folder/mapping logic
+
+### Integration Tests
+- End-to-end sync against Stalwart (CalDAV/CardDAV)
+- End-to-end sync against Nextcloud (CalDAV/CardDAV/WebDAV)
+- Idempotency property tests for each data type
+- Delta handling tests
+- Large file handling (rclone)
+
+### Manual/Secret-Gated Tests
+- Real Soverin account (CalDAV/CardDAV)
+- Real Nextcloud instance (all three)
+- Proton snapshot export (if applicable)
+
+---
+
+## Definition of Done (final gates)
+
+**All of the following must be true before merging:**
+
+1. ✅ **Code Quality:**
+   - `pnpm lint` passes (no warnings)
+   - `pnpm typecheck` passes (no errors)
+
+2. ✅ **Tests:**
+   - `pnpm test` passes (all unit tests)
+   - `pnpm test:integration` passes (all integration tests)
+   - Idempotency property tests green for calendar, contacts, files
+   - Delta handling tests green for all three data types
+
+3. ✅ **Documentation:**
+   - `docs/caldav-carddav-webdav.md` created
+   - `docs/target-providers.md` updated with CalDAV/CardDAV/WebDAV info
+   - `docs/testing.md` updated with new test patterns
+   - `README.md` quickstart includes all data types
+   - `mapping.example.json` complete with all data type examples
+
+4. ✅ **Architecture:**
+   - All three data types follow the same idempotency pattern as mail
+   - Non-destructive by default verified
+   - Ledger schema extended appropriately
+   - Target factory supports all combinations
+
+5. ✅ **Operational:**
+   - No secrets in code/repo
+   - Docker hygiene (no leftover containers/volumes)
+   - Workplan Status block updated with evidence
+   - No blocking issues or TODOs left unaddressed
+
+6. ✅ **PR Process:**
+   - Branch created: `feat/0003-caldav-carddav-webdav`
+   - All CI gates green on PR
+   - PR description includes evidence of testing
+   - Ready for merge to `main`
+
+---
+
+## Implementation notes
+
+### vdirsyncer Setup
 ```bash
-# Run all unit tests
-pnpm test
+# Install vdirsyncer (system package or pip)
+# For testing, use system installation
+pip install vdirsyncer
 
-# Run integration tests (includes IMAP target tests)
-pnpm test:integration
-
-# Run linter
-pnpm lint
-
-# Type check
-pnpm typecheck
-
-# Optional: Run imapsync bulk test (if U2 implemented)
-pnpm test:integration --grep imapsync
+# Configuration generated per sync job in temp directory
+# Sync output parsed for status
 ```
 
-**Evidence Required:**
-- Test output showing all tests pass
-- Screenshots/logs of IMAP target integration tests
-- Updated workplan Status block with timestamps and evidence
-- Documentation updates in `docs/target-providers.md`
+### rclone Setup
+```bash
+# Install rclone (system package or binary)
+# Configure remote via rclone config (non-interactive)
+# Sync commands orchestrated via CLI
+```
+
+### Ledger Extensions
+```sql
+-- Option 1: Single table with type discriminator
+ALTER TABLE ledger ADD COLUMN item_type TEXT NOT NULL DEFAULT 'mail';
+
+-- Option 2: Separate tables per type (recommended for clarity)
+CREATE TABLE ledger_calendar (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL,
+  mapping_id UUID NOT NULL,
+  natural_key_hash BYTEA NOT NULL,
+  content_hash BYTEA NOT NULL,
+  target_id TEXT,
+  status TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(tenant_id, mapping_id, natural_key_hash)
+);
+
+-- Similar for contacts and files
+```
+
+### Cursor Strategy
+- **Calendar:** Use CalDAV `sync-token` (RFC 6578)
+- **Contacts:** Use CardDAV `sync-token` (RFC 6578)
+- **Files:** Use rclone's built-in state files / checksum tracking
 
 ---
 
-## 6. NEXT STEPS
+## Timeline estimate
 
-With Workplan 0001 complete, proceed with Workplan 0002 implementation in this order:
+| Task | Estimated Effort | Dependencies |
+|------|------------------|--------------|
+| T1 — Calendar foundation | 2-3 days | 0001, 0002 complete |
+| T2 — Contacts foundation | 1-2 days | T1 |
+| T3 — Files foundation | 2-3 days | 0001, 0002 complete |
+| T4 — Unified factory | 1 day | T1, T2, T3 |
+| T5 — Provider handling | 1 day | T1, T2, T3 |
+| T6 — Idempotency tests | 1-2 days | T1, T2, T3 |
+| T7 — CLI extension | 1 day | T4 |
+| T8 — Documentation | 1 day | All tasks |
 
-1. **Start with U1** - Core `ImapDavMailTarget` implementation
-2. **Add integration tests** - Verify against Stalwart IMAPS
-3. **Wire target selection (U3)** - Factory pattern and config updates
-4. **Parametrize property tests** - Ensure both JMAP and IMAP pass same tests
-5. **Document providers (U4)** - Create `docs/target-providers.md`
-6. **Optional: U2 imapsync** - Bulk path if needed for performance
+**Total:** ~10-14 days (can be parallelized)
 
-**To proceed:** Click the **Build** button below to automatically switch to the code agent and execute this plan, or manually switch to the code agent and instruct it to begin with Step U1.
+---
+
+*Plan created based on workplan 0001 and 0002 patterns, following the established architecture and ADRs.*
