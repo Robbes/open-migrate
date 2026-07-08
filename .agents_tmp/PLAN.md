@@ -1,190 +1,415 @@
-# 1. OBJECTIVE
+# Workplan 0002 — IMAP/DAV Target Family Implementation Plan
 
-Verify the actual implementation status of Workplan 0001 (O365 → JMAP mail slice), update the workplan Status block with evidence, and determine the next actionable tasks. If T0-T9 are complete, prepare for Workplan 0002 (IMAP/DAV target family).
+## 1. OBJECTIVE
+
+Implement Workplan 0002: Add IMAP/DAV target family support (O365 → Soverin/openDesk mail) as a parallel target to JMAP, maintaining the same idempotency, non-destructive, and shadow-running guarantees established in Workplan 0001.
 
 ---
 
-# 2. CONTEXT SUMMARY
+## 2. CONTEXT SUMMARY
 
 **Repository:** open-migrate - Sovereign migration tool for moving from O365/Google to EU sovereign platforms
 
-**Current Workplan:** 0001-first-slice-jmap-mail.md - First buildable slice: O365 → JMAP mail (one-way shadow)
+**Workplan 0002:** IMAP/DAV target family (O365 → Soverin / openDesk mail)
 
-**Key Components:**
-- `packages/core` - reconcile loop (runShadowPass), idempotency logic
-- `packages/connectors` - ImapSource, JmapTargetWriter
-- `packages/ledger` - SqlLedger, PgCursorStore for idempotency
-- `packages/scheduler` - InProcessScheduler with croner
-- `apps/worker` - CLI entrypoint for running migrations
-- `docs/workplans/` - Active workplans with Status blocks
+**Prerequisites (Workplan 0001 - Complete):**
+- `packages/core` - `runShadowPass` reconcile loop with idempotency guarantees ✅
+- `packages/connectors` - `ImapSource` (O365 IMAP+OAuth2), `JmapTargetWriter` ✅
+- `packages/ledger` - `SqlLedger`, `PgCursorStore` for idempotency state ✅
+- `packages/scheduler` - `InProcessScheduler` with croner ✅
+- `apps/worker` - CLI entrypoint ✅
+- Idempotency property tests: run twice → zero creates; delta: add 1 → create 1 ✅
 
-**Evidence Found:**
-- `apps/worker/src/index.ts` - Complete CLI with --config and --once flags (T7)
-- `packages/scheduler/src/scheduler.ts` - croner integration with schedule() (T6)
-- `apps/worker/src/shared-mailbox.integration.test.ts` - Pattern-S shared mailbox tests (T5)
-- `apps/worker/src/jmap-reindex.integration.test.ts` - Reindex tests (T9)
-- Integration tests in `packages/ledger/src/` - Shadow pass and ledger tests (T4)
+**Key Architecture Decisions:**
+- **ADR-0018:** JMAP is primary target protocol; IMAP/DAV is parallel second family — both in MVP
+- **ADR-0007:** Reuse proven engines (imapsync for bulk, direct IMAP for incremental)
+- **ADR-0011:** Targets are managed EU/CH platforms (Soverin, openDesk); self-hosted targets are user-operated
+- **ADR-0006:** O365 source uses IMAP+OAuth2 (unchanged for 0002)
 
-**Workplan Status Block Discrepancy:** The Status block in workplan 0001 marks T5, T6, T7 as "Open — verify first", but code evidence suggests these are implemented. The Status block needs verification and updating.
+**Target Platforms:**
+- **Soverin:** IMAP/CalDAV/CardDAV/WebDAV based (OX/Nextcloud)
+- **openDesk:** OX-based suites with IMAP/DAV
+- **Stalwart:** Reference server for local dev (speaks both JMAP and IMAP/DAV)
 
----
-
-# 3. APPROACH OVERVIEW
-
-1. **Audit Implementation Status:** Systematically verify each task (T0-T9) against actual code and test evidence
-2. **Run Integration Tests:** Execute `pnpm test:integration` to confirm all tests pass (the "11/11" mentioned in T4)
-3. **Update Workplan Status:** Correct the Status block in workplan 0001 to reflect actual implementation state
-4. **Identify Next Actions:** Based on verification results, determine if:
-   - Workplan 0001 needs completion of remaining items (likely just T8 docs)
-   - Workplan 0002 should be started (IMAP/DAV target family)
-   - Additional verification is needed
-
-**Why This Approach:** The workplan Status block appears outdated. Before proceeding with new work, we need accurate knowledge of what's actually done vs. what's open. Running the integration tests provides definitive proof of implementation completeness.
+**Current State:**
+- JMAP target writer is fully implemented and tested
+- IMAP source connector is fully implemented
+- Core engine, ledger, and scheduler are complete
+- **Missing:** IMAP target writer (`ImapDavMailTarget`) for writing to IMAP servers
 
 ---
 
-# 4. IMPLEMENTATION STEPS
+## 3. APPROACH OVERVIEW
 
-## Step 1: Verify Task Implementation Status
+**Chosen Approach:**
+Implement `ImapDavMailTarget` as a `TargetWriter` that uses IMAP APPEND for mail import, with ledger-gated idempotency. This mirrors the JMAP target's architecture but uses IMAP protocol instead.
 
-**Goal:** Confirm which tasks are truly complete vs. open
+**Rationale:**
+1. **Minimal architecture change:** Reuses the existing reconcile loop, ledger, cursors, and scheduler from 0001
+2. **Proven technology:** IMAP is mature and universally supported; imapsync is battle-tested
+3. **Idempotency via ledger:** Same pattern as JMAP — check ledger first, then verify on target via SEARCH HEADER Message-ID
+4. **Parallel to JMAP:** Both target types can coexist; mapping config selects which to use
+
+**Two-Path Strategy:**
+- **Bulk (optional):** Shell out to `imapsync` for initial full copy (faster for large mailboxes)
+- **Incremental:** Direct IMAP client using APPEND with ledger-gated idempotency (for shadow/delta sync)
+
+**Why Not imapsync-Only:**
+- imapsync is excellent for one-shot bulk copy but doesn't integrate cleanly with our ledger-based idempotency
+- Incremental shadow runs need fine-grained control (per-message ledger checks, flag preservation, INTERNALDATE)
+- Best of both: imapsync for initial bulk, direct IMAP for incremental deltas
+
+---
+
+## 4. IMPLEMENTATION STEPS
+
+### Step U1 — Core ImapDavMailTarget Implementation
+
+**Goal:** Implement `ImapDavMailTarget` as a `TargetWriter` for IMAP mail targets
 
 **Method:**
-- Review code evidence for each task T0-T9
-- Check for test files and their locations
-- Verify key implementation files exist and are functional
+Create `packages/connectors/src/imap-dav-target.ts` with:
 
-**Files to Review:**
-- `apps/worker/src/index.ts` (T7 - CLI)
-- `packages/scheduler/src/scheduler.ts` (T6 - croner)
-- `apps/worker/src/shared-mailbox.integration.test.ts` (T5 - shared mailbox)
-- `apps/worker/src/jmap-reindex.integration.test.ts` (T9 - reindex)
-- `packages/ledger/src/shadow-pass.integration.test.ts` (T4 - shadow engine)
-- `packages/connectors/src/imap-source.ts` (T2 - IMAP source)
-- `packages/connectors/src/jmap-target.ts` (T3 - JMAP target)
-- `packages/ledger/src/ledger.ts` and `cursor-store.ts` (T0 - ledger)
+1. **Configuration interface:**
+   ```typescript
+   export interface ImapDavTargetConfig {
+     host: string;
+     port: number;
+     tls: boolean;
+     auth: {
+       user: string;
+       password: string; // or accessToken for OAuth2
+     };
+     authType?: "LOGIN" | "XOAUTH2";
+   }
+   ```
 
-**Reference:** Workplan 0001 docs/workplans/0001-first-slice-jmap-mail.md
+2. **`connect()` / `disconnect()`:** IMAP connection management using the `imap` package (same as ImapSource)
 
----
+3. **`ensureMailbox(folder: MailFolder): Promise<string>`:**
+   - Check if mailbox exists using `conn.getBoxes()`
+   - Create if absent using CREATE command
+   - Set special-use flags where server supports it (RFC 6154)
+   - Return mailbox path as the target ID
 
-## Step 2: Run Integration Tests
+4. **`upsertEmail(mailboxId, raw, keywords): Promise<UpsertResult>`:**
+   - Extract Message-ID from raw RFC822
+   - **Idempotency check:** `SEARCH HEADER Message-ID:<id>` on target mailbox
+   - If found, return `{ targetId, created: false }`
+   - If not found:
+     - Parse headers to extract `Date:` for INTERNALDATE
+     - Map keywords to IMAP flags (`$seen` → `\Seen`, etc.)
+     - Use `APPEND` with:
+       - Mailbox path
+       - Flags (if any)
+       - INTERNALDATE (ISO 8601 → IMAP date format)
+       - RFC822 message bytes
+   - Return `{ targetId: uid, created: true }`
 
-**Goal:** Verify all integration tests pass (the "11/11" mentioned in T4 Status)
+5. **`findByNaturalKey(mailboxId, naturalKey): Promise<string | undefined>`:**
+   - SEARCH for `HEADER Message-ID <naturalKey>`
+   - Return UID if found, undefined otherwise
 
-**Method:**
-```bash
-# Bring up the dev stack
-docker compose -f deploy/compose/dev.yml up -d
+6. **`listEntries(mailboxId?): AsyncIterable<TargetEntry>`:**
+   - For reindex/ledger recovery (ADR-0020)
+   - FETCH all UIDs with headers (Message-ID)
+   - Yield `{ naturalKey: messageId, targetId: uid, mailboxId }`
 
-# Run integration tests
-pnpm test:integration
-```
-
-**Expected Outcome:**
-- All integration tests pass (ledger, shadow-pass, shared-mailbox, jmap-reindex)
-- Idempotency property tests confirm: run twice → zero creates on second run
-- Delta tests confirm: adding one message creates exactly one new item
-
-**Evidence Required:**
-- Test output showing pass/fail status
-- Any error messages if tests fail
-- Coverage of all 4 integration test files found
-
----
-
-## Step 3: Update Workplan 0001 Status Block
-
-**Goal:** Correct the Status block to reflect actual implementation state
-
-**Method:**
-- Edit `docs/workplans/0001-first-slice-jmap-mail.md`
-- Update each task's status with evidence from Steps 1-2
-- Add test run output as evidence
-
-**Status Block Template:**
-```markdown
-## Status — 2026-07-07 (update this block at the end of every session)
-
-| Task | Status | Evidence |
-|---|---|---|
-| T0 dev stack + ledger | **Done** | PgLedger + PgCursorStore in packages/ledger; ledger.integration.test.ts green |
-| T1 core model + interfaces | **Done** | MailItem, SourceConnector, TargetWriter interfaces in packages/shared/core |
-| T2 IMAP source | **Done** | ImapSource in packages/connectors; integration-tested against Stalwart |
-| T3 JMAP target writer | **Done** | JmapTargetWriter in packages/connectors; integration-tested |
-| T4 shadow engine | **Done** | runShadowPass in packages/core; shadow-pass.integration.test.ts green |
-| T5 Pattern-S shared mailbox | **Done** | shared-mailbox.integration.test.ts; tests Pattern-S idempotency |
-| T6 croner wiring | **Done** | InProcessScheduler.schedule() uses croner; scheduler.ts |
-| T7 worker CLI | **Done** | apps/worker/src/index.ts with --config/--once flags |
-| T8 docs + ADRs | **Partial** | stalwart-integration-fix.md current; README quickstart unverified |
-| T9 reindex | **Done** | jmap-reindex.integration.test.ts; TargetReindexer.listEntries() implemented |
-```
-
----
-
-## Step 4: Complete T8 (Docs) if Needed
-
-**Goal:** Ensure documentation is complete and accurate
-
-**Method:**
-- Verify `README.md` quickstart works from clean clone
-- Check `docs/testing.md` covers idempotency property tests
-- Verify `docs/stalwart-integration-fix.md` is authoritative
-- Add any missing ADRs if decisions crystallized
+7. **Helper functions:**
+   - `mapKeywordsToImapFlags()`: Convert `MailKeyword` → IMAP flags
+   - `formatImapDate()`: Convert ISO 8601 → IMAP date format (`"01-Jan-2024 12:34:56 +0000"`)
+   - `extractMessageIdFromRfc822()`: Parse Message-ID from raw RFC822
 
 **Acceptance Criteria:**
-- README quickstart works end-to-end
-- Testing documentation matches actual test structure
-- No outdated or contradictory documentation
+- Unit tests for flag mapping and date formatting
+- Integration test against Stalwart (IMAPS 993):
+  - Write N messages to target
+  - Re-run → creates 0 (idempotency)
+  - Add 1 message → creates exactly 1 (delta)
+  - Verify flags preserved
+  - Verify INTERNALDATE preserved
+
+**Reference Files:**
+- `packages/connectors/src/jmap-target.ts` (reference for TargetWriter pattern)
+- `packages/connectors/src/imap-source.ts` (reference for IMAP client usage)
+- `packages/shared/src/ports.ts` (TargetWriter interface)
 
 ---
 
-## Step 5: Determine Next Workplan
+### Step U2 — imapsync Bulk Path (Optional Enhancement)
 
-**Goal:** Decide whether to start Workplan 0002 (IMAP/DAV target family)
+**Goal:** Add optional bulk copy capability using imapsync shell-out
 
 **Method:**
-- If Workplan 0001 is fully complete (all gates green, docs updated), begin Workplan 0002
-- If Workplan 0001 has gaps, complete them first
+Create `packages/engines/src/imapsync-wrapper.ts`:
 
-**Workplan 0002 Scope (from sketch):**
-- U1: IMAP/DAV mail target (ImapDavMailTarget implements TargetWriter)
-- U2: imapsync bulk path (optional)
-- U3: Target selection wiring (jmap vs imapdav from config)
-- U4: Provider specifics (Soverin/openDesk)
+1. **Wrapper function:**
+   ```typescript
+   async function runImapsyncBulk(source: ImapSourceConfig, target: ImapDavTargetConfig): Promise<BulkResult>
+   ```
+
+2. **Command construction:**
+   ```bash
+   imapsync \
+     --host1 <source-host> --user1 <source-user> --passfile1 <source-pass> \
+     --host2 <target-host> --user2 <target-user> --passfile2 <target-pass> \
+     --automap --skipmessagesize 0 --maxbytespersecond 100000
+   ```
+
+3. **Integration with reconcile loop:**
+   - Before incremental sync, check if target is empty
+   - If yes, optionally run imapsync for bulk copy
+   - After imapsync, run normal reconcile to ensure ledger is populated
+   - Ledger guards against duplicates from imapsync
+
+4. **Configuration flag:**
+   - Add `bulkMethod?: "imapsync" | "direct"` to mapping config
+   - Default: "direct" (simpler, more controlled)
+
+**Acceptance Criteria:**
+- imapsync command executes successfully against Stalwart
+- Bulk copy followed by incremental pass converges with no duplicates
+- Ledger is properly populated after bulk + incremental
+- Documentation on when to use imapsync vs. direct
+
+**Note:** This is optional for MVP. The direct APPEND path is sufficient; imapsync is a performance optimization for large mailboxes.
 
 ---
 
-# 5. TESTING AND VALIDATION
+### Step U3 — Target Selection Wiring
 
-**Success Criteria:**
+**Goal:** Wire the mapping config to select between JMAP and IMAP/DAV target types
 
-1. **Workplan 0001 Status Verified:**
-   - All tasks T0-T9 have accurate status (Done/Open/Partial)
-   - Status block includes concrete evidence (test files, test results)
-   - No discrepancies between claimed and actual implementation
+**Method:**
 
-2. **Integration Tests Pass:**
-   - `pnpm test:integration` runs successfully
-   - All 4 integration test files execute without errors:
-     - `packages/ledger/src/ledger.integration.test.ts`
-     - `packages/ledger/src/shadow-pass.integration.test.ts`
-     - `apps/worker/src/shared-mailbox.integration.test.ts`
-     - `apps/worker/src/jmap-reindex.integration.test.ts`
-   - Idempotency property confirmed: second run creates 0 items
-   - Delta property confirmed: adding 1 item creates exactly 1 new item
+1. **Update mapping config schema** (`packages/shared/src/config.ts`):
+   ```typescript
+   export type TargetType = "jmap" | "imapdav";
+   
+   export interface TargetConfig {
+     type: TargetType;
+     // JMAP-specific
+     baseUrl?: string;
+     username?: string;
+     password?: string;
+     // IMAP/DAV-specific
+     imapHost?: string;
+     imapPort?: number;
+     imapTls?: boolean;
+     // Shared
+     mailbox: string;
+   }
+   ```
 
-3. **Documentation Complete:**
-   - README.md quickstart works from clean clone
-   - `docs/testing.md` accurately describes test structure
-   - `docs/stalwart-integration-fix.md` is the authoritative reference
+2. **Target factory function:**
+   ```typescript
+   // packages/connectors/src/target-factory.ts
+   export function createTargetWriter(config: TargetConfig): TargetWriter {
+     switch (config.type) {
+       case "jmap":
+         return new JmapTargetWriter({ baseUrl: config.baseUrl!, username: config.username!, password: config.password! });
+       case "imapdav":
+         return new ImapDavMailTarget({
+           host: config.imapHost!,
+           port: config.imapPort!,
+           tls: config.imapTls!,
+           auth: { user: config.username!, password: config.password! }
+         });
+       default:
+         throw new Error(`Unknown target type: ${config.type}`);
+     }
+   }
+   ```
 
-4. **Next Steps Clear:**
-   - If 0001 complete: Workplan 0002 is ready to start
-   - If gaps exist: Specific remaining tasks identified with priorities
+3. **Update worker CLI** (`apps/worker/src/index.ts`):
+   - Use `createTargetWriter()` to instantiate the correct target based on config
+   - No changes needed to the reconcile loop — it's target-agnostic
 
-**Validation Methods:**
-- Run `pnpm test:integration` and capture output
-- Verify each integration test file exists and has meaningful test cases
-- Check that workplan Status block matches code evidence
-- Confirm README quickstart instructions are accurate and complete
+4. **Parametrize property tests:**
+   - Create test fixtures for both JMAP and IMAP/DAV targets
+   - Run the same idempotency and delta tests against both target types
+   - Verify both pass with identical semantics
+
+**Acceptance Criteria:**
+- Mapping config with `type: "jmap"` creates JmapTargetWriter
+- Mapping config with `type: "imapdav"` creates ImapDavMailTarget
+- Same idempotency tests pass for both target types
+- Worker CLI works with both target types
+
+**Reference Files:**
+- `packages/shared/src/config.ts` (config schema)
+- `apps/worker/src/index.ts` (CLI wiring)
+- `packages/ledger/src/shadow-pass.integration.test.ts` (property tests to parametrize)
+
+---
+
+### Step U4 — Provider Specifics & Documentation
+
+**Goal:** Document and handle quirks for Soverin and openDesk providers
+
+**Method:**
+
+1. **Create `docs/target-providers.md`:**
+   - **Soverin:**
+     - IMAP server details (host, port, TLS requirements)
+     - Special-use folder support (which RFC 6154 features are advertised)
+     - Folder naming conventions (e.g., "Sent Messages" vs. "Sent")
+     - Throttling/limits (if known)
+     - Authentication method (password vs. OAuth2)
+   
+   - **openDesk (OX-based):**
+     - IMAP server details
+     - Special-use folder handling
+     - Known quirks (e.g., folder creation requirements)
+     - Throttling/limits
+   
+   - **Stalwart (reference):**
+     - Already documented in `docs/stalwart-integration-fix.md`
+     - IMAPS on 993, TLS required
+     - Full RFC 6154 support
+
+2. **Handle provider quirks in code:**
+   - Folder name normalization (e.g., "Sent Messages" → "Sent")
+   - Graceful handling of servers that don't advertise special-use
+   - Retry logic for throttled requests (429 responses)
+
+3. **Manual smoke test guide:**
+   - Steps to test against real Soverin/openDesk accounts
+   - Secret-gated environment setup (never commit credentials)
+   - Expected behavior and verification steps
+
+**Acceptance Criteria:**
+- `docs/target-providers.md` documents Soverin and openDesk specifics
+- Code handles missing special-use support gracefully
+- Manual smoke test against real provider accounts succeeds
+- Idempotency verified on real targets (run twice → zero creates)
+
+---
+
+### Step 5 — Integration & End-to-End Testing
+
+**Goal:** Ensure the full IMAP/DAV stack works end-to-end
+
+**Method:**
+
+1. **Add IMAP target integration tests** (`packages/connectors/src/imap-dav-target.test.ts`):
+   - Test against Stalwart (which supports IMAP)
+   - Test mailbox creation with special-use
+   - Test email APPEND with flags and INTERNALDATE
+   - Test idempotency (write twice → second is no-op)
+   - Test reindex (`listEntries`)
+
+2. **Parametrize existing shadow-pass tests:**
+   - Create test fixtures for IMAP target
+   - Run same property tests as JMAP target
+   - Verify identical semantics
+
+3. **End-to-end test** (`apps/worker/src/imap-dav-e2e.test.ts`):
+   - Source: Stalwart IMAP (as O365 proxy)
+   - Target: Stalwart IMAP (as Soverin proxy)
+   - Run full shadow pass
+   - Verify idempotency and delta
+
+4. **Update `docs/testing.md`:**
+   - Add IMAP/DAV target test section
+   - Document how to run IMAP-specific tests
+   - Add provider-specific test notes
+
+**Acceptance Criteria:**
+- All integration tests pass (JMAP + IMAP targets)
+- E2E test demonstrates full O365→IMAP migration flow
+- Idempotency property verified for IMAP target
+- Documentation updated with IMAP/DAV testing guidance
+
+---
+
+## 5. TESTING AND VALIDATION
+
+**Definition of Done for Workplan 0002:**
+
+1. **ImapDavMailTarget Implementation (U1):**
+   - ✅ `ImapDavMailTarget` class implements `TargetWriter` interface
+   - ✅ `ensureMailbox()` creates mailbox and sets special-use
+   - ✅ `upsertEmail()` uses APPEND with INTERNALDATE and flags
+   - ✅ `findByNaturalKey()` searches by Message-ID
+   - ✅ `listEntries()` supports reindex/ledger recovery
+   - ✅ Unit tests for flag mapping and date formatting
+   - ✅ Integration tests against Stalwart IMAPS
+
+2. **Idempotency Property (Critical):**
+   - ✅ First run: N messages created
+   - ✅ Second run: 0 messages created (idempotent skip)
+   - ✅ Add 1 message, re-run: exactly 1 created (delta)
+   - ✅ Flags and INTERNALDATE preserved across runs
+
+3. **Target Selection (U3):**
+   - ✅ Mapping config supports `type: "jmap"` or `type: "imapdav"`
+   - ✅ Factory creates correct TargetWriter implementation
+   - ✅ Worker CLI works with both target types
+   - ✅ Same reconcile loop used for both target types
+
+4. **Property Tests Parametrized:**
+   - ✅ Idempotency tests pass for JMAP target
+   - ✅ Idempotency tests pass for IMAP/DAV target
+   - ✅ Delta tests pass for both target types
+   - ✅ Reindex tests work for both target types
+
+5. **Provider Documentation (U4):**
+   - ✅ `docs/target-providers.md` documents Soverin and openDesk
+   - ✅ Special-use folder handling documented
+   - ✅ Known quirks and workarounds documented
+   - ✅ Manual smoke test guide provided
+
+6. **Gates Green:**
+   - ✅ `pnpm lint` passes
+   - ✅ `pnpm typecheck` passes
+   - ✅ `pnpm test` (unit tests) passes
+   - ✅ `pnpm test:integration` passes (JMAP + IMAP targets)
+   - ✅ Workplan 0002 Status block updated with evidence
+
+7. **Out of Scope (Confirmed):**
+   - ❌ Calendar/contacts via CalDAV/CardDAV (slice 0003)
+   - ❌ Files via WebDAV (slice 0003)
+   - ❌ Graph rich extractor (later)
+   - ❌ Pattern-D distribution lists (later)
+   - ❌ Two-way sync (later)
+   - ❌ Cutover UI (later)
+
+**Validation Commands:**
+```bash
+# Run all unit tests
+pnpm test
+
+# Run integration tests (includes IMAP target tests)
+pnpm test:integration
+
+# Run linter
+pnpm lint
+
+# Type check
+pnpm typecheck
+
+# Optional: Run imapsync bulk test (if U2 implemented)
+pnpm test:integration --grep imapsync
+```
+
+**Evidence Required:**
+- Test output showing all tests pass
+- Screenshots/logs of IMAP target integration tests
+- Updated workplan Status block with timestamps and evidence
+- Documentation updates in `docs/target-providers.md`
+
+---
+
+## 6. NEXT STEPS
+
+With Workplan 0001 complete, proceed with Workplan 0002 implementation in this order:
+
+1. **Start with U1** - Core `ImapDavMailTarget` implementation
+2. **Add integration tests** - Verify against Stalwart IMAPS
+3. **Wire target selection (U3)** - Factory pattern and config updates
+4. **Parametrize property tests** - Ensure both JMAP and IMAP pass same tests
+5. **Document providers (U4)** - Create `docs/target-providers.md`
+6. **Optional: U2 imapsync** - Bulk path if needed for performance
+
+**To proceed:** Click the **Build** button below to automatically switch to the code agent and execute this plan, or manually switch to the code agent and instruct it to begin with Step U1.
