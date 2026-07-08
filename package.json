@@ -46,12 +46,5 @@
     "typescript": "5.9.2",
     "typescript-eslint": "^8.62.1",
     "vitest": "3.2.7"
-  },
-  "pnpm": {
-    "overrides": {
-      "ws": ">=8.21.0",
-      "socket.io-client": ">=4.8.0",
-      "engine.io-client": ">=6.6.0"
-    }
   }
 }
