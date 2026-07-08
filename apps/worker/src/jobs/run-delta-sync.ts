@@ -4,11 +4,12 @@
  * Executes an incremental synchronization, processing only changes since the last sync.
  * Uses checkpoints to track progress.
  * 
- * Trigger: Scheduled via cron (e.g., every 15 minutes)
+ * Trigger: Can be triggered manually via event or scheduled via a dispatcher job
  */
 
 import { triggerClient } from '../trigger-client';
 import { z } from 'zod';
+import { eventTrigger } from '@trigger.dev/sdk';
 
 // Job input schema
 const DeltaSyncJobSchema = z.object({
@@ -23,15 +24,13 @@ type DeltaSyncJobPayload = z.infer<typeof DeltaSyncJobSchema>;
 triggerClient.defineJob({
   id: 'run-delta-sync',
   name: 'Delta Sync',
-  description: 'Execute an incremental synchronization for a mapping',
   version: '0.0.1',
-  trigger: triggerClient.cron({
-    cron: '*/15 * * * *', // Every 15 minutes
-    name: 'Frequent Delta Sync',
+  trigger: eventTrigger({
+    name: 'delta-sync.triggered',
+    schema: DeltaSyncJobSchema,
   }),
-  inputSchema: DeltaSyncJobSchema,
-  run: async (payload, { ctx, logger }) => {
-    logger.info('Starting delta sync', {
+  run: async (payload, io, context) => {
+    io.logger.info('Starting delta sync', {
       tenantId: payload.tenantId,
       mappingId: payload.mappingId,
       domains: payload.domains,
@@ -46,7 +45,7 @@ triggerClient.defineJob({
       //   domains: payload.domains,
       // });
 
-      logger.info('Delta sync completed successfully');
+      io.logger.info('Delta sync completed successfully');
       
       return {
         success: true,
@@ -55,7 +54,7 @@ triggerClient.defineJob({
         // result: result,
       };
     } catch (error) {
-      logger.error('Delta sync failed', { error });
+      io.logger.error('Delta sync failed', { error });
       throw error; // Trigger.dev will retry
     }
   },

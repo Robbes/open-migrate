@@ -13,6 +13,8 @@
     "@openmig/shared": "workspace:*",
     "@openmig/connectors": "workspace:*",
     "@openmig/ledger": "workspace:*",
-    "croner": "9.1.0"
+    "@trigger.dev/sdk": "^3.0.0",
+    "croner": "9.1.0",
+    "zod": "^3.22.4"
   }
 }

@@ -4,11 +4,12 @@
  * Executes a complete synchronization for a given mapping.
  * This job is idempotent and can be safely re-run.
  * 
- * Trigger: Manual or scheduled via cron
+ * Trigger: Manual or scheduled via a dispatcher job
  */
 
 import { triggerClient } from '../trigger-client';
 import { z } from 'zod';
+import { eventTrigger } from '@trigger.dev/sdk';
 
 // Job input schema
 const FullSyncJobSchema = z.object({
@@ -26,15 +27,13 @@ type FullSyncJobPayload = z.infer<typeof FullSyncJobSchema>;
 triggerClient.defineJob({
   id: 'run-full-sync',
   name: 'Full Sync',
-  description: 'Execute a complete synchronization for a mapping',
   version: '0.0.1',
-  trigger: triggerClient.cron({
-    cron: '0 2 * * *', // Daily at 2 AM
-    name: 'Daily Full Sync',
+  trigger: eventTrigger({
+    name: 'full-sync.triggered',
+    schema: FullSyncJobSchema,
   }),
-  inputSchema: FullSyncJobSchema,
-  run: async (payload, { ctx, logger }) => {
-    logger.info('Starting full sync', {
+  run: async (payload, io, context) => {
+    io.logger.info('Starting full sync', {
       tenantId: payload.tenantId,
       mappingId: payload.mappingId,
       options: payload.options,
@@ -49,7 +48,7 @@ triggerClient.defineJob({
       //   ...payload.options,
       // });
 
-      logger.info('Full sync completed successfully');
+      io.logger.info('Full sync completed successfully');
       
       return {
         success: true,
@@ -58,7 +57,7 @@ triggerClient.defineJob({
         // result: result,
       };
     } catch (error) {
-      logger.error('Full sync failed', { error });
+      io.logger.error('Full sync failed', { error });
       throw error; // Trigger.dev will retry based on configuration
     }
   },

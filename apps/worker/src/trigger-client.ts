@@ -6,7 +6,6 @@
  * 
  * TRIGGER_DEV_API_KEY=your_api_key
  * TRIGGER_DEV_API_URL=https://app.trigger.dev (Cloud) or http://localhost:3000 (self-hosted)
- * TRIGGER_ENVIRONMENT=production | staging | development
  */
 
 import { TriggerClient } from '@trigger.dev/sdk';
@@ -15,7 +14,6 @@ export const triggerClient = new TriggerClient({
   id: 'open-migrate-worker',
   apiKey: process.env.TRIGGER_DEV_API_KEY,
   apiUrl: process.env.TRIGGER_DEV_API_URL || 'http://localhost:3000',
-  environment: process.env.TRIGGER_ENVIRONMENT || 'development',
 });
 
 /**

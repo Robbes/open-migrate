@@ -35,6 +35,7 @@ export interface CreatePaymentParams {
   amount: number; // Amount in cents
   description: string;
   redirectUrl: string;
+  webhookUrl?: string;
   customerId?: string;
   method?: string;
 }
@@ -49,7 +50,9 @@ class MollieService {
   private client: Mollie.MollieApi;
 
   constructor(apiKey: string) {
-    this.client = Mollie.createClient(apiKey);
+    this.client = Mollie.createClient({
+      apiKey,
+    });
   }
 
   /**
@@ -89,7 +92,7 @@ class MollieService {
       metadata: {
         tenantId: params.tenantId,
       },
-    } as unknown as Mollie.Payment);
+    });
 
     return {
       id: payment.id,

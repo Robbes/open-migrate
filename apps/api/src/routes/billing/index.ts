@@ -30,7 +30,10 @@ const EstimateCostSchema = z.object({
  */
 router.get('/usage', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { tenantId } = req;
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(401).json({ error: 'Unauthorized', message: 'Tenant ID required' });
+    }
     const period = new Date().toISOString().slice(0, 7); // YYYY-MM
 
     // Get or create current period usage
@@ -72,7 +75,10 @@ router.get('/usage', authenticate, async (req: AuthenticatedRequest, res: Respon
  */
 router.post('/usage', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { tenantId } = req;
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(401).json({ error: 'Unauthorized', message: 'Tenant ID required' });
+    }
     const body = z.object({
       period: z.string(),
       storageUsedGB: z.number(),
@@ -115,7 +121,10 @@ router.post('/usage', authenticate, async (req: AuthenticatedRequest, res: Respo
  */
 router.get('/usage/history', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { tenantId } = req;
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(401).json({ error: 'Unauthorized', message: 'Tenant ID required' });
+    }
     const usage = billingApi.listUsage(tenantId);
 
     res.json({
@@ -140,7 +149,10 @@ router.get('/usage/history', authenticate, async (req: AuthenticatedRequest, res
  */
 router.post('/estimate', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { tenantId } = req;
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(401).json({ error: 'Unauthorized', message: 'Tenant ID required' });
+    }
     const body = EstimateCostSchema.parse(req.body);
 
     const cost = billingApi.estimateCost(tenantId, body);
@@ -179,7 +191,10 @@ router.post('/estimate', authenticate, async (req: AuthenticatedRequest, res: Re
  */
 router.get('/invoices', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { tenantId } = req;
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(401).json({ error: 'Unauthorized', message: 'Tenant ID required' });
+    }
     const invoices = billingApi.listInvoices(tenantId);
 
     res.json({
@@ -201,7 +216,10 @@ router.get('/invoices', authenticate, async (req: AuthenticatedRequest, res: Res
  */
 router.get('/invoices/:invoiceId', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { invoiceId } = req.params;
+    const invoiceId = req.params.invoiceId;
+    if (!invoiceId) {
+      return res.status(400).json({ error: 'Bad Request', message: 'Invoice ID required' });
+    }
     const invoice = billingApi.getInvoice(invoiceId);
 
     if (!invoice) {
@@ -229,8 +247,14 @@ router.get('/invoices/:invoiceId', authenticate, async (req: AuthenticatedReques
  */
 router.post('/invoices/:invoiceId/pay', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { invoiceId } = req.params;
-    const { tenantId } = req;
+    const invoiceId = req.params.invoiceId;
+    if (!invoiceId) {
+      return res.status(400).json({ error: 'Bad Request', message: 'Invoice ID required' });
+    }
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(401).json({ error: 'Unauthorized', message: 'Tenant ID required' });
+    }
 
     const invoice = billingApi.getInvoice(invoiceId);
     
@@ -297,7 +321,10 @@ router.post('/invoices/:invoiceId/pay', authenticate, async (req: AuthenticatedR
  */
 router.get('/payment-methods', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { tenantId } = req;
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(401).json({ error: 'Unauthorized', message: 'Tenant ID required' });
+    }
     const paymentMethods = billingApi.getPaymentMethods(tenantId);
 
     res.json({
@@ -319,7 +346,10 @@ router.get('/payment-methods', authenticate, async (req: AuthenticatedRequest, r
  */
 router.post('/payment-methods', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { tenantId } = req;
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(401).json({ error: 'Unauthorized', message: 'Tenant ID required' });
+    }
     const body = z.object({
       type: z.enum(['card', 'banktransfer', 'other']),
       last4: z.string().optional(),
@@ -359,8 +389,14 @@ router.patch(
   authenticate,
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { paymentMethodId } = req.params;
-      const { tenantId } = req;
+      const paymentMethodId = req.params.paymentMethodId;
+      if (!paymentMethodId) {
+        return res.status(400).json({ error: 'Bad Request', message: 'Payment method ID required' });
+      }
+      const tenantId = req.tenantId;
+      if (!tenantId) {
+        return res.status(401).json({ error: 'Unauthorized', message: 'Tenant ID required' });
+      }
 
       const paymentMethod = billingApi.setDefaultPaymentMethod(tenantId, paymentMethodId);
 
