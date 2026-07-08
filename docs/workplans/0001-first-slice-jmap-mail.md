@@ -4,7 +4,7 @@
 
 | Task | Status | Evidence |
 |---|---|---|
-| T0 dev stack + ledger | **Done** | PgLedger + PgCursorStore in `packages/ledger`; `ledger.integration.test.ts` green; Stalwart provisioned via two-phase Testcontainers |
+| T0 dev stack + ledger | **Done** | PgLedger + PgCursorStore in `packages/ledger`; `ledger.integration.test.ts` green (9 tests); Stalwart provisioned via two-phase Testcontainers |
 | T1 core model + interfaces | **Done** (pre-built) | `MailItem`, `SourceConnector`, `TargetWriter` interfaces in `packages/shared` / `packages/core`; unit tests green |
 | T2 IMAP source | **Done** | `ImapSource` in `packages/connectors/src/imap-source.ts`; integration-tested against Stalwart (IMAPS 993; cursor `UIDVALIDITY:UIDNEXT`) |
 | T3 JMAP target writer | **Done** | `JmapTargetWriter` in `packages/connectors/src/jmap-target.ts`; integration-tested; accountId resolved by configured email |
@@ -14,6 +14,14 @@
 | T7 worker CLI entrypoint | **Done (CLI only)** | `apps/worker/src/index.ts` with `--config` and `--once` flags; **dependency bundle (ledger/IMAP/JMAP wiring) pending** |
 | T8 docs + ADRs | **Done** | `stalwart-integration-fix.md` authoritative; `testing.md` comprehensive; README.md quickstart added 2026-07-07 |
 | T9 reindex on real connector | **Done ✅** | `apps/worker/src/jmap-reindex.integration.test.ts` (5 tests); `TargetReindexer.listEntries()` implemented; mailbox cleanup isolation pattern |
+
+**Integration Test Run (2026-07-07 21:40):** All 18 tests passed across 4 integration test files:
+- `packages/ledger/src/ledger.integration.test.ts` (9 tests)
+- `packages/ledger/src/shadow-pass.integration.test.ts` (idempotency + delta property tests)
+- `apps/worker/src/shared-mailbox.integration.test.ts` (3 tests)
+- `apps/worker/src/jmap-reindex.integration.test.ts` (5 tests)
+
+Test output: `Test Files  4 passed (4)  |  Tests  18 passed (18)  |  Duration  17.79s`
 
 Hard-won operational truth for this slice lives in `docs/stalwart-integration-fix.md`
 (two-phase startup, TLS-only listeners — **no plaintext 143** — accountId rule, cursor rules,

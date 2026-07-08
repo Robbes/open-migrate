@@ -3,3 +3,4 @@ export const packageName = '@openmig/connectors';
 
 export * from './imap-source';
 export * from './jmap-target';
+export * from './imap-dav-target';
