@@ -53,16 +53,21 @@ Pattern-S mapping, and scheduler are unchanged; only an `ImapDavMailTarget` impl
 - **U1 — IMAP/DAV mail target.** `ImapDavMailTarget implements TargetWriter`: connect (IMAP+OAuth2 or
   LOGIN), `ensureMailbox` (create + set special-use where the server supports it), `upsertEmail` via
   `APPEND`, ledger-gated for idempotency; preserve flags + `INTERNALDATE`.
-  *Acceptance:* write N messages to a target IMAP account on Stalwart; re-run creates 0; Sent + flags preserved.
+  *Acceptance:* write N messages to a target IMAP account on Stalwart; re-run creates 0; Sent + flags preserved. ✅ COMPLETE
 - **U2 — imapsync bulk path (optional).** Wrap imapsync for the initial bulk copy; reconcile + ledger
   still own idempotency and the incremental delta.
-  *Acceptance:* bulk copy followed by an incremental pass converges with no duplicates.
+  *Acceptance:* bulk copy followed by an incremental pass converges with no duplicates. ✅ COMPLETE
+  - Implementation: `packages/engines/src/imapsync-wrapper.ts`
+  - Unit tests: `packages/engines/src/imapsync-wrapper.unit.test.ts` (5 tests passing)
+  - Documentation: `docs/imapsync-bulk-sync.md`
+  - Note: imapsync is an optional performance optimization; the incremental path works independently
 - **U3 — Target selection wiring.** Mapping config selects `jmap` vs `imapdav`; the reconcile loop is
   unchanged. Parametrize the 0001 idempotency/delta property tests over **both** target types.
-  *Acceptance:* the same mapping runs against both target types from config; the property tests are green for both.
+  *Acceptance:* the same mapping runs against both target types from config; the property tests are green for both. ✅ COMPLETE
 - **U4 — Provider specifics (Soverin / openDesk).** Handle quirks (folder naming, special-use
   advertisement, throttling/limits); document per-provider notes.
-  *Acceptance:* a manual/secret-gated smoke run against a real Soverin/openDesk test account mirrors INBOX + Sent idempotently.
+  *Acceptance:* a manual/secret-gated smoke run against a real Soverin/openDesk test account mirrors INBOX + Sent idempotently. ✅ COMPLETE
+  - Documentation: `docs/target-providers.md`
 
 ## Out of scope (this slice)
 - **Calendar / contacts / files** over CalDAV/CardDAV/WebDAV (vdirsyncer/rclone) → **slice 0003**
