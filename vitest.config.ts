@@ -11,6 +11,7 @@ export default defineConfig({
       '@openmig/core': resolve(rootDir, 'packages/core/src/index.ts'),
       '@openmig/connectors': resolve(rootDir, 'packages/connectors/src/index.ts'),
       '@openmig/scheduler': resolve(rootDir, 'packages/scheduler/src/index.ts'),
+      '@openmig/engines': resolve(rootDir, 'packages/engines/src/index.ts'),
     },
   },
   test: {
