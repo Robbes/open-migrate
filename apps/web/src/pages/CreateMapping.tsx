@@ -54,7 +54,7 @@ const initialFormData: FormData = {
   schedule: '',
 };
 
-const steps: { id: Step; name: string; icon: React.FC<any> }[] = [
+const steps: { id: Step; name: string; icon: React.FC<React.SVGProps<SVGSVGElement>> }[] = [
   { id: 'source', name: 'Source', icon: Server },
   { id: 'target', name: 'Target', icon: Database },
   { id: 'credentials', name: 'Credentials', icon: Settings },
@@ -122,7 +122,7 @@ const CreateMapping: React.FC = () => {
     }
   };
 
-  const updateField = (field: keyof FormData, value: any) => {
+  const updateField = (field: keyof FormData, value: string | boolean | string[]) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 

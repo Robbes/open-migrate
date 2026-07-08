@@ -2,7 +2,7 @@ import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from 'axio
 
 // Create axios instance with default config
 const apiClient: AxiosInstance = axios.create({
-  baseURL: (import.meta as any).env?.VITE_API_URL || '/api',
+  baseURL: (import.meta as unknown as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL || '/api',
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',

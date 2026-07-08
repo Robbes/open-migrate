@@ -83,13 +83,13 @@ class MollieService {
       },
       description: params.description,
       redirectUrl: params.redirectUrl,
-      webhookUrl: params.webhookUrl || `${(process as any).env.API_URL}/api/billing/webhooks/mollie`,
+      webhookUrl: params.webhookUrl || `${process.env.API_URL}/api/billing/webhooks/mollie`,
       customerId: params.customerId,
       method: params.method,
       metadata: {
         tenantId: params.tenantId,
       },
-    } as any);
+    } as unknown as Mollie.Payment);
 
     return {
       id: payment.id,

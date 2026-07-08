@@ -80,7 +80,7 @@ export const tenantApi = {
     return z.array(TenantSchema).parse(response.data.tenants);
   },
 
-  create: async (data: { name: string; slug: string; settings?: any }) => {
+  create: async (data: { name: string; slug: string; settings?: Record<string, unknown> }) => {
     const response = await apiClient.post('/tenants', data);
     return TenantSchema.parse(response.data);
   },

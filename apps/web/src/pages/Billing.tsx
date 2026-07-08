@@ -1,7 +1,7 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CreditCard, TrendingUp, DollarSign, FileText } from 'lucide-react';
-import { billingApi } from '../services/billing-service';
+import { billingApi, type Invoice } from '../services/billing-service';
 
 const Billing: React.FC = () => {
   const { data: usage, isLoading: usageLoading } = useQuery({
@@ -141,7 +141,7 @@ const Billing: React.FC = () => {
             <p className="text-gray-500 text-center py-8">No invoices yet</p>
           ) : (
             <div className="space-y-4">
-              {invoices?.invoices?.map((invoice: any) => (
+              {invoices?.invoices?.map((invoice: Invoice) => (
                 <div
                   key={invoice.id}
                   className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
