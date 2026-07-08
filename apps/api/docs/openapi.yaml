@@ -1,0 +1,573 @@
+# Open Migration Stack API Specification
+
+OpenAPI 3.0 specification for the Open Migration Stack managed edition API.
+
+## Overview
+
+The Open Migration Stack API provides REST endpoints for:
+- Tenant management
+- Migration configuration and control
+- Billing and usage tracking
+- Job orchestration
+
+## Base URL
+
+```
+https://api.openmigrate.example.com/v1
+```
+
+## Authentication
+
+All API endpoints require JWT authentication via the `Authorization` header:
+
+```
+Authorization: Bearer <jwt_token>
+```
+
+The JWT token must contain the following claims:
+- `sub`: User ID
+- `email`: User email
+- `tenantId`: Current tenant ID
+- `role`: User role (owner, admin, member, viewer)
+
+## Common Response Codes
+
+- `200`: Success
+- `201`: Created
+- `204`: No Content (successful deletion)
+- `400`: Bad Request (validation error)
+- `401`: Unauthorized (missing or invalid token)
+- `403`: Forbidden (insufficient permissions)
+- `404`: Not Found
+- `500`: Internal Server Error
+
+---
+
+## Tenants
+
+### List Tenants
+
+Get all tenants for the authenticated user.
+
+**GET** `/api/tenants`
+
+**Response:**
+```json
+{
+  "tenants": [
+    {
+      "id": "string",
+      "name": "string",
+      "slug": "string",
+      "createdAt": "2024-01-01T00:00:00Z"
+    }
+  ]
+}
+```
+
+### Create Tenant
+
+Create a new tenant.
+
+**POST** `/api/tenants`
+
+**Request Body:**
+```json
+{
+  "name": "My Company",
+  "slug": "my-company",
+  "settings": {
+    "maxMappings": 10,
+    "maxUsers": 5
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "tenant-123",
+  "name": "My Company",
+  "slug": "my-company",
+  "ownerId": "user-123",
+  "settings": {
+    "maxMappings": 10,
+    "maxUsers": 5
+  },
+  "createdAt": "2024-01-01T00:00:00Z"
+}
+```
+
+### Get Tenant
+
+Get tenant details.
+
+**GET** `/api/tenants/:tenantId`
+
+**Response:**
+```json
+{
+  "id": "tenant-123",
+  "name": "My Company",
+  "slug": "my-company",
+  "settings": {
+    "maxMappings": 10,
+    "maxUsers": 5
+  },
+  "createdAt": "2024-01-01T00:00:00Z"
+}
+```
+
+### Update Tenant
+
+Update tenant settings.
+
+**PUT** `/api/tenants/:tenantId`
+
+**Request Body:**
+```json
+{
+  "name": "My Company Updated",
+  "settings": {
+    "maxMappings": 20
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "tenant-123",
+  "name": "My Company Updated",
+  "updatedAt": "2024-01-02T00:00:00Z"
+}
+```
+
+### Delete Tenant
+
+Delete a tenant (owner only).
+
+**DELETE** `/api/tenants/:tenantId`
+
+**Response:** `204 No Content`
+
+---
+
+## Tenant Members
+
+### List Members
+
+Get all members of a tenant.
+
+**GET** `/api/tenants/:tenantId/members`
+
+**Response:**
+```json
+{
+  "members": [
+    {
+      "id": "member-1",
+      "userId": "user-1",
+      "email": "owner@example.com",
+      "role": "owner",
+      "invitedAt": "2024-01-01T00:00:00Z"
+    }
+  ]
+}
+```
+
+### Invite Member
+
+Invite a new member to the tenant.
+
+**POST** `/api/tenants/:tenantId/members`
+
+**Request Body:**
+```json
+{
+  "email": "newmember@example.com",
+  "role": "admin"
+}
+```
+
+**Response:**
+```json
+{
+  "id": "member-2",
+  "tenantId": "tenant-123",
+  "email": "newmember@example.com",
+  "role": "admin",
+  "status": "pending",
+  "invitedAt": "2024-01-02T00:00:00Z",
+  "invitedBy": "user-123"
+}
+```
+
+### Update Member Role
+
+Update a member's role.
+
+**PATCH** `/api/tenants/:tenantId/members/:memberId`
+
+**Request Body:**
+```json
+{
+  "role": "admin"
+}
+```
+
+**Response:**
+```json
+{
+  "id": "member-2",
+  "tenantId": "tenant-123",
+  "role": "admin",
+  "updatedAt": "2024-01-02T00:00:00Z"
+}
+```
+
+### Remove Member
+
+Remove a member from the tenant.
+
+**DELETE** `/api/tenants/:tenantId/members/:memberId`
+
+**Response:** `204 No Content`
+
+---
+
+## Migrations (Mappings)
+
+### List Mappings
+
+Get all mappings for the current tenant.
+
+**GET** `/api/mappings`
+
+**Response:**
+```json
+{
+  "mappings": [
+    {
+      "id": "mapping-1",
+      "tenantId": "tenant-123",
+      "name": "Demo Migration",
+      "sourceType": "imap",
+      "targetType": "jmap",
+      "status": "active",
+      "lastSyncAt": "2024-01-01T00:00:00Z",
+      "createdAt": "2024-01-01T00:00:00Z"
+    }
+  ]
+}
+```
+
+### Create Mapping
+
+Create a new migration mapping.
+
+**POST** `/api/mappings`
+
+**Request Body:**
+```json
+{
+  "name": "My Migration",
+  "sourceType": "imap",
+  "targetType": "jmap",
+  "sourceConfig": {
+    "host": "imap.example.com",
+    "port": 993,
+    "username": "user@example.com",
+    "useSsl": true
+  },
+  "targetConfig": {
+    "host": "jmap.example.com",
+    "port": 443,
+    "username": "user@example.com",
+    "password": "secret",
+    "useSsl": true
+  },
+  "syncConfig": {
+    "domains": ["email", "calendar"],
+    "schedule": "0 2 * * *"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "mapping-123",
+  "tenantId": "tenant-123",
+  "name": "My Migration",
+  "sourceType": "imap",
+  "targetType": "jmap",
+  "sourceConfig": {...},
+  "targetConfig": {...},
+  "syncConfig": {...},
+  "status": "draft",
+  "createdAt": "2024-01-01T00:00:00Z"
+}
+```
+
+### Get Mapping
+
+Get mapping details.
+
+**GET** `/api/mappings/:mappingId`
+
+**Response:**
+```json
+{
+  "id": "mapping-123",
+  "tenantId": "tenant-123",
+  "name": "My Migration",
+  "sourceType": "imap",
+  "targetType": "jmap",
+  "sourceConfig": {...},
+  "targetConfig": {...},
+  "syncConfig": {...},
+  "status": "active",
+  "lastSyncAt": "2024-01-01T00:00:00Z",
+  "createdAt": "2024-01-01T00:00:00Z"
+}
+```
+
+### Update Mapping
+
+Update mapping configuration.
+
+**PUT** `/api/mappings/:mappingId`
+
+**Request Body:** (all fields optional)
+```json
+{
+  "name": "Updated Migration Name",
+  "syncConfig": {
+    "schedule": "0 */6 * * *"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "mapping-123",
+  "name": "Updated Migration Name",
+  "syncConfig": {...},
+  "updatedAt": "2024-01-02T00:00:00Z"
+}
+```
+
+### Delete Mapping
+
+Delete a mapping.
+
+**DELETE** `/api/mappings/:mappingId`
+
+**Response:** `204 No Content`
+
+### Trigger Sync
+
+Trigger a sync for a mapping.
+
+**POST** `/api/mappings/:mappingId/sync`
+
+**Request Body:**
+```json
+{
+  "type": "full",
+  "forceFullScan": false
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "runId": "run-123",
+  "jobType": "full",
+  "triggeredAt": "2024-01-01T00:00:00Z"
+}
+```
+
+### Trigger Cutover
+
+Trigger cutover for a mapping.
+
+**POST** `/api/mappings/:mappingId/cutover`
+
+**Request Body:**
+```json
+{
+  "skipFinalSync": false,
+  "skipVerification": false,
+  "gracePeriodHours": 24
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "runId": "run-cutover-123",
+  "triggeredAt": "2024-01-01T00:00:00Z",
+  "gracePeriodEnd": "2024-01-02T00:00:00Z"
+}
+```
+
+### List Runs
+
+Get sync runs for a mapping.
+
+**GET** `/api/mappings/:mappingId/runs`
+
+**Response:**
+```json
+{
+  "runs": [
+    {
+      "id": "run-1",
+      "mappingId": "mapping-123",
+      "type": "full",
+      "status": "success",
+      "startedAt": "2024-01-01T00:00:00Z",
+      "finishedAt": "2024-01-01T01:00:00Z",
+      "itemsProcessed": 1250,
+      "errors": 0
+    }
+  ]
+}
+```
+
+### Get Run Details
+
+Get run details and logs.
+
+**GET** `/api/mappings/:mappingId/runs/:runId`
+
+**Response:**
+```json
+{
+  "id": "run-1",
+  "mappingId": "mapping-123",
+  "type": "full",
+  "status": "success",
+  "startedAt": "2024-01-01T00:00:00Z",
+  "finishedAt": "2024-01-01T01:00:00Z",
+  "itemsProcessed": 1250,
+  "errors": 0,
+  "events": [
+    {
+      "level": "info",
+      "message": "Starting full sync",
+      "at": "2024-01-01T00:00:00Z"
+    },
+    {
+      "level": "info",
+      "message": "Processed 1250 items",
+      "at": "2024-01-01T00:50:00Z"
+    },
+    {
+      "level": "info",
+      "message": "Sync completed successfully",
+      "at": "2024-01-01T01:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+## Webhooks
+
+### Trigger.dev Webhook
+
+Receive job status updates from Trigger.dev.
+
+**POST** `/api/webhooks/trigger`
+
+**Headers:**
+```
+x-trigger-signature: <hmac-sha256-signature>
+```
+
+**Request Body:**
+```json
+{
+  "id": "webhook-123",
+  "eventType": "job.run.completed",
+  "job": {
+    "id": "run-full-sync",
+    "name": "Full Sync"
+  },
+  "run": {
+    "id": "run-123",
+    "status": "success",
+    "startedAt": "2024-01-01T00:00:00Z",
+    "finishedAt": "2024-01-01T01:00:00Z"
+  },
+  "payload": {
+    "tenantId": "tenant-123",
+    "mappingId": "mapping-123"
+  },
+  "createdAt": "2024-01-01T01:00:00Z"
+}
+```
+
+**Response:**
+```json
+{
+  "received": true
+}
+```
+
+---
+
+## Error Responses
+
+All error responses follow this format:
+
+```json
+{
+  "error": "Error Type",
+  "message": "Human-readable error message",
+  "details": [
+    {
+      "field": "string",
+      "message": "Validation error message"
+    }
+  ]
+}
+```
+
+### Example Errors
+
+**400 Bad Request:**
+```json
+{
+  "error": "Validation error",
+  "details": [
+    {
+      "field": "email",
+      "message": "Invalid email format"
+    }
+  ]
+}
+```
+
+**401 Unauthorized:**
+```json
+{
+  "error": "Unauthorized",
+  "message": "Invalid token"
+}
+```
+
+**403 Forbidden:**
+```json
+{
+  "error": "Forbidden",
+  "message": "Insufficient permissions"
+}
+```
