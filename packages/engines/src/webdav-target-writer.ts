@@ -9,13 +9,13 @@
 import type {
   FileTargetWriter,
   FileFolder,
-  FileItem,
+  RawFileItem,
   UpsertResult,
   Ledger,
   TenantId,
   MappingId,
-} from '@open-migrate/shared';
-import { fileNaturalKeyHash, fileContentHash } from '@open-migrate/shared';
+} from '@openmig/shared';
+import { fileNaturalKeyHash, fileContentHash } from '@openmig/shared';
 
 /**
  * Configuration for WebDAV target writer
@@ -66,7 +66,7 @@ export class WebDAVTargetWriter implements FileTargetWriter {
    * Returns the directory ID (path) for use in subsequent operations.
    */
   async ensureDirectory(folder: FileFolder): Promise<string> {
-    const directoryPath = this.normalizePath(folder.path || folder.name);
+    const directoryPath = this.normalizePath(folder.path ?? folder.name ?? 'files');
     
     // Check if directory already exists via PROPFIND
     const exists = await this.directoryExists(directoryPath);
@@ -85,10 +85,10 @@ export class WebDAVTargetWriter implements FileTargetWriter {
    */
   async upsertFile(
     parentId: string,
-    raw: FileItem,
+    raw: RawFileItem,
   ): Promise<UpsertResult> {
     // Use file path as natural key
-    const naturalKey = raw.path;
+    const naturalKey = raw.item.path;
     const naturalKeyHash = fileNaturalKeyHash(naturalKey);
 
     // LEDGER FAST-PATH: Check if already migrated
@@ -97,8 +97,8 @@ export class WebDAVTargetWriter implements FileTargetWriter {
       return { targetId: known.targetId, created: false };
     }
 
-    // Compute content hash for change detection
-    const contentHashValue = fileContentHash(raw.content);
+    // Compute content hash for change detection (only for files with content, not directories)
+    const contentHashValue = raw.content ? fileContentHash(raw.content) : fileContentHash(new Uint8Array(0));
 
     // Check if file already exists on target
     const existingId = await this.findFileByNaturalKey(parentId, naturalKey);
@@ -200,27 +200,29 @@ export class WebDAVTargetWriter implements FileTargetWriter {
     });
   }
 
-  private async uploadFile(parentId: string, raw: FileItem): Promise<string> {
-    const filePath = this.buildFilePath(parentId, raw.path);
+  private async uploadFile(parentId: string, raw: RawFileItem): Promise<string> {
+    const filePath = this.buildFilePath(parentId, raw.item.path);
     
     // Check if file is large and should use chunked upload
     const useChunked = this.config.chunkedUploads && 
-                      raw.content.length > (this.config.chunkSize || 10 * 1024 * 1024);
+                      raw.content && raw.content.length > (this.config.chunkSize || 10 * 1024 * 1024);
 
-    if (useChunked) {
+    if (useChunked && raw.content) {
       return await this.uploadFileChunked(filePath, raw.content);
     }
 
-    // Simple PUT for small files
-    await this.httpClient.request({
-      method: 'PUT',
-      url: this.buildUrl(filePath),
-      body: raw.content,
-      headers: {
-        'Content-Type': raw.mimeType || 'application/octet-stream',
-        Authorization: `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64')}`,
-      },
-    });
+    // Simple PUT for small files - only if content exists
+    if (raw.content) {
+      await this.httpClient.request({
+        method: 'PUT',
+        url: this.buildUrl(filePath),
+        body: raw.content,
+        headers: {
+          'Content-Type': raw.item.mimeType || 'application/octet-stream',
+          Authorization: `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64')}`,
+        },
+      });
+    }
 
     return filePath;
   }

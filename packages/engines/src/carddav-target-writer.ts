@@ -14,8 +14,8 @@ import type {
   Ledger,
   TenantId,
   MappingId,
-} from '@open-migrate/shared';
-import { contactNaturalKeyHash, contactContentHash } from '@open-migrate/shared';
+} from '@openmig/shared';
+import { contactNaturalKeyHash, contactContentHash } from '@openmig/shared';
 
 /**
  * Configuration for CardDAV target writer
@@ -64,7 +64,7 @@ export class CardDAVTargetWriter implements ContactTargetWriter {
    * Returns the address book ID (href) for use in subsequent operations.
    */
   async ensureContactFolder(folder: ContactFolder): Promise<string> {
-    const addressBookPath = this.normalizeAddressBookPath(folder.path || folder.name);
+    const addressBookPath = this.normalizeAddressBookPath(folder.path ?? folder.name ?? 'addressbook');
     
     // Check if address book already exists via PROPFIND
     const exists = await this.addressBookExists(addressBookPath);
@@ -236,7 +236,8 @@ export class CardDAVTargetWriter implements ContactTargetWriter {
     if (!uidMatch) {
       throw new Error('Invalid vCard data: missing UID');
     }
-    return uidMatch[0].split(':')[1].trim();
+    const parts = uidMatch[0].split(':');
+    return parts[1]?.trim() ?? '';
   }
 
   private async uploadContact(
@@ -269,6 +270,7 @@ export class CardDAVTargetWriter implements ContactTargetWriter {
     const hrefMatches = response.matchAll(/<D:href>([^<]+)<\/D:href>/g);
     for (const match of hrefMatches) {
       const href = match[1];
+      if (!href) continue;
       // Check if this resource contains the matching UID
       if (href.includes(searchUid)) {
         return href;

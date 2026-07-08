@@ -121,7 +121,7 @@ function parseRcloneOutput(output: string): { successCount: number; failureCount
     if (line.includes('Transferred:') || line.match(/Transferred:\s*\d+%/)) {
       // Extract bytes transferred
       const bytesMatch = line.match(/(\d+)\s*[GMK]?B/);
-      if (bytesMatch) {
+      if (bytesMatch?.[1]) {
         const value = parseInt(bytesMatch[1], 10);
         const unit = bytesMatch[0].match(/[GMK]B/)?.[0]?.[0] || 'K';
         bytesTransferred += value * (unit === 'G' ? 1024 * 1024 * 1024 : unit === 'M' ? 1024 * 1024 : unit === 'K' ? 1024 : 1);
@@ -130,7 +130,7 @@ function parseRcloneOutput(output: string): { successCount: number; failureCount
     // Count successful transfers
     else if (line.includes('Copied') || line.includes('transferred')) {
       const numMatch = line.match(/(\d+)\s+files?/i);
-      if (numMatch) {
+      if (numMatch?.[1]) {
         successCount += parseInt(numMatch[1], 10);
       }
     }
@@ -143,7 +143,7 @@ function parseRcloneOutput(output: string): { successCount: number; failureCount
       failureCount++;
       // Try to extract path if available
       const pathMatch = line.match(/"([^"]+)"/);
-      const filePath = pathMatch ? pathMatch[1] : 'unknown';
+      const filePath = pathMatch?.[1] ?? 'unknown';
       failures.push({ path: filePath, error: line.trim() });
     }
   }

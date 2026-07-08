@@ -14,8 +14,8 @@ import type {
   Ledger,
   TenantId,
   MappingId,
-} from '@open-migrate/shared';
-import { calendarNaturalKeyHash, calendarContentHash } from '@open-migrate/shared';
+} from '@openmig/shared';
+import { calendarNaturalKeyHash, calendarContentHash } from '@openmig/shared';
 
 /**
  * Configuration for CalDAV target writer
@@ -66,7 +66,7 @@ export class CalDAVTargetWriter implements CalendarTargetWriter {
    * Returns the calendar ID (href) for use in subsequent operations.
    */
   async ensureCalendar(folder: CalendarFolder): Promise<string> {
-    const calendarPath = this.normalizeCalendarPath(folder.path || folder.name);
+    const calendarPath = this.normalizeCalendarPath(folder.path ?? folder.name ?? 'calendar');
     
     // Check if calendar already exists via PROPFIND
     const exists = await this.calendarExists(calendarPath);
@@ -239,7 +239,8 @@ export class CalDAVTargetWriter implements CalendarTargetWriter {
     if (!uidMatch) {
       throw new Error('Invalid iCalendar data: missing UID');
     }
-    return uidMatch[0].split(':')[1].trim();
+    const parts = uidMatch[0].split(':');
+    return parts[1]?.trim() ?? '';
   }
 
   private async uploadEvent(
@@ -272,6 +273,7 @@ export class CalDAVTargetWriter implements CalendarTargetWriter {
     const hrefMatches = response.matchAll(/<D:href>([^<]+)<\/D:href>/g);
     for (const match of hrefMatches) {
       const href = match[1];
+      if (!href) continue;
       // Check if this resource contains the matching UID
       // In a real implementation, we'd parse the full response
       if (href.includes(searchUid)) {

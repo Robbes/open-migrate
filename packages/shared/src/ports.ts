@@ -1,8 +1,8 @@
 import type { TenantId, MappingId } from './ids';
 import type { MailFolder, MailItem, RawMessage, MailKeyword } from './mail';
-import type { CalendarFolder } from './calendar';
-import type { ContactFolder } from './contact';
-import type { FileFolder } from './file';
+import type { CalendarFolder, RawCalendarEvent } from './calendar';
+import type { ContactFolder, RawContact } from './contact';
+import type { FileFolder, RawFileItem } from './file';
 
 /** Opaque, source-defined cursor for incremental listing (e.g. UIDVALIDITY+UIDNEXT). */
 export interface SyncCursor {

@@ -125,7 +125,7 @@ function parseVdirsyncerOutput(output: string): { successCount: number; failureC
       failureCount++;
       // Try to extract UID if available
       const uidMatch = line.match(/uid[:\s]+([^\s,]+)/i);
-      const uid = uidMatch ? uidMatch[1] : 'unknown';
+      const uid = uidMatch?.[1] ?? 'unknown';
       failures.push({ uid, error: line.trim() });
     }
   }
