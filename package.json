@@ -27,6 +27,7 @@
   "devDependencies": {
     "@cyclonedx/cyclonedx-npm": "^6.0.0",
     "@eslint/js": "10.0.1",
+    "@types/imap-simple": "^4.2.10",
     "@types/node": "^26.1.0",
     "@types/pg": "^8",
     "@typescript-eslint/eslint-plugin": "^8.63.0",
