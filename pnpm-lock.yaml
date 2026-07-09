@@ -247,6 +247,13 @@ importers:
       zod:
         specifier: ^3.22.4
         version: 3.25.76
+    devDependencies:
+      '@types/imap-simple':
+        specifier: ^4.2.10
+        version: 4.2.10
+      imap-simple:
+        specifier: ^5.1.0
+        version: 5.1.0
 
   packages/connectors:
     dependencies:
@@ -290,6 +297,12 @@ importers:
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
+      '@types/imap-simple':
+        specifier: ^4.2.10
+        version: 4.2.10
+      imap-simple:
+        specifier: ^5.1.0
+        version: 5.1.0
 
   packages/provisioner: {}
 
