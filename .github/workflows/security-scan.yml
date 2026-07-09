@@ -48,7 +48,7 @@ jobs:
         run: pnpm audit --audit-level=high || echo "::warning::pnpm audit reported advisories"
 
       - name: Trivy filesystem/dependency scan (SARIF)
-        uses: aquasecurity/trivy-action@6e747556c299b98f991b2f10f9cf8a79d7d3b0c4 # v0.14.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           format: sarif
