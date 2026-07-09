@@ -35,6 +35,51 @@ export interface SourceConnector {
   fetch(item: MailItem): Promise<RawMessage>;
 }
 
+/**
+ * Calendar source connector for CalDAV.
+ */
+export interface CalendarSource {
+  /** List all calendar collections */
+  listFolders(): Promise<ReadonlyArray<CalendarFolder>>;
+  /**
+   * List calendar items changed since cursor.
+   */
+  listSince(
+    folder: CalendarFolder,
+    cursor?: SyncCursor,
+  ): Promise<{ items: ReadonlyArray<RawCalendarEvent>; nextCursor: SyncCursor }>;
+}
+
+/**
+ * Contact source connector for CardDAV.
+ */
+export interface ContactSource {
+  /** List all address book collections */
+  listFolders(): Promise<ReadonlyArray<ContactFolder>>;
+  /**
+   * List contacts changed since cursor.
+   */
+  listSince(
+    folder: ContactFolder,
+    cursor?: SyncCursor,
+  ): Promise<{ items: ReadonlyArray<RawContact>; nextCursor: SyncCursor }>;
+}
+
+/**
+ * File source connector for WebDAV.
+ */
+export interface FileSource {
+  /** List all file folders/directories */
+  listFolders(): Promise<ReadonlyArray<FileFolder>>;
+  /**
+   * List files changed since cursor.
+   */
+  listSince(
+    folder: FileFolder,
+    cursor?: SyncCursor,
+  ): Promise<{ items: ReadonlyArray<RawFileItem>; nextCursor: SyncCursor }>;
+}
+
 /** Result of upserting one message into a target. */
 export interface UpsertResult {
   /** Target-side id (e.g. a JMAP Email id). */
@@ -153,6 +198,7 @@ export interface TargetReindexer {
 export interface LedgerRecord {
   readonly tenantId: TenantId;
   readonly mappingId: MappingId;
+  readonly itemType: 'mail' | 'calendar' | 'contact' | 'file';
   readonly naturalKeyHash: string;
   readonly contentHash: string;
   readonly targetId: string;
@@ -160,17 +206,18 @@ export interface LedgerRecord {
   readonly createdAt: string;
 }
 
-/** Idempotency ledger. UNIQUE(tenantId, mappingId, naturalKeyHash). Non-destructive. */
+/** Idempotency ledger. UNIQUE(tenantId, mappingId, itemType, naturalKeyHash). Non-destructive. */
 export interface Ledger {
   /** Look up an existing record by natural key. */
   find(
     tenantId: TenantId,
     mappingId: MappingId,
+    itemType: 'mail' | 'calendar' | 'contact' | 'file',
     naturalKeyHash: string,
   ): Promise<LedgerRecord | undefined>;
   /**
    * Record a mapping if absent. If a row with the same
-   * (tenantId, mappingId, naturalKeyHash) exists, return it unchanged (no-op);
+   * (tenantId, mappingId, itemType, naturalKeyHash) exists, return it unchanged (no-op);
    * otherwise insert and return the new row.
    */
   recordIfAbsent(record: LedgerRecord): Promise<LedgerRecord>;

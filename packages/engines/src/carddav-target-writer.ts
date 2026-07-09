@@ -91,7 +91,7 @@ export class CardDAVTargetWriter implements ContactTargetWriter {
     const naturalKeyHash = contactNaturalKeyHash(naturalKey);
 
     // LEDGER FAST-PATH: Check if already migrated
-    const known = await this.ledger.find(this.tenantId, this.mappingId, naturalKeyHash);
+    const known = await this.ledger.find(this.tenantId, this.mappingId, 'contact', naturalKeyHash);
     if (known) {
       return { targetId: known.targetId, created: false };
     }
@@ -105,6 +105,7 @@ export class CardDAVTargetWriter implements ContactTargetWriter {
       // Record in ledger if not present (adopt existing)
       await this.ledger.recordIfAbsent({
         tenantId: this.tenantId,
+        itemType: 'contact',
         mappingId: this.mappingId,
         naturalKeyHash,
         contentHash: contentHashValue,
@@ -120,6 +121,7 @@ export class CardDAVTargetWriter implements ContactTargetWriter {
     // RECORD IN LEDGER
     await this.ledger.recordIfAbsent({
       tenantId: this.tenantId,
+        itemType: 'contact',
       mappingId: this.mappingId,
       naturalKeyHash,
       contentHash: contentHashValue,

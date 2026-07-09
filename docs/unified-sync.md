@@ -4,6 +4,8 @@
 
 The Unified Sync Engine is the orchestration layer that coordinates synchronization across all data types: mail, calendar, contacts, and files. It provides a single entry point for running complete migrations while maintaining the idempotency and non-destructive properties of individual sync engines.
 
+**Key Design Principle**: Uses the `GenericSyncEngine` for domain-neutral sync logic, with domain-specific source connectors and target writers.
+
 ## Architecture
 
 ```
@@ -20,6 +22,12 @@ The Unified Sync Engine is the orchestration layer that coordinates synchronizat
 │                          │                                       │
 │                          ▼                                       │
 │                 ┌─────────────────┐                              │
+│                 │   GenericSync   │                              │
+│                 │     Engine      │                              │
+│                 └────────┬────────┘                              │
+│                          │                                       │
+│                          ▼                                       │
+│                 ┌─────────────────┐                              │
 │                 │     Ledger      │                              │
 │                 │  (Idempotency)  │                              │
 │                 └─────────────────┘                              │
@@ -29,9 +37,39 @@ The Unified Sync Engine is the orchestration layer that coordinates synchronizat
 
 ## Components
 
-### 1. Configuration
+### 1. GenericSyncEngine
 
-Located in `packages/core/src/unified-sync.ts`:
+The core sync engine that works for all data types. Located in `packages/core/src/generic-sync.ts`:
+
+**Features:**
+- Domain-neutral item contract
+- Ledger fast-path (skip already-migrated items)
+- Create-if-absent on target (handles lost ledger)
+- Incremental cursors
+- Bounded concurrency
+- Non-destructive sync (no deletions propagated)
+
+```typescript
+class GenericSyncEngine {
+  async sync(): Promise<GenericSyncResult> {
+    // 1. List all folders
+    // 2. For each folder:
+    //    a. Get cursor (if available)
+    //    b. List items since cursor
+    //    c. For each item:
+    //       - Check ledger (fast-path skip if known)
+    //       - Check target for existence (create-if-absent)
+    //       - Fetch and create
+    //       - Record in ledger
+    //    d. Persist cursor
+    // 3. Return stats
+  }
+}
+```
+
+### 2. Configuration
+
+Located in `packages/shared/src/config.ts`:
 
 ```typescript
 interface UnifiedSyncConfig {
@@ -46,17 +84,17 @@ interface UnifiedSyncConfig {
   };
   calendar: {
     enabled: boolean;
-    source: SourceConnector;
+    source: CalendarSource;
     target: CalendarTargetWriter;
   };
   contacts: {
     enabled: boolean;
-    source: SourceConnector;
+    source: ContactSource;
     target: ContactTargetWriter;
   };
   files: {
     enabled: boolean;
-    source: SourceConnector;
+    source: FileSource;
     target: FileTargetWriter;
   };
   
@@ -66,7 +104,73 @@ interface UnifiedSyncConfig {
 }
 ```
 
-### 2. Sync Statistics
+### 3. Domains Configuration (Multi-Domain Sync)
+
+The optional `domains` block enables per-domain configuration for multi-domain sync. When absent, the root `source` and `target` are used (backward compatible).
+
+```typescript
+interface DomainsConfig {
+  readonly mail?: DomainConfig;
+  readonly calendar?: DomainConfig;
+  readonly contacts?: DomainConfig;
+  readonly files?: DomainConfig;
+}
+
+interface DomainConfig {
+  readonly enabled: boolean;
+  readonly source: SourceConfig;
+  readonly target: TargetConfig;
+  readonly concurrency?: number;
+}
+```
+
+**Example Configuration:**
+
+```json
+{
+  "tenantId": "tenant-123",
+  "mappingId": "multi-domain-sync",
+  "source": {
+    "type": "imap-oauth2",
+    "host": "outlook.office365.com",
+    "port": 993,
+    "user": "user@example.com",
+    "auth": { "kind": "xoauth2", "tokenFromEnv": "O365_TOKEN" }
+  },
+  "target": {
+    "type": "jmap",
+    "baseUrl": "http://stalwart:8080",
+    "user": "target@dev.local",
+    "auth": { "kind": "basic", "passwordFromEnv": "TARGET_PASSWORD" }
+  },
+  "domains": {
+    "mail": {
+      "enabled": true,
+      "source": { /* IMAP source */ },
+      "target": { /* JMAP target */ },
+      "concurrency": 4
+    },
+    "calendar": {
+      "enabled": true,
+      "source": {
+        "type": "caldav",
+        "url": "https://caldav.example.com/dav/",
+        "user": "user@example.com",
+        "auth": { "kind": "xoauth2", "tokenFromEnv": "CALDAV_TOKEN" }
+      },
+      "target": {
+        "type": "caldav",
+        "url": "https://caldav.target.com/dav/",
+        "user": "target@dev.local",
+        "auth": { "kind": "basic", "passwordFromEnv": "TARGET_CALENDAR_PASSWORD" }
+      },
+      "concurrency": 2
+    }
+  }
+}
+```
+
+### 4. Sync Statistics
 
 ```typescript
 interface TypeSyncStats {

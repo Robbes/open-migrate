@@ -93,7 +93,7 @@ export class CalDAVTargetWriter implements CalendarTargetWriter {
     const naturalKeyHash = calendarNaturalKeyHash(naturalKey);
 
     // LEDGER FAST-PATH: Check if already migrated
-    const known = await this.ledger.find(this.tenantId, this.mappingId, naturalKeyHash);
+    const known = await this.ledger.find(this.tenantId, this.mappingId, 'calendar', naturalKeyHash);
     if (known) {
       return { targetId: known.targetId, created: false };
     }
@@ -107,6 +107,7 @@ export class CalDAVTargetWriter implements CalendarTargetWriter {
       // Record in ledger if not present (adopt existing)
       await this.ledger.recordIfAbsent({
         tenantId: this.tenantId,
+        itemType: 'calendar',
         mappingId: this.mappingId,
         naturalKeyHash,
         contentHash: contentHashValue,
@@ -122,6 +123,7 @@ export class CalDAVTargetWriter implements CalendarTargetWriter {
     // RECORD IN LEDGER
     await this.ledger.recordIfAbsent({
       tenantId: this.tenantId,
+        itemType: 'calendar',
       mappingId: this.mappingId,
       naturalKeyHash,
       contentHash: contentHashValue,

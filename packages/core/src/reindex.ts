@@ -15,13 +15,14 @@ export const reindexFromTarget: RunReindex = async (deps) => {
   for await (const entry of reindexer.listEntries()) {
     scanned++;
     const nkh = naturalKeyHash(entry.naturalKey);
-    const known = await ledger.find(tenantId, mappingId, nkh);
+    const known = await ledger.find(tenantId, mappingId, 'mail', nkh);
     if (known) {
       alreadyKnown++;
       continue;
     }
     await ledger.recordIfAbsent({
       tenantId,
+      itemType: 'mail',
       mappingId,
       naturalKeyHash: nkh,
       contentHash: entry.contentHash ?? '',

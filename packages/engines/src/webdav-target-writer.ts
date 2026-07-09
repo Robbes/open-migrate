@@ -92,7 +92,7 @@ export class WebDAVTargetWriter implements FileTargetWriter {
     const naturalKeyHash = fileNaturalKeyHash(naturalKey);
 
     // LEDGER FAST-PATH: Check if already migrated
-    const known = await this.ledger.find(this.tenantId, this.mappingId, naturalKeyHash);
+    const known = await this.ledger.find(this.tenantId, this.mappingId, 'file', naturalKeyHash);
     if (known) {
       return { targetId: known.targetId, created: false };
     }
@@ -106,6 +106,7 @@ export class WebDAVTargetWriter implements FileTargetWriter {
       // Record in ledger if not present (adopt existing)
       await this.ledger.recordIfAbsent({
         tenantId: this.tenantId,
+        itemType: 'file',
         mappingId: this.mappingId,
         naturalKeyHash,
         contentHash: contentHashValue,
@@ -121,6 +122,7 @@ export class WebDAVTargetWriter implements FileTargetWriter {
     // RECORD IN LEDGER
     await this.ledger.recordIfAbsent({
       tenantId: this.tenantId,
+        itemType: 'file',
       mappingId: this.mappingId,
       naturalKeyHash,
       contentHash: contentHashValue,

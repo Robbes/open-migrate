@@ -62,13 +62,14 @@ describe('SqliteLedger', () => {
   });
 
   it('should return undefined for non-existent record', async () => {
-    const result = await ledger.find(asTenantId('tenant-1'), asMappingId('mapping-1'), 'hash-abc123');
+    const result = await ledger.find(asTenantId('tenant-1'), asMappingId('mapping-1'), 'mail', 'hash-abc123');
     expect(result).toBeUndefined();
   });
 
   it('should record a new ledger entry', async () => {
     const record: LedgerRecord = {
       tenantId: asTenantId('tenant-1'),
+      itemType: 'mail',
       mappingId: asMappingId('mapping-1'),
       naturalKeyHash: 'hash-abc123',
       contentHash: 'content-xyz',
@@ -87,6 +88,7 @@ describe('SqliteLedger', () => {
   it('should be idempotent - recordIfAbsent should not overwrite existing entries', async () => {
     const record: LedgerRecord = {
       tenantId: asTenantId('tenant-1'),
+      itemType: 'mail',
       mappingId: asMappingId('mapping-1'),
       naturalKeyHash: 'hash-def456',
       contentHash: 'content-abc',
@@ -105,6 +107,7 @@ describe('SqliteLedger', () => {
   it('should find a previously recorded entry', async () => {
     const record: LedgerRecord = {
       tenantId: asTenantId('tenant-1'),
+      itemType: 'mail',
       mappingId: asMappingId('mapping-1'),
       naturalKeyHash: 'hash-ghi789',
       contentHash: 'content-def',
@@ -113,7 +116,7 @@ describe('SqliteLedger', () => {
     };
 
     await ledger.recordIfAbsent(record);
-    const found = await ledger.find(asTenantId('tenant-1'), asMappingId('mapping-1'), 'hash-ghi789');
+    const found = await ledger.find(asTenantId('tenant-1'), asMappingId('mapping-1'), 'mail', 'hash-ghi789');
 
     expect(found).toBeDefined();
     expect(found?.naturalKeyHash).toBe('hash-ghi789');
@@ -123,6 +126,7 @@ describe('SqliteLedger', () => {
   it('should not find entries with different tenant or mapping', async () => {
     const record: LedgerRecord = {
       tenantId: asTenantId('tenant-2'),
+      itemType: 'mail',
       mappingId: asMappingId('mapping-2'),
       naturalKeyHash: 'hash-jkl012',
       contentHash: 'content-ghi',
@@ -133,11 +137,11 @@ describe('SqliteLedger', () => {
     await ledger.recordIfAbsent(record);
     
     // Try to find with different tenant
-    const found1 = await ledger.find(asTenantId('tenant-1'), asMappingId('mapping-2'), 'hash-jkl012');
+    const found1 = await ledger.find(asTenantId('tenant-1'), asMappingId('mapping-2'), 'mail', 'hash-jkl012');
     expect(found1).toBeUndefined();
 
     // Try to find with different mapping
-    const found2 = await ledger.find(asTenantId('tenant-2'), asMappingId('mapping-1'), 'hash-jkl012');
+    const found2 = await ledger.find(asTenantId('tenant-2'), asMappingId('mapping-1'), 'mail', 'hash-jkl012');
     expect(found2).toBeUndefined();
   });
 });

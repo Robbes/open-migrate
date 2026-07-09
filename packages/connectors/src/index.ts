@@ -4,3 +4,5 @@ export const packageName = '@openmig/connectors';
 export * from './imap-source';
 export * from './jmap-target';
 export * from './imap-dav-target';
+// CalDAV, CardDAV, and WebDAV connectors are pending implementation
+// See docs/workplans/0007-multi-domain-sync-completion.md

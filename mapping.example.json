@@ -15,5 +15,74 @@
     "auth": { "kind": "basic", "passwordFromEnv": "TARGET_PASSWORD" }
   },
   "schedule": { "cron": "*/15 * * * *" },
-  "_note": "Placeholders only. Never commit real credentials; secrets are read from the named env vars."
+  "concurrency": 4,
+  "_note": "Placeholders only. Never commit real credentials; secrets are read from the named env vars.",
+  "_note_multi_domain": "The optional 'domains' block enables multi-domain sync (calendar, contacts, files). When absent, only the root source/target is used (backward compatible).",
+  "domains": {
+    "mail": {
+      "enabled": true,
+      "source": {
+        "type": "imap-oauth2",
+        "host": "outlook.office365.com",
+        "port": 993,
+        "user": "user@example.onmicrosoft.com",
+        "auth": { "kind": "xoauth2", "tokenFromEnv": "O365_ACCESS_TOKEN" }
+      },
+      "target": {
+        "type": "jmap",
+        "baseUrl": "http://stalwart:8080",
+        "user": "target@dev.local",
+        "auth": { "kind": "basic", "passwordFromEnv": "TARGET_PASSWORD" }
+      },
+      "concurrency": 4
+    },
+    "calendar": {
+      "enabled": true,
+      "source": {
+        "type": "caldav",
+        "url": "https://caldav.example.com/dav/",
+        "user": "user@example.com",
+        "auth": { "kind": "xoauth2", "tokenFromEnv": "CALDAV_ACCESS_TOKEN" }
+      },
+      "target": {
+        "type": "caldav",
+        "url": "https://caldav.target.com/dav/",
+        "user": "target@dev.local",
+        "auth": { "kind": "basic", "passwordFromEnv": "TARGET_CALENDAR_PASSWORD" }
+      },
+      "concurrency": 2
+    },
+    "contacts": {
+      "enabled": true,
+      "source": {
+        "type": "carddav",
+        "url": "https://carddav.example.com/dav/",
+        "user": "user@example.com",
+        "auth": { "kind": "xoauth2", "tokenFromEnv": "CARDDAV_ACCESS_TOKEN" }
+      },
+      "target": {
+        "type": "carddav",
+        "url": "https://carddav.target.com/dav/",
+        "user": "target@dev.local",
+        "auth": { "kind": "basic", "passwordFromEnv": "TARGET_CONTACTS_PASSWORD" }
+      },
+      "concurrency": 2
+    },
+    "files": {
+      "enabled": true,
+      "source": {
+        "type": "webdav",
+        "url": "https://webdav.example.com/dav/",
+        "user": "user@example.com",
+        "auth": { "kind": "xoauth2", "tokenFromEnv": "WEBDAV_ACCESS_TOKEN" }
+      },
+      "target": {
+        "type": "webdav",
+        "url": "https://webdav.target.com/dav/",
+        "user": "target@dev.local",
+        "auth": { "kind": "basic", "passwordFromEnv": "TARGET_FILES_PASSWORD" }
+      },
+      "concurrency": 2
+    }
+  }
 }

@@ -6,3 +6,5 @@ export * from './reindex';
 export * from './cutover-state';
 export * from './verification';
 export * from './cutover';
+export * from './unified-sync';
+export * from './generic-sync';

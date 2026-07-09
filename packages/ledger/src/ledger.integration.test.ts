@@ -117,6 +117,7 @@ describe('PgLedger (integration)', () => {
     const result = await ledger.find(
       TEST_TENANT_ID,
       TEST_MAPPING_ID,
+      'mail',
       'hash-abc123',
     );
     expect(result).toBeUndefined();
@@ -125,6 +126,7 @@ describe('PgLedger (integration)', () => {
   it('should record a new ledger entry', async () => {
     const record: LedgerRecord = {
       tenantId: TEST_TENANT_ID,
+      itemType: 'mail',
       mappingId: TEST_MAPPING_ID,
       naturalKeyHash: 'hash-abc123',
       contentHash: 'content-xyz',
@@ -143,6 +145,7 @@ describe('PgLedger (integration)', () => {
   it('should be idempotent - recordIfAbsent should not overwrite existing entries', async () => {
     const record: LedgerRecord = {
       tenantId: TEST_TENANT_ID,
+      itemType: 'mail',
       mappingId: TEST_MAPPING_ID,
       naturalKeyHash: 'hash-def456',
       contentHash: 'content-abc',
@@ -161,6 +164,7 @@ describe('PgLedger (integration)', () => {
   it('should find a previously recorded entry', async () => {
     const record: LedgerRecord = {
       tenantId: TEST_TENANT_ID,
+      itemType: 'mail',
       mappingId: TEST_MAPPING_ID,
       naturalKeyHash: 'hash-ghi789',
       contentHash: 'content-def',
@@ -172,6 +176,7 @@ describe('PgLedger (integration)', () => {
     const found = await ledger.find(
       TEST_TENANT_ID,
       TEST_MAPPING_ID,
+      'mail',
       'hash-ghi789',
     );
 
@@ -183,6 +188,7 @@ describe('PgLedger (integration)', () => {
   it('should not find entries with different tenant or mapping', async () => {
     const record: LedgerRecord = {
       tenantId: TEST_TENANT_2_ID,
+      itemType: 'mail',
       mappingId: TEST_MAPPING_2_ID,
       naturalKeyHash: 'hash-jkl012',
       contentHash: 'content-ghi',
@@ -196,6 +202,7 @@ describe('PgLedger (integration)', () => {
     const found1 = await ledger.find(
       TEST_TENANT_ID,
       TEST_MAPPING_2_ID,
+      'mail',
       'hash-jkl012',
     );
     expect(found1).toBeUndefined();
@@ -204,6 +211,7 @@ describe('PgLedger (integration)', () => {
     const found2 = await ledger.find(
       TEST_TENANT_2_ID,
       TEST_MAPPING_ID,
+      'mail',
       'hash-jkl012',
     );
     expect(found2).toBeUndefined();
