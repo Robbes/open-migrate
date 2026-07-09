@@ -1,6 +1,13 @@
 # Workplan 0003: Calendar, Contacts & Files (CalDAV, CardDAV, WebDAV)
 
-## Status: IN PROGRESS
+> ⚠️ **SUPERSEDED by [workplan 0007](./0007-multi-domain-sync-completion.md)** (2026-07-09) —
+> kept as history, do not execute from this file. Verified state at supersession: data models,
+> hash functions, target-writer classes and vdirsyncer/rclone wrappers exist, but
+> `runUnifiedSync` is a stub returning zeros, there are no calendar/contact/file **source**
+> connectors, no ledger item-type support, and no integration tests for any non-mail domain.
+> The "Completed Tasks" list below overstates; ground truth lives in 0007's Status block.
+
+## Status: SUPERSEDED (was: IN PROGRESS)
 
 This document tracks the implementation of Workplan 0003, which extends the sovereign migration stack to support calendar (CalDAV), contacts (CardDAV), and files (WebDAV) synchronization.
 
