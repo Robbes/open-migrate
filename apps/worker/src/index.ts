@@ -17,7 +17,7 @@ import { runShadowPass } from '@openmig/core';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { buildDeps } from './build-deps.js';
+import { buildDeps } from './build-deps';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

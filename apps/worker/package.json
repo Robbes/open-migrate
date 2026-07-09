@@ -8,11 +8,15 @@
     "worker": "./src/index.ts"
   },
   "dependencies": {
+    "@openmig/connectors": "workspace:*",
     "@openmig/core": "workspace:*",
+    "@openmig/ledger": "workspace:*",
     "@openmig/scheduler": "workspace:*",
     "@openmig/shared": "workspace:*",
-    "@openmig/connectors": "workspace:*",
-    "@openmig/ledger": "workspace:*",
-    "croner": "9.1.0"
+    "@trigger.dev/sdk": "^4.5.1",
+    "croner": "9.1.0",
+    "engine.io": "^6.6.9",
+    "socket.io": "^4.8.1",
+    "zod": "^3.22.4"
   }
 }

@@ -7,12 +7,12 @@ import { sql } from 'drizzle-orm';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import type { ImapSimpleOptions } from 'imap-simple';
-import { createPgDb } from './db.js';
-import { PgLedger } from './ledger.js';
-import { PgCursorStore } from './cursor-store.js';
-import { ImapSource } from '../../connectors/src/imap-source.js';
-import { JmapTargetWriter } from '../../connectors/src/jmap-target.js';
-import { runShadowPass } from '../../core/src/reconcile.js';
+import { createPgDb } from './db';
+import { PgLedger } from './ledger';
+import { PgCursorStore } from './cursor-store';
+import { ImapSource } from '../../connectors/src/imap-source';
+import { JmapTargetWriter } from '../../connectors/src/jmap-target';
+import { runShadowPass } from '../../core/src/reconcile';
 import { asTenantId, asMappingId } from '@openmig/shared';
 
 const __filename = fileURLToPath(import.meta.url);

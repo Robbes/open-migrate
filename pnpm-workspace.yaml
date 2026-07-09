@@ -12,5 +12,11 @@ allowBuilds:
   better-sqlite3: true
   cpu-features: true
   esbuild: true
+  libxmljs2: true
   protobufjs: true
   ssh2: true
+overrides:
+  semver: ^7.5.2
+  ws: ^8.21.0
+  socket.io-client: ^4.8.0
+  engine.io-client: ^6.6.0

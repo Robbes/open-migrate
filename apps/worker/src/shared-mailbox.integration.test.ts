@@ -7,12 +7,12 @@ import { sql } from 'drizzle-orm';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import type { ImapSimpleOptions } from 'imap-simple';
-import { createPgDb } from '../../../packages/ledger/src/db.ts';
-import { PgLedger } from '../../../packages/ledger/src/ledger.ts';
-import { PgCursorStore } from '../../../packages/ledger/src/cursor-store.ts';
-import { ImapSource } from '../../../packages/connectors/src/imap-source.ts';
-import { JmapTargetWriter } from '../../../packages/connectors/src/jmap-target.ts';
-import { runShadowPass } from '../../../packages/core/src/reconcile.ts';
+import { createPgDb } from '../../../packages/ledger/src/db';
+import { PgLedger } from '../../../packages/ledger/src/ledger';
+import { PgCursorStore } from '../../../packages/ledger/src/cursor-store';
+import { ImapSource } from '../../../packages/connectors/src/imap-source';
+import { JmapTargetWriter } from '../../../packages/connectors/src/jmap-target';
+import { runShadowPass } from '../../../packages/core/src/reconcile';
 import { asTenantId, asMappingId } from '@openmig/shared';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -64,7 +64,6 @@ const RETRY_DELAY_MS = 2000;
 /**
  * Box interface for IMAP mailbox (unused, kept for reference)
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 interface ImMapBox {
   name: string;
   readOnly?: boolean;

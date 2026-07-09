@@ -6,25 +6,25 @@ export {
   getImapsyncVersion,
   type BulkSyncResult,
   type ImapSyncConfig,
-} from './imapsync-wrapper.js';
+} from './imapsync-wrapper';
 
 export {
   runCalDAVSync,
   cleanupCalDAVConfig,
   type CalDAVSyncConfig,
   type CalDAVSyncResult,
-} from './caldav-sync.js';
+} from './caldav-sync';
 
 export {
   runCardDAVSync,
   cleanupCardDAVConfig,
   type CardDAVSyncConfig,
   type CardDAVSyncResult,
-} from './carddav-sync.js';
+} from './carddav-sync';
 
 export {
   runWebDAVSync,
   cleanupWebDAVConfig,
   type WebDAVSyncConfig,
   type WebDAVSyncResult,
-} from './webdav-sync.js';
+} from './webdav-sync';
