@@ -105,6 +105,7 @@ jobs:
         with:
           node-version: '24'
           cache: pnpm
+          cache-prefix: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm install --frozen-lockfile
       - name: Lint & typecheck
         run: |
