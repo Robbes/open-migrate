@@ -33,6 +33,9 @@ importers:
       '@eslint/js':
         specifier: 10.0.1
         version: 10.0.1(eslint@10.6.0(jiti@1.21.7))
+      '@types/imap-simple':
+        specifier: ^4.2.10
+        version: 4.2.10
       '@types/node':
         specifier: ^26.1.0
         version: 26.1.0
@@ -1456,6 +1459,12 @@ packages:
 
   '@types/http-errors@2.0.5':
     resolution: {integrity: sha512-r8Tayk8HJnX0FztbZN7oVqGccWgw98T/0neJphO91KkmOzug1KkofZURD4UaD5uH8AqcFLfdPErnBod0u71/qg==}
+
+  '@types/imap-simple@4.2.10':
+    resolution: {integrity: sha512-ZLITvpfY4+oPtH3z7axYRGJqOB/9M6cb4ye8eEydOlgXZuJFX0z9l+hxzXgrFDnWKwxH39ZPCT4bGIFUKSJ52g==}
+
+  '@types/imap@0.8.43':
+    resolution: {integrity: sha512-POPoqrDax9mxM2N4ITZYCWaFtg1ORVfzJe4S7xwSh9aHawdEb7FwWTJYiAhzIvWp7DM+6BajnzYOwZ1BUrqtow==}
 
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
@@ -5285,6 +5294,15 @@ snapshots:
       '@types/serve-static': 1.15.10
 
   '@types/http-errors@2.0.5': {}
+
+  '@types/imap-simple@4.2.10':
+    dependencies:
+      '@types/imap': 0.8.43
+      '@types/node': 26.1.0
+
+  '@types/imap@0.8.43':
+    dependencies:
+      '@types/node': 26.1.0
 
   '@types/json-schema@7.0.15': {}
 
