@@ -42,7 +42,7 @@ export const runShadowPass: RunShadowPass = async (deps) => {
       const naturalKeyHash = naturalKeyForItem(item);
 
       // Ledger fast-path: already migrated -> skip without fetching the body.
-      const known = await ledger.find(tenantId, mappingId, naturalKeyHash);
+      const known = await ledger.find(tenantId, mappingId, 'mail', naturalKeyHash);
       if (known) {
         skipped += 1;
         return;
@@ -55,6 +55,7 @@ export const runShadowPass: RunShadowPass = async (deps) => {
 
       await ledger.recordIfAbsent({
         tenantId,
+        itemType: 'mail',
         mappingId,
         naturalKeyHash,
         contentHash: ch,

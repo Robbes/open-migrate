@@ -7,4 +7,4 @@ export * from './cutover-state';
 export * from './verification';
 export * from './cutover';
 export * from './unified-sync';
-// GenericSyncEngine is pending implementation - see docs/workplans/0007-multi-domain-sync-completion.md
+export * from './generic-sync';

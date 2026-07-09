@@ -198,6 +198,7 @@ export interface TargetReindexer {
 export interface LedgerRecord {
   readonly tenantId: TenantId;
   readonly mappingId: MappingId;
+  readonly itemType: 'mail' | 'calendar' | 'contact' | 'file';
   readonly naturalKeyHash: string;
   readonly contentHash: string;
   readonly targetId: string;
@@ -205,17 +206,18 @@ export interface LedgerRecord {
   readonly createdAt: string;
 }
 
-/** Idempotency ledger. UNIQUE(tenantId, mappingId, naturalKeyHash). Non-destructive. */
+/** Idempotency ledger. UNIQUE(tenantId, mappingId, itemType, naturalKeyHash). Non-destructive. */
 export interface Ledger {
   /** Look up an existing record by natural key. */
   find(
     tenantId: TenantId,
     mappingId: MappingId,
+    itemType: 'mail' | 'calendar' | 'contact' | 'file',
     naturalKeyHash: string,
   ): Promise<LedgerRecord | undefined>;
   /**
    * Record a mapping if absent. If a row with the same
-   * (tenantId, mappingId, naturalKeyHash) exists, return it unchanged (no-op);
+   * (tenantId, mappingId, itemType, naturalKeyHash) exists, return it unchanged (no-op);
    * otherwise insert and return the new row.
    */
   recordIfAbsent(record: LedgerRecord): Promise<LedgerRecord>;

@@ -137,16 +137,17 @@ export class MemoryTarget implements TargetWriter, TargetReindexer {
 export class MemoryLedger implements Ledger {
   private readonly rows = new Map<string, LedgerRecord>();
 
-  private key(r: Pick<LedgerRecord, 'tenantId' | 'mappingId' | 'naturalKeyHash'>): string {
-    return `${r.tenantId}\u0000${r.mappingId}\u0000${r.naturalKeyHash}`;
+  private key(r: Pick<LedgerRecord, 'tenantId' | 'mappingId' | 'itemType' | 'naturalKeyHash'>): string {
+    return `${r.tenantId}\u0000${r.mappingId}\u0000${r.itemType}\u0000${r.naturalKeyHash}`;
   }
 
   find(
     tenantId: LedgerRecord['tenantId'],
     mappingId: LedgerRecord['mappingId'],
+    itemType: LedgerRecord['itemType'],
     naturalKeyHash: string,
   ): Promise<LedgerRecord | undefined> {
-    return Promise.resolve(this.rows.get(this.key({ tenantId, mappingId, naturalKeyHash })));
+    return Promise.resolve(this.rows.get(this.key({ tenantId, mappingId, itemType, naturalKeyHash })));
   }
 
   recordIfAbsent(record: LedgerRecord): Promise<LedgerRecord> {

@@ -24,6 +24,7 @@ export class SqliteLedger implements Ledger {
   async find(
     tenantId: TenantId,
     mappingId: MappingId,
+    itemType: 'mail' | 'calendar' | 'contact' | 'file',
     naturalKeyHash: string,
   ): Promise<LedgerRecord | undefined> {
     const result = await this.db
@@ -34,6 +35,7 @@ export class SqliteLedger implements Ledger {
           eq(schemaSqlite.item.tenantId, tenantId),
           eq(schemaSqlite.item.mappingId, mappingId),
           eq(schemaSqlite.item.naturalKeyHash, naturalKeyHash),
+          eq(schemaSqlite.item.domain, itemType === 'mail' ? 'email' : itemType),
         ),
       )
       .limit(1);
@@ -54,7 +56,7 @@ export class SqliteLedger implements Ledger {
         id: crypto.randomUUID(),
         tenantId: record.tenantId,
         mappingId: record.mappingId,
-        domain: 'email',
+        domain: record.itemType === 'mail' ? 'email' : record.itemType,
         collection: '',
         naturalKey: '',
         naturalKeyHash: record.naturalKeyHash,
@@ -69,7 +71,7 @@ export class SqliteLedger implements Ledger {
 
     // If nothing was inserted, fetch the existing row
     if (inserted.length === 0) {
-      const existing = await this.find(record.tenantId, record.mappingId, record.naturalKeyHash);
+      const existing = await this.find(record.tenantId, record.mappingId, record.itemType, record.naturalKeyHash);
       if (!existing) {
         throw new Error(
           `Failed to insert or find record with naturalKeyHash: ${record.naturalKeyHash}`,
@@ -85,6 +87,7 @@ export class SqliteLedger implements Ledger {
     return {
       tenantId: row.tenantId as TenantId,
       mappingId: row.mappingId as MappingId,
+      itemType: row.domain === 'email' ? 'mail' : (row.domain as 'calendar' | 'contact' | 'file'),
       naturalKeyHash: row.naturalKeyHash,
       contentHash: row.contentHash ?? '',
       targetId: (() => {
