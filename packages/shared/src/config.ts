@@ -88,6 +88,26 @@ export interface WebDAVTarget {
   readonly auth: SourceAuth;
 }
 
+/** Per-domain sync configuration for multi-domain sync */
+export interface DomainConfig {
+  /** Whether this domain is enabled */
+  readonly enabled: boolean;
+  /** Source connector for this domain */
+  readonly source: SourceConfig;
+  /** Target writer for this domain */
+  readonly target: TargetConfig;
+  /** Optional per-domain concurrency override */
+  readonly concurrency?: number;
+}
+
+/** Per-domain configuration block for multi-domain sync */
+export interface DomainsConfig {
+  mail?: DomainConfig;
+  calendar?: DomainConfig;
+  contacts?: DomainConfig;
+  files?: DomainConfig;
+}
+
 export type SourceConfig = ImapOAuth2Source | CalDAVSource | CardDAVSource | WebDAVSource;
 export type TargetConfig = JmapTarget | ImapDavTarget | CalDAVTarget | CardDAVTarget | WebDAVTarget;
 
@@ -103,6 +123,8 @@ export interface MappingConfig {
   readonly schedule?: ScheduleConfig;
   /** Max messages processed in parallel per folder (bounds throughput and peak memory). */
   readonly concurrency?: number;
+  /** Optional per-domain configuration for multi-domain sync */
+  readonly domains?: DomainsConfig;
 }
 
 function asRecord(v: unknown, path: string): Record<string, unknown> {
@@ -238,6 +260,7 @@ export function parseMappingConfig(input: unknown): MappingConfig {
       ? undefined
       : { cron: reqString(asRecord(root.schedule, 'schedule'), 'cron', 'schedule.cron') };
   const concurrency = root.concurrency === undefined ? undefined : reqInt(root, 'concurrency', 'concurrency');
+  const domains = root.domains === undefined ? undefined : parseDomainsConfig(asRecord(root.domains, 'domains'));
 
   return {
     tenantId,
@@ -246,7 +269,67 @@ export function parseMappingConfig(input: unknown): MappingConfig {
     target,
     ...(schedule ? { schedule } : {}),
     ...(concurrency !== undefined ? { concurrency } : {}),
+    ...(domains !== undefined ? { domains } : {}),
   };
+}
+
+/** Parse and validate the domains configuration block */
+function parseDomainsConfig(obj: Record<string, unknown>): DomainsConfig {
+  const domains: DomainsConfig = {};
+
+  // Parse mail domain
+  if (obj.mail !== undefined) {
+    const mail = asRecord(obj.mail, 'domains.mail');
+    domains.mail = {
+      enabled: reqBoolean(mail, 'enabled', 'domains.mail.enabled'),
+      source: parseSource(asRecord(mail.source, 'domains.mail.source')),
+      target: parseTarget(asRecord(mail.target, 'domains.mail.target')),
+      ...(mail.concurrency !== undefined ? { concurrency: reqInt(mail, 'concurrency', 'domains.mail.concurrency') } : {}),
+    };
+  }
+
+  // Parse calendar domain
+  if (obj.calendar !== undefined) {
+    const calendar = asRecord(obj.calendar, 'domains.calendar');
+    domains.calendar = {
+      enabled: reqBoolean(calendar, 'enabled', 'domains.calendar.enabled'),
+      source: parseSource(asRecord(calendar.source, 'domains.calendar.source')),
+      target: parseTarget(asRecord(calendar.target, 'domains.calendar.target')),
+      ...(calendar.concurrency !== undefined ? { concurrency: reqInt(calendar, 'concurrency', 'domains.calendar.concurrency') } : {}),
+    };
+  }
+
+  // Parse contacts domain
+  if (obj.contacts !== undefined) {
+    const contacts = asRecord(obj.contacts, 'domains.contacts');
+    domains.contacts = {
+      enabled: reqBoolean(contacts, 'enabled', 'domains.contacts.enabled'),
+      source: parseSource(asRecord(contacts.source, 'domains.contacts.source')),
+      target: parseTarget(asRecord(contacts.target, 'domains.contacts.target')),
+      ...(contacts.concurrency !== undefined ? { concurrency: reqInt(contacts, 'concurrency', 'domains.contacts.concurrency') } : {}),
+    };
+  }
+
+  // Parse files domain
+  if (obj.files !== undefined) {
+    const files = asRecord(obj.files, 'domains.files');
+    domains.files = {
+      enabled: reqBoolean(files, 'enabled', 'domains.files.enabled'),
+      source: parseSource(asRecord(files.source, 'domains.files.source')),
+      target: parseTarget(asRecord(files.target, 'domains.files.target')),
+      ...(files.concurrency !== undefined ? { concurrency: reqInt(files, 'concurrency', 'domains.files.concurrency') } : {}),
+    };
+  }
+
+  return domains;
+}
+
+function reqBoolean(obj: Record<string, unknown>, key: string, path: string): boolean {
+  const v = obj[key];
+  if (typeof v !== 'boolean') {
+    throw new ConfigError(`${path}: expected a boolean`);
+  }
+  return v;
 }
 
 /** Parse + validate a mapping config from JSON text. Unknown extra keys (e.g. "_note") are ignored. */

@@ -35,6 +35,51 @@ export interface SourceConnector {
   fetch(item: MailItem): Promise<RawMessage>;
 }
 
+/**
+ * Calendar source connector for CalDAV.
+ */
+export interface CalendarSource {
+  /** List all calendar collections */
+  listFolders(): Promise<ReadonlyArray<CalendarFolder>>;
+  /**
+   * List calendar items changed since cursor.
+   */
+  listSince(
+    folder: CalendarFolder,
+    cursor?: SyncCursor,
+  ): Promise<{ items: ReadonlyArray<RawCalendarEvent>; nextCursor: SyncCursor }>;
+}
+
+/**
+ * Contact source connector for CardDAV.
+ */
+export interface ContactSource {
+  /** List all address book collections */
+  listFolders(): Promise<ReadonlyArray<ContactFolder>>;
+  /**
+   * List contacts changed since cursor.
+   */
+  listSince(
+    folder: ContactFolder,
+    cursor?: SyncCursor,
+  ): Promise<{ items: ReadonlyArray<RawContact>; nextCursor: SyncCursor }>;
+}
+
+/**
+ * File source connector for WebDAV.
+ */
+export interface FileSource {
+  /** List all file folders/directories */
+  listFolders(): Promise<ReadonlyArray<FileFolder>>;
+  /**
+   * List files changed since cursor.
+   */
+  listSince(
+    folder: FileFolder,
+    cursor?: SyncCursor,
+  ): Promise<{ items: ReadonlyArray<RawFileItem>; nextCursor: SyncCursor }>;
+}
+
 /** Result of upserting one message into a target. */
 export interface UpsertResult {
   /** Target-side id (e.g. a JMAP Email id). */

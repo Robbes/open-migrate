@@ -57,7 +57,114 @@ integration suite does not depend on it.
 - After every mirror run the tests **assert the source INBOX count is unchanged**
   (cross-account-pollution guard).
 
-## Test isolation patterns
+## Property Testing Patterns
+
+### Per-Domain Property Test Pattern
+
+For multi-domain sync (calendar, contacts, files), use the following property test pattern:
+
+#### Idempotency Test
+
+```typescript
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { GenericSyncEngine } from '@openmig/core';
+import { CaldavSource } from '@openmig/connectors';
+
+describe('CalDAV Sync Idempotency', () => {
+  let source: CaldavSource;
+  let target: CalDAVTargetWriter;
+  let ledger: Ledger;
+  let cursors: CursorStore;
+  let engine: GenericSyncEngine;
+
+  beforeEach(async () => {
+    await cleanTargetMailboxes();
+    await cleanDatabaseState(TENANT_ID, MAPPING_ID);
+    
+    source = new CaldavSource({ /* ... */ });
+    target = new CalDAVTargetWriter({ /* ... */ });
+    ledger = createTestLedger();
+    cursors = createTestCursorStore();
+    
+    engine = new GenericSyncEngine({
+      tenantId: TENANT_ID,
+      mappingId: MAPPING_ID,
+      source,
+      target,
+      ledger,
+      cursors,
+      concurrency: 4,
+      itemType: 'calendar',
+    });
+  });
+
+  it('should create 0 items on second run', async () => {
+    // First sync
+    const result1 = await engine.sync();
+    expect(result1.created).toBeGreaterThan(0);
+    
+    // Second sync - should create nothing
+    const result2 = await engine.sync();
+    expect(result2.created).toBe(0);
+    expect(result2.skipped).toBe(result1.scanned);
+  });
+});
+```
+
+#### Delta Test
+
+```typescript
+describe('CalDAV Sync Delta', () => {
+  it('should sync only modified items', async () => {
+    // Initial sync
+    const result1 = await engine.sync();
+    const initialCount = result1.scanned;
+    
+    // Modify one item on source
+    await modifySourceEvent('event-uid-123');
+    
+    // Second sync - should only sync the modified item
+    const result2 = await engine.sync();
+    expect(result2.scanned).toBe(1);
+    expect(result2.created).toBe(0);
+    expect(result2.skipped).toBe(1);
+  });
+});
+```
+
+#### Reindex Test
+
+```typescript
+describe('CalDAV Reindex', () => {
+  it('should create 0 items when ledger is wiped and reindexed', async () => {
+    // Initial sync
+    const result1 = await engine.sync();
+    expect(result1.created).toBeGreaterThan(0);
+    
+    // Wipe ledger
+    await cleanDatabaseState(TENANT_ID, MAPPING_ID);
+    
+    // Reindex - should adopt existing items (create-if-absent)
+    const result2 = await engine.sync();
+    expect(result2.created).toBe(0);
+    expect(result2.skipped).toBe(result1.scanned);
+  });
+});
+```
+
+### Domain-Specific Test Files
+
+Use the `*.unit.test.ts` or `*.integration.test.ts` naming convention:
+
+- `caldav-source.unit.test.ts` - CalDAV source connector unit tests
+- `carddav-source.unit.test.ts` - CardDAV source connector unit tests
+- `webdav-source.unit.test.ts` - WebDAV source connector unit tests
+- `generic-sync.idempotency.unit.test.ts` - Generic sync engine idempotency tests
+- `caldav-sync.integration.test.ts` - CalDAV end-to-end integration tests
+- `carddav-sync.integration.test.ts` - CardDAV end-to-end integration tests
+- `webdav-sync.integration.test.ts` - WebDAV end-to-end integration tests
+
+## Test Isolation Patterns
 
 ### Mailbox cleanup (recommended for shared accounts)
 
