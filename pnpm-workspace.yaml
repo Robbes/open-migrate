@@ -12,7 +12,7 @@ allowBuilds:
   better-sqlite3: true
   cpu-features: true
   esbuild: true
-  libxmljs2: set this to true or false
+  libxmljs2: true
   protobufjs: true
   ssh2: true
 overrides:
