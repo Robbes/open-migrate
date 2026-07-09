@@ -50,6 +50,11 @@ Nextcloud) — both in MVP (ADR-0018). The **O365 source stays IMAP+OAuth2/Graph
 - The test O365 source is a **real SMB tenant**: read-only, least-privilege, never write back.
 - The Spark arm64 runner has docker socket + root: trusted workflows only; build multi-arch (amd64+arm64) images.
 
+## Skills (all agents)
+Agent-neutral, reusable skills live in `.agents/skills/` — currently `caveman.md` (ultra-terse
+output mode). Activate one only when the user asks for it by name (e.g. "caveman mode");
+read the file and follow it for the rest of the session.
+
 ## Prompts for other agent sessions
 Inline all code/commands/paths as backtick inline code within prose — no separate fenced blocks —
 so the whole prompt is one copy-pasteable unit.
