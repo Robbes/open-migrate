@@ -9,7 +9,6 @@
 | C — Workplan & docs integrity (0003/0004/0005 status, broken links, stale README) | ⬜ Proposed | approved |
 | D — Root dependency & shim cleanup (`mollie-api-node`, stale `.d.ts`) | ⬜ Proposed | approved |
 | E — CI hardening (self-hosted runner on `pull_request`, unpinned actions) | ⬜ Proposed | approved |
-| F — Web framework decision: `migration/nextjs-15` branch vs Vite on `main` | 🔶 Recommendation recorded | (b) we stay on Vite |
 | G — Compose duplication & Postgres version drift (root vs `deploy/compose`) | ⬜ Proposed | approved |
 | H — Re-enable `no-unused-vars` lint rule | ⬜ Proposed | approved |
 | I — Worker CLI config-path bug | ⬜ Proposed | approved |
@@ -151,39 +150,6 @@ commit SHAs. Document the policy in `docs/testing.md`.
 
 **Acceptance.** A PR from a fork cannot reach the self-hosted runner; all actions SHA-pinned;
 pipeline still green end-to-end.
-
----
-
-## F — Web framework decision: `migration/nextjs-15` branch — DECISION NEEDED
-
-**Evidence.** `main` ships `apps/web` as Vite + React 18 (built under workplan 0005 Phase 4).
-Unmerged branch `migration/nextjs-15` rebuilds it on **Next.js 15.0.0-rc.0 + React 19.0.0-rc.1**
-(release candidates) and adds `docs/workplans/0006-status-report.md` — which also **collides with
-this workplan's number**.
-
-**Considerations.** RC dependencies conflict with the "low-maintenance" principle; on the other
-hand the branch adds i18n (EN/NL, ADR-0013), auth and WCAG groundwork the Vite app lacks. Two web
-stacks in flight will bit-rot whichever loses.
-
-**Owner decision.** (a) adopt the branch: rebase, move every RC dependency to stable releases,
-renumber its doc (suggest `0012-web-nextjs15.md`), then merge and delete the Vite variant; or
-(b) stay on Vite: cherry-pick i18n/a11y ideas as tasks into workplan 0011 and close the branch.
-Workplan 0011's UI tasks are written to work with either outcome but **block on this decision**.
-
-**Recommendation (2026-07-09 assessment): (b) — stay on Vite; the branch is not needed.**
-Rationale: the branch pins **release candidates** (`next@15.0.0-rc.0`, `react@19.0.0-rc.1`) that
-are stale prereleases by now, so "finalize" means re-doing the upgrade work anyway; Next.js adds
-a server runtime the self-host bundle explicitly doesn't want (arch §7.1 "dependency-light";
-the control-plane UI is a status/wizard SPA — nothing needs SSR); the branch predates the Mollie/
-lockfile/lint fixes on `main`, so a merge fights conflicts across `apps/web` and the lockfile;
-and everything genuinely valuable in it (EN/NL i18n per ADR-0013, auth flow, WCAG 2.2 AA) is
-captured as **workplan 0011 T6** requirements achievable in the Vite app. The branch head
-(`9722f95`) is preserved as tag **`archive/nextjs-15`** so deleting the branch loses nothing
-(`git push origin --delete migration/nextjs-15` when the owner confirms). Record the framework
-choice as a short ADR when 0011 T6 starts.
-
-**Acceptance.** Decision recorded here + in an ADR (UI framework choice); losing variant removed;
-one web app builds green.
 
 ---
 
