@@ -1,19 +1,18 @@
 # Workplan 0006 — Intermediate remediation: repo integrity & findings outside the plan
 
-## Status — PROPOSED, ⚠️ AWAITING OWNER VALIDATION (do not execute until approved)
+## Status — all is approved
 
 | Item | Status | Owner decision |
 |---|---|---|
-| A — Test-selection gap (17 test files never run) | ⬜ Proposed | approve / reject |
-| B — Docs case collision `DEPLOYMENT.md` vs `deployment.md` | ⬜ Proposed | approve / reject |
-| C — Workplan & docs integrity (0003/0004/0005 status, broken links, stale README) | ⬜ Proposed | approve / reject |
-| D — Root dependency & shim cleanup (`mollie-api-node`, stale `.d.ts`) | ⬜ Proposed | approve / reject |
-| E — CI hardening (self-hosted runner on `pull_request`, unpinned actions) | ⬜ Proposed | approve / reject |
-| F — Stray `. agents/` directory (name contains a space) | ✅ Done 2026-07-09 | approved (b): relocated to `.agents/skills/caveman.md`, referenced from AGENTS.md (agent-neutral) |
-| G — Web framework decision: `migration/nextjs-15` branch vs Vite on `main` | 🔶 Recommendation recorded | recommended (b) stay on Vite; owner confirms branch deletion |
-| H — Compose duplication & Postgres version drift (root vs `deploy/compose`) | ⬜ Proposed | approve / reject |
-| I — Re-enable `no-unused-vars` lint rule | ⬜ Proposed | approve / reject |
-| J — Worker CLI config-path bug | ⬜ Proposed | approve / reject |
+| A — Test-selection gap (17 test files never run) | ⬜ Proposed | approved |
+| B — Docs case collision `DEPLOYMENT.md` vs `deployment.md` | ⬜ Proposed | approved |
+| C — Workplan & docs integrity (0003/0004/0005 status, broken links, stale README) | ⬜ Proposed | approved |
+| D — Root dependency & shim cleanup (`mollie-api-node`, stale `.d.ts`) | ⬜ Proposed | approved |
+| E — CI hardening (self-hosted runner on `pull_request`, unpinned actions) | ⬜ Proposed | approved |
+| F — Web framework decision: `migration/nextjs-15` branch vs Vite on `main` | 🔶 Recommendation recorded | (b) we stay on Vite |
+| G — Compose duplication & Postgres version drift (root vs `deploy/compose`) | ⬜ Proposed | approved |
+| H — Re-enable `no-unused-vars` lint rule | ⬜ Proposed | approved |
+| I — Worker CLI config-path bug | ⬜ Proposed | approved |
 
 > This workplan was produced by an assessment session on 2026-07-09 (clean clone of `main`,
 > `f1acd4a`). It collects **verified findings that fall outside the architecture/feature plans**.
@@ -155,32 +154,7 @@ pipeline still green end-to-end.
 
 ---
 
-## F — Stray `. agents/` directory (leading-dot-space name) — DECISION NEEDED
-
-**Evidence.** The repo root contains a directory literally named `. agents` (dot, space,
-"agents") holding one file: `skills/caveman.md`, a token-compression persona skill. The name
-pattern strongly suggests an accidental paste (`.agents` intended). It is unreferenced by
-AGENTS.md/CLAUDE.md.
-
-**Owner decision.** (a) delete it; (b) keep the skill but move it to a properly named directory
-(e.g. `.agents/skills/`) and reference it from AGENTS.md; the space-named directory should not
-survive either way.
-
-**Resolution (2026-07-09).** Owner chose (b), with the constraint that the skill stays
-**agent-neutral — available to all agents, not just Claude**. It never triggered because
-`. agents/skills/` (with the space; created via the GitHub web editor, `80b26ae`) is not a
-location anything reads. Moved to `.agents/skills/caveman.md` and referenced from **AGENTS.md**
-(new "Skills (all agents)" section) — AGENTS.md is this repo's single agent-neutral entry point,
-so every agent that follows the session protocol now knows to load it on request. Optional
-later: thin per-agent discovery shims (e.g. `.claude/skills/caveman/SKILL.md` pointing at the
-canonical file) if name-invocation (`/caveman`) is wanted; only on owner request.
-
-**Acceptance.** ✅ No path with a leading `. ` remains; canonical skill lives at
-`.agents/skills/caveman.md`; AGENTS.md references it; decision recorded here.
-
----
-
-## G — Web framework decision: `migration/nextjs-15` branch — DECISION NEEDED
+## F — Web framework decision: `migration/nextjs-15` branch — DECISION NEEDED
 
 **Evidence.** `main` ships `apps/web` as Vite + React 18 (built under workplan 0005 Phase 4).
 Unmerged branch `migration/nextjs-15` rebuilds it on **Next.js 15.0.0-rc.0 + React 19.0.0-rc.1**
@@ -213,7 +187,7 @@ one web app builds green.
 
 ---
 
-## H — Compose duplication & Postgres drift
+## G — Compose duplication & Postgres drift
 
 **Evidence.** Root `docker-compose.yml` (added with 0005) runs `postgres:15-alpine` and a
 Trigger.dev stack; `deploy/compose/dev.yml` is the canonical dev stack (CHANGELOG records
@@ -230,7 +204,7 @@ keep the repo root compose-free (docs updated).
 
 ---
 
-## I — Re-enable `no-unused-vars`
+## H — Re-enable `no-unused-vars`
 
 **Evidence.** Commit `04fcf33` ("fix: disable no-unused-vars lint rule and clean up test")
 switched the rule off repo-wide in `eslint.config.js` to get CI green — a masking fix.
@@ -244,7 +218,7 @@ the 0005-era API/web code).
 
 ---
 
-## J — Worker CLI config-path bug
+## I — Worker CLI config-path bug
 
 **Evidence.** `apps/worker/src/index.ts` `loadConfig()` does `join(__dirname, configPath)` — the
 config is resolved relative to the **compiled module's directory**, not the invoker's cwd, and an
@@ -258,11 +232,6 @@ against the dev stack.
 **Acceptance.** `--config` works with relative-to-cwd and absolute paths; quickstart verified.
 
 ---
-
-## Suggested execution order
-A (unblocks trust in every other plan) → C → J → D → I → B → H → E; F and G are pure owner
-decisions and can land any time. Items are independent; one small PR per item, gates green each
-time (AGENTS.md session protocol applies — update this Status block with evidence per item).
 
 ## Out of scope (tracked in feature workplans)
 - Runtime RLS enforcement (`SET app.current_tenant` is set nowhere in app code) → **0011 T1**,
