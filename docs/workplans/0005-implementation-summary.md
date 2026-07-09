@@ -1,6 +1,13 @@
 # Workplan 0005 Implementation Summary
 
-## Status: Phase 1 Complete, Phase 2 In Progress
+> ⚠️ **SUPERSEDED by [workplan 0011](./0011-managed-edition-hardening.md)** (2026-07-09) — kept
+> as history, do not execute from this file. The original 0005 plan document was deleted with
+> `.agents_tmp/` (restoration tracked in workplan 0006 item C). Verified state at supersession:
+> RLS SQL, Trigger scheduler/job scaffolding, API/web skeletons and the Mollie service merged,
+> but API route handlers are TODO shells, jobs don't call the sync core, and **RLS is not
+> enforced at runtime** (nothing sets `app.current_tenant`) — see 0011 "Why this slice".
+
+## Status: SUPERSEDED (was: Phase 1 Complete, Phase 2 In Progress)
 
 This document summarizes the implementation progress for Workplan 0005: Managed Edition — Multi-tenant Orchestration & Billing.
 

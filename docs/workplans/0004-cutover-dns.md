@@ -1,5 +1,12 @@
 # Workplan 0004: Cutover & DNS Management
 
+> ⚠️ **SUPERSEDED by [workplan 0009](./0009-cutover-integration.md)** (2026-07-09) — kept as
+> history, do not execute from this file. Verified state at supersession: state machine,
+> verification scaffolding, DNS types and rollback orchestrator exist **unit-tested against
+> fakes only**; nothing is persisted, wired to the worker/API, or performs real DNS I/O
+> (Phase 4 never started). Note the header/body status contradictions below were part of the
+> reason for supersession (see workplan 0006 item C).
+
 **Status**: Phase 1 & 2 - COMPLETED, Phase 3 - IN_PROGRESS  
 **Phase 1 Status**: ✅ COMPLETED  
 **Phase 2 Status**: ✅ COMPLETED  
