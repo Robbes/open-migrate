@@ -31,7 +31,7 @@ export const runRollback = schemaTask({
   id: 'run-rollback',
   description: 'Rollback',
   schema: RollbackJobSchema,
-  run: async (payload: RollbackJobPayload, { ctx }) => {
+  run: async (payload: RollbackJobPayload, { ctx: _ctx }) => {
     console.log('Starting rollback process', {
       tenantId: payload.tenantId,
       mappingId: payload.mappingId,

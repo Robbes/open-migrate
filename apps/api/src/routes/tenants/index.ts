@@ -31,12 +31,12 @@ const UpdateTenantSchema = z.object({
   }).optional(),
 });
 
-const InviteMemberSchema = z.object({
+const _InviteMemberSchema = z.object({
   email: z.string().email(),
   role: z.enum(['owner', 'admin', 'member', 'viewer']),
 });
 
-const UpdateMemberRoleSchema = z.object({
+const _UpdateMemberRoleSchema = z.object({
   role: z.enum(['owner', 'admin', 'member', 'viewer']),
 });
 
@@ -203,7 +203,7 @@ router.delete(
   requireRole('owner'),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { tenantId } = req.params;
+      const { tenantId: _tenantId } = req.params;
 
       // TODO: Delete tenant from database
       // await db.delete(tenant).where(eq(tenant.id, tenantId));

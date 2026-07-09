@@ -243,7 +243,7 @@ router.delete(
   authenticate,
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { mappingId } = req.params;
+      const { mappingId: _mappingId } = req.params;
 
       // TODO: Delete mapping from database
       // await db.delete(mapping).where(eq(mapping.id, mappingId));
@@ -269,9 +269,9 @@ router.post(
   authenticate,
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { mappingId } = req.params;
+      const { mappingId: _mappingId } = req.params;
       const body = TriggerSyncSchema.parse(req.body);
-      const { tenantId } = req;
+      const { tenantId: _tenantId } = req;
 
       // TODO: Trigger Trigger.dev job
       // const job = await triggerClient.trigger({
@@ -318,9 +318,9 @@ router.post(
   requireRole('owner', 'admin'),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { mappingId } = req.params;
+      const { mappingId: _mappingId } = req.params;
       const body = TriggerCutoverSchema.parse(req.body);
-      const { tenantId } = req;
+      const { tenantId: _tenantId } = req;
 
       // TODO: Trigger Trigger.dev cutover job
       // const job = await triggerClient.trigger({

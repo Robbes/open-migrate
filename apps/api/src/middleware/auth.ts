@@ -143,7 +143,7 @@ export async function optionalAuth(
     authenticatedReq.userRole = payload.role;
 
     next();
-  } catch (error) {
+  } catch (_error) {
     // Token invalid, but continue without authentication
     next();
   }

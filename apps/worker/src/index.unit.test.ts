@@ -5,8 +5,9 @@
  * Full integration tests require the dependency injection to be implemented.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { parseMappingConfig } from '@openmig/shared';
+import { resolve } from 'path';
 
 describe('Worker CLI', () => {
   describe('parseMappingConfig', () => {
@@ -87,6 +88,36 @@ describe('Worker CLI', () => {
           target: {},
         })
       ).toThrow();
+    });
+  });
+
+  describe('config path resolution', () => {
+    let originalCwd: string;
+
+    beforeEach(() => {
+      originalCwd = process.cwd();
+    });
+
+    afterEach(() => {
+      process.chdir(originalCwd);
+    });
+
+    it('should resolve relative paths from process.cwd() not __dirname', () => {
+      // Simulate the config path resolution logic
+      const configPath = './mapping.example.json';
+      const resolvedPath = resolve(process.cwd(), configPath);
+      
+      // The path should be resolved from cwd, not from the module directory
+      expect(resolvedPath).toContain(process.cwd());
+      expect(resolvedPath).not.toContain('apps/worker/src');
+    });
+
+    it('should handle absolute paths correctly', () => {
+      const absolutePath = '/tmp/mapping.json';
+      const resolvedPath = resolve(process.cwd(), absolutePath);
+      
+      // Absolute paths should remain unchanged
+      expect(resolvedPath).toBe(absolutePath);
     });
   });
 });

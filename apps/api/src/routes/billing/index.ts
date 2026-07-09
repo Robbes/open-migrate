@@ -10,7 +10,7 @@ import type { Response } from 'express';
 import { z } from 'zod';
 import { authenticate } from '../../middleware/auth';
 import type { AuthenticatedRequest } from '../../types/api';
-import { billingApi, UsageMetrics, calculateCost } from '../../services/billing-service';
+import { billingApi, UsageMetrics as _UsageMetrics, calculateCost } from '../../services/billing-service';
 import { getMollieService } from '../../services/mollie/index';
 
 const router = Router();

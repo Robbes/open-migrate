@@ -33,7 +33,7 @@ router.get(
   authenticate,
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { tenantId } = req.params;
+      const { tenantId: _tenantId } = req.params;
 
       // TODO: Query database for tenant members
       // const members = await db.query.tenantMember.findMany({
@@ -239,7 +239,7 @@ router.delete(
   requireRole('owner', 'admin'),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { tenantId, memberId } = req.params;
+      const { tenantId: _tenantId, memberId } = req.params;
 
       // Prevent removing the last owner
       if (req.userId === memberId) {

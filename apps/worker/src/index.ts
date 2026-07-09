@@ -16,7 +16,7 @@ import { InProcessScheduler } from '@openmig/scheduler';
 import { runShadowPass } from '@openmig/core';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, resolve } from 'path';
 import { buildDeps } from './build-deps';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -70,7 +70,9 @@ Environment Variables:
 
 /** Load mapping config from file. */
 function loadConfig(configPath: string): MappingConfig {
-  const absolutePath = join(__dirname, configPath);
+  // Resolve config path relative to current working directory, not __dirname
+  // This allows --config ./mapping.json to work from any directory
+  const absolutePath = resolve(process.cwd(), configPath);
   const text = readFileSync(absolutePath, 'utf-8');
   return parseMappingConfig(text);
 }

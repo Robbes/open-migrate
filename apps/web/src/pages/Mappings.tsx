@@ -4,9 +4,9 @@ import { useQuery } from '@tanstack/react-query';
 import { 
   FolderGit2, 
   Plus, 
-  MoreVertical,
+  MoreVertical as _MoreVertical,
   Play,
-  Pause,
+  Pause as _Pause,
   Trash2,
   Edit
 } from 'lucide-react';

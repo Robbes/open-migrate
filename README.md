@@ -39,13 +39,13 @@ pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration
 
 ### Running the Worker (Development)
 
-> **Note:** The worker CLI is implemented but the full dependency injection (ledger, IMAP source, JMAP target) is still being wired up. Integration tests verify the core logic works end-to-end.
+> **Note:** The worker CLI and dependency injection (ledger, IMAP source, JMAP target) are implemented in `apps/worker/src/build-deps.ts`. Integration tests verify the full stack works end-to-end.
 
 ```bash
 # Bring up the dev stack (Postgres + Stalwart + Nextcloud)
 docker compose -f deploy/compose/dev.yml up -d
 
-# Run worker (requires full dependency bundle - see workplan 0001 T7)
+# Run worker (uses buildDeps to wire ledger, IMAP, JMAP)
 node --loader ts-node/esm apps/worker/src/index.ts --config ./mapping.example.json --once
 ```
 
@@ -54,21 +54,21 @@ Create a mapping configuration file (see `mapping.example.json`):
 ```json
 {
   "tenantId": "your-tenant-id",
-  "mappingId": "your-mapping-id",
+  "mappingId": "inbox-mail",
   "source": {
-    "type": "imap",
+    "type": "imap-oauth2",
     "host": "outlook.office365.com",
     "port": 993,
-    "username": "user@domain.com",
-    "auth": { "type": "OAUTH2", "accessToken": "..." }
+    "user": "user@example.onmicrosoft.com",
+    "auth": { "kind": "xoauth2", "tokenFromEnv": "O365_ACCESS_TOKEN" }
   },
   "target": {
     "type": "jmap",
-    "url": "https://your-jmap-provider.com/jmap",
-    "username": "target@domain.com",
-    "password": "..."
+    "baseUrl": "https://your-jmap-provider.com/jmap",
+    "user": "target@domain.com",
+    "auth": { "kind": "basic", "passwordFromEnv": "TARGET_PASSWORD" }
   },
-  "schedule": "0 */6 * * *"
+  "schedule": { "cron": "*/15 * * * *" }
 }
 ```
 

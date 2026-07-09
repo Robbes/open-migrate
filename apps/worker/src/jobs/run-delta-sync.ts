@@ -24,7 +24,7 @@ export const runDeltaSync = schemaTask({
   id: 'run-delta-sync',
   description: 'Delta Sync',
   schema: DeltaSyncJobSchema,
-  run: async (payload: unknown, { ctx }) => {
+  run: async (payload: unknown, { ctx: _ctx }) => {
     // Type assertion since schemaTask validates the payload
     const typedPayload = payload as DeltaSyncJobPayload;
     
@@ -36,7 +36,7 @@ export const runDeltaSync = schemaTask({
 
     try {
       // Perform delta sync for each domain
-      const results = [];
+      const _results = [];
       
       if (typedPayload.domains) {
         for (const domain of typedPayload.domains) {

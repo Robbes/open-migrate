@@ -1,6 +1,9 @@
 # Unified CI — TypeScript/Node (pnpm). Mirrors the team convention:
 #   detect-changes -> docs-hygiene (parallel) -> lint -> unit-tests -> integration-tests
 # E2E is a SEPARATE, manual workflow (e2e.yml). Runs on the self-hosted (Spark) runner.
+#
+# SECURITY: Self-hosted runner is ONLY used for push events to main.
+# Pull requests from forks run on GitHub-hosted runners to prevent arbitrary code execution.
 name: CI
 
 on:
@@ -16,7 +19,7 @@ concurrency:
 jobs:
   detect-changes:
     name: detect-changes
-    runs-on: self-hosted
+    runs-on: ${{ github.event_name == 'push' && 'self-hosted' || 'ubuntu-latest' }}
     outputs:
       any_changed: ${{ steps.filter.outputs.any_changed }}
     steps:
@@ -42,7 +45,7 @@ jobs:
 
   docs-hygiene:
     name: docs-hygiene
-    runs-on: self-hosted
+    runs-on: ${{ github.event_name == 'push' && 'self-hosted' || 'ubuntu-latest' }}
     # Quality gate for all changes (incl. docs-only)
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
@@ -70,16 +73,35 @@ jobs:
           done
           [ "$missing" -gt 0 ] && { echo "Canonical docs are the source of truth; removing one requires an ADR."; exit 1; } || true
           echo "Canonical docs present."
+      - name: Check for case collisions in tracked files
+        run: |
+          set -e
+          echo "Checking for files that differ only by case..."
+          # Get all tracked files, normalize to lowercase, find duplicates
+          duplicates=$(git ls-files | tr '[:upper:]' '[:lower:]' | sort | uniq -d)
+          if [ -n "$duplicates" ]; then
+            echo "::error::Case collision detected! Files that differ only by case:"
+            echo "$duplicates" | while read line; do
+              echo "  - $line"
+              git ls-files | grep -i "^$line$" | while read f; do
+                echo "    -> $f"
+              done
+            done
+            echo "This breaks case-insensitive filesystems (Windows, macOS default)."
+            echo "Fix: rename or remove one of the conflicting files."
+            exit 1
+          fi
+          echo "No case collisions found."
 
   lint:
     name: lint
-    runs-on: self-hosted
+    runs-on: ${{ github.event_name == 'push' && 'self-hosted' || 'ubuntu-latest' }}
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.any_changed == 'true' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
-      - uses: pnpm/action-setup@v4 # TODO: pin to commit SHA per security policy
-      - uses: actions/setup-node@v4 # TODO: pin to commit SHA per security policy
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
           cache: pnpm
@@ -91,12 +113,12 @@ jobs:
 
   unit-tests:
     name: unit-tests
-    runs-on: self-hosted
+    runs-on: ${{ github.event_name == 'push' && 'self-hosted' || 'ubuntu-latest' }}
     needs: lint
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
-      - uses: pnpm/action-setup@v4 # TODO: pin to commit SHA
-      - uses: actions/setup-node@v4 # TODO: pin to commit SHA
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
           cache: pnpm
@@ -115,12 +137,12 @@ jobs:
 
   integration-tests:
     name: integration-tests
-    runs-on: self-hosted
+    runs-on: ${{ github.event_name == 'push' && 'self-hosted' || 'ubuntu-latest' }}
     needs: unit-tests
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
-      - uses: pnpm/action-setup@v4 # TODO: pin to commit SHA
-      - uses: actions/setup-node@v4 # TODO: pin to commit SHA
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
           cache: pnpm

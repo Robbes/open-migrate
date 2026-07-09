@@ -418,7 +418,7 @@ docker stats
 docker compose restart
 
 # Increase container memory limit
-# Update docker-compose.yml
+# Update deploy/compose/managed.yml
 mem_limit: 4g
 ```
 

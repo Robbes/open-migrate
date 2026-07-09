@@ -30,7 +30,7 @@ export const runFullSync = schemaTask({
   id: 'run-full-sync',
   description: 'Full Sync',
   schema: FullSyncJobSchema,
-  run: async (payload: unknown, { ctx }) => {
+  run: async (payload: unknown, { ctx: _ctx }) => {
     // Type assertion since schemaTask validates the payload
     const typedPayload = payload as FullSyncJobPayload;
     

@@ -1,9 +1,15 @@
-version: '3.8'
-
+# Managed deployment stack with Trigger.dev orchestration.
+# Postgres version aligned with deploy/compose/dev.yml (Postgres 18).
+#
+# This stack includes:
+# - PostgreSQL (ledger database)
+# - Trigger.dev (managed orchestration platform)
+# - Open Migration API & Worker
+# - Web application
 services:
   # PostgreSQL Database
   postgres:
-    image: postgres:15-alpine
+    image: postgres:18-alpine
     container_name: open-migrate-db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-openmigrate}
@@ -24,7 +30,7 @@ services:
 
   # Trigger.dev Backend
   trigger-db:
-    image: postgres:15-alpine
+    image: postgres:18-alpine
     container_name: trigger-db
     environment:
       POSTGRES_USER: trigger
@@ -150,8 +156,8 @@ services:
       dockerfile: apps/web/Dockerfile
     container_name: open-migrate-web
     environment:
-      VITE_API_URL: ${VITE_API_URL:-http://localhost:3001/api}
-      VITE_AUTH_URL: ${VITE_AUTH_URL:-http://localhost:3001/auth}
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:3123/api}
+      VITE_AUTH_URL: ${VITE_AUTH_URL:-http://localhost:3123/auth}
     ports:
       - "${WEB_PORT:-3123}:80"
     depends_on:

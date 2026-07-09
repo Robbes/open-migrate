@@ -12,20 +12,20 @@ import {
 } from 'lucide-react';
 import { apiClient } from '../services/api.js';
 
-interface SystemHealth {
+interface _SystemHealth {
   status: 'healthy' | 'degraded' | 'critical';
   uptime: string;
   lastRestart: string;
 }
 
-interface TenantStats {
+interface _TenantStats {
   total: number;
   active: number;
   inactive: number;
   newThisMonth: number;
 }
 
-interface MigrationStats {
+interface _MigrationStats {
   total: number;
   running: number;
   completed: number;
@@ -33,14 +33,14 @@ interface MigrationStats {
   successRate: number;
 }
 
-interface ResourceUsage {
+interface _ResourceUsage {
   cpu: number;
   memory: number;
   storage: number;
   databaseConnections: number;
 }
 
-interface Revenue {
+interface _Revenue {
   total: number;
   thisMonth: number;
   lastMonth: number;

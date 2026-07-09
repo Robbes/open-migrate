@@ -8,7 +8,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { getMollieService } from '../../services/mollie/index';
-import { billingApi } from '../../services/billing-service';
+import { billingApi as _billingApi } from '../../services/billing-service';
 
 const router = Router();
 
