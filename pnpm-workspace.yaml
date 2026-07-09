@@ -14,7 +14,9 @@ allowBuilds:
   esbuild: true
   libxmljs2: true
   protobufjs: true
+  sharp: set this to true or false
   ssh2: true
+  unrs-resolver: set this to true or false
 overrides:
   semver: ^7.5.2
   ws: ^8.21.0
