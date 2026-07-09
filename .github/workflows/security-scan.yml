@@ -22,7 +22,7 @@ permissions:
 jobs:
   security-scan:
     name: security-scan
-    runs-on: self-hosted
+    runs-on: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'self-hosted' || 'ubuntu-latest' }}
     permissions:
       contents: read
       security-events: write
@@ -48,7 +48,7 @@ jobs:
         run: pnpm audit --audit-level=high || echo "::warning::pnpm audit reported advisories"
 
       - name: Trivy filesystem/dependency scan (SARIF)
-        uses: aquasecurity/trivy-action@master # TODO: pin to commit SHA
+        uses: aquasecurity/trivy-action@6e747556c299b98f991b2f10f9cf8a79d7d3b0c4 # v0.14.0
         with:
           scan-type: fs
           format: sarif
@@ -57,16 +57,16 @@ jobs:
         continue-on-error: true
 
       - name: Upload SARIF to code scanning
-        if: always()
+        if: always() && hashFiles('trivy.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3 # TODO: pin to commit SHA
         with:
           sarif_file: trivy.sarif
 
       - name: Generate CycloneDX SBOM
-        run: npx -y @cyclonedx/cyclonedx-npm --output-format JSON --output-file bom.json --ignore-npm-errors
+        run: npx -y @cyclonedx/cyclonedx-npm --output-format JSON --output-file bom.json --ignore-npm-errors || echo "::warning::CycloneDX SBOM generation failed"
 
       - name: Upload SBOM artifact
-        if: always()
+        if: always() && hashFiles('bom.json') != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.0
         with:
           name: sbom-${{ github.sha }}
