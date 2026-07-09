@@ -49,7 +49,7 @@ export interface UnifiedSyncDeps {
 }
 
 export async function runUnifiedSync(
-  deps: UnifiedSyncDeps
+  _deps: UnifiedSyncDeps
 ): Promise<UnifiedSyncResult> {
   // Stub: return empty stats
   return {

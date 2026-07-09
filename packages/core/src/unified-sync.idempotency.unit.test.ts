@@ -30,7 +30,7 @@ describe('Unified Sync Idempotency - Stub', () => {
 
     const result = await runUnifiedSync({
       config,
-      ledger: {} as any,
+      ledger: {} as import('@openmig/shared').Ledger,
       cursors: undefined,
     });
 
