@@ -22,7 +22,7 @@ const Billing: React.FC = () => {
     );
   }
 
-  const formatCurrency = (cents: number) => {
+  const _formatCurrency = (cents: number) => {
     return `€${(cents / 100).toFixed(2)}`;
   };
 

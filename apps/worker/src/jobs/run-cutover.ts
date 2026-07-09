@@ -32,7 +32,7 @@ export const runCutover = schemaTask({
   id: 'run-cutover',
   description: 'Cutover',
   schema: CutoverJobSchema,
-  run: async (payload: CutoverJobPayload, { ctx }) => {
+  run: async (payload: CutoverJobPayload, { ctx: _ctx }) => {
     console.log('Starting cutover process', {
       tenantId: payload.tenantId,
       mappingId: payload.mappingId,

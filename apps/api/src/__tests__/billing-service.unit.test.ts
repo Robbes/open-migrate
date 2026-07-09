@@ -1,3 +1,4 @@
+import { describe, it, expect } from 'vitest';
 import type { UsageMetrics } from '../services/billing-service';
 import { calculateCost } from '../services/billing-service';
 
@@ -17,8 +18,8 @@ describe('Billing Service', () => {
       expect(cost.egress).toBe(0);
       expect(cost.compute).toBe(0);
       expect(cost.subtotal).toBe(999); // Base fee in cents
-      expect(cost.tax).toBe(209); // 21% of 999
-      expect(cost.total).toBe(1208); // subtotal + tax
+      expect(cost.tax).toBe(210); // 21% of 999 = 209.79, rounded to 210
+      expect(cost.total).toBe(1209); // subtotal + tax
     });
 
     it('calculates cost with storage', () => {
@@ -90,7 +91,8 @@ describe('Billing Service', () => {
       expect(cost.egress).toBe(0);
       expect(cost.compute).toBe(0);
       expect(cost.subtotal).toBe(999);
-      expect(cost.total).toBe(1208);
+      expect(cost.tax).toBe(210); // 21% of 999 = 209.79, rounded to 210
+      expect(cost.total).toBe(1209); // 999 + 210
     });
   });
 });

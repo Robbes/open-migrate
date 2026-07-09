@@ -64,7 +64,7 @@ const RETRY_DELAY_MS = 2000;
 /**
  * Box interface for IMAP mailbox (unused, kept for reference)
  */
-interface ImMapBox {
+interface _ImMapBox {
   name: string;
   readOnly?: boolean;
   newKeywords: boolean;

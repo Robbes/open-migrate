@@ -290,10 +290,10 @@ docker compose -f deploy/compose/trigger.yml up -d
 
 ## References
 
-- [Workplan 0005](.agents_tmp/PLAN.md)
 - [RLS Guide](docs/rls-guide.md)
-- [ADR-0004: Orchestration Strategy](docs/adr/0004-orchestration-strategy.md)
-- [ADR-0010: Persistence](docs/adr/0010-persistence.md)
+- [ADR-0004: Orchestration Strategy](docs/adr/0004-orchestration-triggerdev-and-inprocess.md)
+- [ADR-0005: Idempotency & Ledger](docs/adr/0005-idempotency-ledger-nondestructive.md)
+- [ADR-0010: Persistence](docs/adr/0010-persistence-postgres-sqlite.md)
 - [Trigger.dev Documentation](https://trigger.dev/docs)
 - [PostgreSQL RLS](https://www.postgresql.org/docs/current/sql-altertable.html#SQL-ALTERTABLE-RLS)
 

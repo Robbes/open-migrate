@@ -28,34 +28,38 @@ The implementation follows the established pattern from Workplans 0001 and 0002:
                         └─────────────────┘
 ```
 
-## Completed Tasks
+## Completed Tasks (Stubs & Interfaces Only)
+
+> ⚠️ **Reality Check**: All items below are **data models, interfaces, and stubs only**. No
+> working source connectors or end-to-end sync exists. The `runUnifiedSync` function in
+> `packages/core/src/unified-sync.ts` is explicitly a stub that returns zeros for all
+> synchronization metrics. The ledger schema lacks item-type support for
+> calendar/contact/file entities.
 
 ### 1. Data Models (packages/shared/src/)
 
 #### Calendar Models (`calendar.ts`)
-- `CalendarEvent`: Complete iCalendar event with UID, summary, start/end, recurrence, attendees, reminders
-- `CalendarFolder`: Calendar collection metadata
-- `RawCalendarEvent`: Event with raw iCalendar data
-- Support for events, todos, and journals
-- RFC 5545 compliance
+- `CalendarEvent`: Type definition for iCalendar event with UID, summary, start/end, recurrence, attendees, reminders
+- `CalendarFolder`: Calendar collection metadata type
+- `RawCalendarEvent`: Event with raw iCalendar data type
+- **Note**: These are TypeScript types only; no source connector reads/calendars yet
 
 #### Contact Models (`contact.ts`)
-- `Contact`: Complete vCard with UID, name, phones, emails, addresses, organization, photo
-- `ContactFolder`: Address book collection metadata  
-- `RawContact`: Contact with raw vCard data
-- Support for vCard 3.0 and 4.0
-- Full RFC 6350 compliance
+- `Contact`: Type definition for vCard with UID, name, phones, emails, addresses, organization, photo
+- `ContactFolder`: Address book collection metadata type
+- `RawContact`: Contact with raw vCard data type
+- **Note**: These are TypeScript types only; no source connector reads contacts yet
 
 #### File Models (`file.ts`)
-- `FileItem`: File/folder with path, size, content hash, timestamps, permissions
-- `FileFolder`: File collection metadata with quota info
-- `RawFileItem`: File with raw content bytes
-- Support for directories and files
-- WebDAV property support
+- `FileItem`: Type definition for file/folder with path, size, content hash, timestamps, permissions
+- `FileFolder`: File collection metadata type with quota info
+- `RawFileItem`: File with raw content bytes type
+- **Note**: These are TypeScript types only; no source connector reads files yet
 
 ### 2. Hash Functions (packages/shared/src/hash.ts)
 
-Extended the hash module with type-specific natural key and content hashing:
+Type-specific natural key and content hashing **functions exist** but are not exercised by
+working sync flows:
 
 ```typescript
 // Calendar - UID-based, case-insensitive (RFC 5545)
@@ -76,24 +80,24 @@ fileContentHash(content: Uint8Array): string
 
 ### 3. Target Writer Interfaces (packages/shared/src/ports.ts)
 
-Added three new target writer interfaces:
+Interface definitions only (no implementations):
 
 ```typescript
-// CalDAV target writer
+// CalDAV target writer (interface only)
 interface CalendarTargetWriter {
   ensureCalendar(folder: CalendarFolder): Promise<string>;
   upsertCalendarEvent(calendarId: string, raw: RawCalendarEvent): Promise<UpsertResult>;
   findCalendarByNaturalKey(calendarId: string, naturalKey: string): Promise<string | undefined>;
 }
 
-// CardDAV target writer
+// CardDAV target writer (interface only)
 interface ContactTargetWriter {
   ensureContactFolder(folder: ContactFolder): Promise<string>;
   upsertContact(folderId: string, raw: RawContact): Promise<UpsertResult>;
   findContactByNaturalKey(folderId: string, naturalKey: string): Promise<string | undefined>;
 }
 
-// WebDAV target writer
+// WebDAV target writer (interface only)
 interface FileTargetWriter {
   ensureDirectory(folder: FileFolder): Promise<string>;
   upsertFile(parentId: string, raw: RawFileItem): Promise<UpsertResult>;
@@ -103,37 +107,25 @@ interface FileTargetWriter {
 
 ### 4. Sync Engines (packages/engines/src/)
 
+> ⚠️ **Status**: Shell-out stubs exist but are not integrated into the worker or tested end-to-end.
+
 #### CalDAV Sync Engine (`caldav-sync.ts`)
-- `CalDAVSyncConfig`: Configuration for CalDAV sync
-- `runCalDAVSync()`: Executes vdirsyncer for CalDAV synchronization
-- `cleanupCalDAVConfig()`: Cleans up temporary config files
-- Features:
-  - Automatic config generation
-  - Output parsing for statistics
-  - Error handling and reporting
-  - Dry run support
+- `CalDAVSyncConfig`: Type for CalDAV sync configuration
+- `runCalDAVSync()`: Stub that would execute vdirsyncer (not wired to worker/API)
+- `cleanupCalDAVConfig()`: Stub for cleanup
+- **Status**: Not tested, not integrated
 
 #### CardDAV Sync Engine (`carddav-sync.ts`)
-- `CardDAVSyncConfig`: Configuration for CardDAV sync
-- `runCardDAVSync()`: Executes vdirsyncer for CardDAV synchronization
-- `cleanupCardDAVConfig()`: Cleans up temporary config files
-- Features:
-  - Automatic config generation
-  - Output parsing for statistics
-  - Error handling and reporting
-  - Dry run support
+- `CardDAVSyncConfig`: Type for CardDAV sync configuration
+- `runCardDAVSync()`: Stub that would execute vdirsyncer (not wired to worker/API)
+- `cleanupCardDAVConfig()`: Stub for cleanup
+- **Status**: Not tested, not integrated
 
 #### WebDAV Sync Engine (`webdav-sync.ts`)
-- `WebDAVSyncConfig`: Configuration for WebDAV sync
-- `runWebDAVSync()`: Executes rclone for WebDAV synchronization
-- `cleanupWebDAVConfig()`: Cleans up temporary config files
-- Features:
-  - Automatic rclone config generation
-  - Support for copy, sync, and move modes
-  - Include/exclude pattern filtering
-  - Size-based filtering (min/max)
-  - Output parsing for statistics
-  - Bytes transferred tracking
+- `WebDAVSyncConfig`: Type for WebDAV sync configuration
+- `runWebDAVSync()`: Stub that would execute rclone (not wired to worker/API)
+- `cleanupWebDAVConfig()`: Stub for cleanup
+- **Status**: Not tested, not integrated
 
 ## Pending Tasks
 

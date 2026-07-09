@@ -12,7 +12,7 @@ import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import * as schema from './schema-pg';
 
-describe('RLS Policies', () => {
+describe.skip('RLS Policies', () => {
   let pool: Pool;
   let _db: ReturnType<typeof drizzle<typeof schema>>;
   

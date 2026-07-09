@@ -4,14 +4,13 @@
 > history, do not execute from this file. Verified state at supersession: state machine,
 > verification scaffolding, DNS types and rollback orchestrator exist **unit-tested against
 > fakes only**; nothing is persisted, wired to the worker/API, or performs real DNS I/O
-> (Phase 4 never started). Note the header/body status contradictions below were part of the
-> reason for supersession (see workplan 0006 item C).
+> (Phase 4 never started).
 
-**Status**: Phase 1 & 2 - COMPLETED, Phase 3 - IN_PROGRESS  
-**Phase 1 Status**: ✅ COMPLETED  
-**Phase 2 Status**: ✅ COMPLETED  
-**Phase 3 Status**: IN_PROGRESS  
-**Phase 3 Detail**: Rollback orchestrator implemented, documentation created
+**Status**: SUPERSEDED (was: Phase 1 & 2 COMPLETED, Phase 3 IN_PROGRESS)
+
+> **Reality check**: All components listed below are **unit-tested against fakes only**. No
+> integration with the worker/API exists. No real DNS I/O is performed. Phase 4 (integration)
+> was never started. See workplan 0009 for the current state.
 
 ## Overview
 
