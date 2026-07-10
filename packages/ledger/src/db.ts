@@ -18,7 +18,7 @@ export type SqliteDatabase = ReturnType<typeof drizzleSqlite<typeof schemaSqlite
  * Uses the `postgres` driver (postgres-js) which is compatible with Drizzle.
  * Returns an object with the db and a close method.
  */
-export function createPgDb(connectionString: string): PgDatabase & { $client: postgres.Sql<object>; close: () => Promise<void> } {
+export function createPgDb(connectionString: string): PgDatabase & { $client: postgres.Sql<Record<string, unknown>>; close: () => Promise<void> } {
   const client = postgres(connectionString);
   const db = drizzlePg(client, { schema: schemaPg });
   return Object.assign(db, {

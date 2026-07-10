@@ -11,7 +11,7 @@
  * - Case-insensitive UID handling (UIDs are lowercased for comparison)
  */
 
-import type { CalendarSource, CalendarFolder, SyncCursor } from '@openmig/shared';
+import type { CalendarSource, CalendarFolder, SyncCursor, RawCalendarEvent } from '@openmig/shared';
 import type { CalDAVSourceConfig, CalDAVSyncToken, CalDAVCalendarObject } from './caldav-source.types';
 import type { HttpClient, HttpRequestOptions, HttpResponse } from './dav-http.types';
 

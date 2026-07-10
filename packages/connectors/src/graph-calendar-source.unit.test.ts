@@ -10,7 +10,7 @@
  * - Cancelled occurrence tracking (drift log, not delete)
  */
 
-import { describe, it, expect, _vi, _beforeEach, _afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { GraphCalendarSource } from './graph-calendar-source';
 import type { GraphCalendarSourceConfig as _GraphCalendarSourceConfig } from './graph-calendar-source.types';
 import type { HttpClient, HttpResponse } from './dav-http.types';
