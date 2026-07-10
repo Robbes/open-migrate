@@ -9,7 +9,7 @@
  * - Throttle event counting
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   ThrottleLimiter,
   ThrottleConfig,
