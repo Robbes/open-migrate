@@ -12,3 +12,4 @@ export * from './unified-sync';
 export * from './generic-sync';
 export * from './dns-manager';
 export * from './dns-verify-only';
+export * from './dns-provider-desec';
