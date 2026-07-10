@@ -13,7 +13,7 @@
 
 import { describe, it, expect, _vi, _beforeEach, _afterEach } from 'vitest';
 import { GraphContactsSource } from './graph-contacts-source';
-import type { GraphContactsSourceConfig } from './graph-contacts-source.types';
+import type { GraphContactsSourceConfig as _GraphContactsSourceConfig } from './graph-contacts-source.types';
 import type { HttpClient, HttpResponse } from './dav-http.types';
 import type { TokenProvider, OAuth2Token } from '@openmig/shared';
 

@@ -15,7 +15,7 @@
  */
 
 import type { ContactSource, ContactFolder, RawContact, SyncCursor } from '@openmig/shared';
-import type { CardDAVSourceConfig, CardDAVSyncToken, CardDAVContactObject, CardDAVHomeSet, CardDAVCollection } from './carddav-source.types';
+import type { CardDAVSourceConfig, CardDAVSyncToken, CardDAVContactObject, CardDAVHomeSet as _CardDAVHomeSet, CardDAVCollection as _CardDAVCollection } from './carddav-source.types';
 import type { HttpClient, HttpRequestOptions, HttpResponse } from './dav-http.types';
 
 /**

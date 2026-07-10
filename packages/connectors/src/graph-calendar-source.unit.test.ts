@@ -12,7 +12,7 @@
 
 import { describe, it, expect, _vi, _beforeEach, _afterEach } from 'vitest';
 import { GraphCalendarSource } from './graph-calendar-source';
-import type { GraphCalendarSourceConfig } from './graph-calendar-source.types';
+import type { GraphCalendarSourceConfig as _GraphCalendarSourceConfig } from './graph-calendar-source.types';
 import type { HttpClient, HttpResponse } from './dav-http.types';
 import type { TokenProvider, OAuth2Token } from '@openmig/shared';
 

@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { CarddavSource } from './carddav-source';
 import type { CardDAVSourceConfig } from './carddav-source.types';
-import type { RawContact } from '@openmig/shared';
+import type { RawContact as _RawContact } from '@openmig/shared';
 
 // Stalwart CardDAV configuration from Testcontainers
 const STALWART_CALENDAR_URL = process.env.STALWART_JMAP_URL;

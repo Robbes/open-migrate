@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { CalDAVSource } from './caldav-source';
 import type { CalDAVSourceConfig } from './caldav-source.types';
-import type { RawCalendarEvent } from '@openmig/shared';
+import type { RawCalendarEvent as _RawCalendarEvent } from '@openmig/shared';
 
 // Stalwart CalDAV configuration from Testcontainers
 const STALWART_CALENDAR_URL = process.env.STALWART_JMAP_URL;
