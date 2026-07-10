@@ -301,7 +301,7 @@ export class GraphDriveSource implements FileSource {
         });
 
         // Check for rate limited response and retry
-        if (response.status === 429 || response.status === 503) {
+        if ((response.status === 429 || response.status === 503) && this.throttleLimiter) {
           const retryAfter = response.headers.get('retry-after');
           const waitTime = this.throttleLimiter.handleRateLimited(response.status, retryAfter || undefined);
           await new Promise(resolve => setTimeout(resolve, waitTime));
