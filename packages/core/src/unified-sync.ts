@@ -10,31 +10,22 @@
  * - Generic sync engine for all domains
  * - Aggregated statistics and error handling
  * - Fail-fast on domain errors
+ * 
+ * Architecture: Connectors are injected via UnifiedSyncDeps following ports & adapters.
+ * This keeps the core stack-independent - no direct dependency on @openmig/connectors.
  */
 
-import type { TenantId, MappingId, Ledger, CursorStore, SyncCursor } from '@openmig/shared';
-import { runGenericSync, type GenericSyncResult, type GenericSource, type GenericTargetWriter, type GenericFolder, type GenericItem, type GenericRawItem } from './generic-sync';
+import type { TenantId, MappingId, Ledger, CursorStore, SyncCursor, GenericSource, GenericTargetWriter, GenericFolder, GenericItem, GenericRawItem } from '@openmig/shared';
+import { runGenericSync, type GenericSyncResult } from './generic-sync';
 
-// CalDAV imports
-import { CalDAVSource } from '@openmig/connectors';
-import type { CalDAVSourceConfig } from '@openmig/connectors';
-import type { RawCalendarEvent } from '@openmig/shared';
-import { CalDAVTargetWriter } from '@openmig/engines';
+// Type-only imports for config interfaces
+import type { CalDAVSourceConfig } from '@openmig/connectors/caldav-source';
+import type { CardDAVSourceConfig } from '@openmig/connectors/carddav-source';
+import type { WebDAVSourceConfig } from '@openmig/connectors/webdav-source';
 import type { CalDAVTargetConfig } from '@openmig/engines';
-
-// CardDAV imports
-import { CarddavSource } from '@openmig/connectors';
-import type { CardDAVSourceConfig } from '@openmig/connectors';
-import type { RawContact } from '@openmig/shared';
-import { CardDAVTargetWriter } from '@openmig/engines';
 import type { CardDAVTargetConfig } from '@openmig/engines';
-
-// WebDAV imports
-import { WebdavFileSource } from '@openmig/connectors';
-import type { WebDAVSourceConfig } from '@openmig/connectors';
-import type { RawFileItem } from '@openmig/shared';
-import { WebDAVTargetWriter } from '@openmig/engines';
 import type { WebDAVTargetConfig } from '@openmig/engines';
+import type { RawCalendarEvent, RawContact, RawFileItem } from '@openmig/shared';
 
 export interface UnifiedSyncConfig {
   tenantId: TenantId;
@@ -76,6 +67,14 @@ export interface UnifiedSyncDeps {
   config: UnifiedSyncConfig;
   ledger: Ledger;
   cursors?: CursorStore;
+  // Injected connector instances (ports & adapters pattern)
+  // Core doesn't construct connectors - they're provided by the caller
+  caldavSource?: GenericSource<CalDAVFolder, CalDAVItem>;
+  caldavWriter?: GenericTargetWriter<CalDAVFolder, CalDAVItem>;
+  carddavSource?: GenericSource<CardDAVFolder, CardDAVItem>;
+  carddavWriter?: GenericTargetWriter<CardDAVFolder, CardDAVItem>;
+  webdavSource?: GenericSource<WebDAVFolder, WebDAVItem>;
+  webdavWriter?: GenericTargetWriter<WebDAVFolder, WebDAVItem>;
 }
 
 /**
@@ -448,8 +447,8 @@ function convertToTypeSyncStats(result: GenericSyncResult, durationSeconds: numb
  * Run unified sync across all enabled domains.
  * 
  * For each enabled domain:
- * 1. Create the appropriate source connector
- * 2. Create the appropriate target writer
+ * 1. Use the injected source connector (or create from config if not injected)
+ * 2. Use the injected target writer (or create from config if not injected)
  * 3. Call runGenericSync with the source, writer, ledger, and cursors
  * 4. Aggregate results into UnifiedSyncResult
  * 
@@ -477,7 +476,7 @@ export async function runUnifiedSync(
 
   // Calendar domain
   if (config.calendar?.enabled) {
-    const caldavSource = config.caldavSource;
+    const caldavSource = deps.caldavSource;
     const caldavTarget = config.caldavTarget;
     if (!caldavSource || !caldavTarget) {
       throw new Error('CalDAV source and target configuration required for calendar sync');
@@ -487,7 +486,6 @@ export async function runUnifiedSync(
       (async () => {
         const domainStart = Date.now();
         try {
-          const source = new CalDAVSourceAdapter(caldavSource);
           const writer = new CalDAVTargetWriterAdapter(caldavTarget, {
             ledger,
             tenantId: config.tenantId,
@@ -497,7 +495,7 @@ export async function runUnifiedSync(
           const syncResult = await runGenericSync({
             tenantId: config.tenantId,
             mappingId: config.mappingId,
-            source,
+            source: caldavSource,
             target: writer,
             ledger,
             cursors,
@@ -520,7 +518,7 @@ export async function runUnifiedSync(
 
   // Contacts domain
   if (config.contacts?.enabled) {
-    const carddavSource = config.carddavSource;
+    const carddavSource = deps.carddavSource;
     const carddavTarget = config.carddavTarget;
     if (!carddavSource || !carddavTarget) {
       throw new Error('CardDAV source and target configuration required for contacts sync');
@@ -530,7 +528,6 @@ export async function runUnifiedSync(
       (async () => {
         const domainStart = Date.now();
         try {
-          const source = new CarddavSourceAdapter(carddavSource);
           const writer = new CardDAVTargetWriterAdapter(carddavTarget, {
             ledger,
             tenantId: config.tenantId,
@@ -540,7 +537,7 @@ export async function runUnifiedSync(
           const syncResult = await runGenericSync({
             tenantId: config.tenantId,
             mappingId: config.mappingId,
-            source,
+            source: carddavSource,
             target: writer,
             ledger,
             cursors,
@@ -563,7 +560,7 @@ export async function runUnifiedSync(
 
   // Files domain
   if (config.files?.enabled) {
-    const webdavSource = config.webdavSource;
+    const webdavSource = deps.webdavSource;
     const webdavTarget = config.webdavTarget;
     if (!webdavSource || !webdavTarget) {
       throw new Error('WebDAV source and target configuration required for files sync');
@@ -573,7 +570,6 @@ export async function runUnifiedSync(
       (async () => {
         const domainStart = Date.now();
         try {
-          const source = new WebdavFileSourceAdapter(webdavSource);
           const writer = new WebDAVTargetWriterAdapter(webdavTarget, {
             ledger,
             tenantId: config.tenantId,
@@ -583,7 +579,7 @@ export async function runUnifiedSync(
           const syncResult = await runGenericSync({
             tenantId: config.tenantId,
             mappingId: config.mappingId,
-            source,
+            source: webdavSource,
             target: writer,
             ledger,
             cursors,
