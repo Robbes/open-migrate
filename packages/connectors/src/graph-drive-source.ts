@@ -16,7 +16,7 @@
 
 import type { FileSource, FileFolder, RawFileItem, SyncCursor, ThrottleLimiter } from '@openmig/shared';
 import type { GraphDriveSourceConfig, GraphDriveItem, GraphDriveDeltaResponse, GraphDriveDeltaCursor, ParsedPath, NormalizePathOptions } from './graph-drive-source.types';
-import type { HttpClient, HttpRequestOptions, HttpResponse } from './dav-http.types';
+import type { HttpClient as _HttpClient, HttpRequestOptions, HttpResponse } from './dav-http.types';
 
 /**
  * Graph Drive source connector implementation.
