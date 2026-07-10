@@ -80,6 +80,12 @@ export interface FileSource {
   ): Promise<{ items: ReadonlyArray<RawFileItem>; nextCursor: SyncCursor }>;
 }
 
+/**
+ * Union type for all source connector types.
+ * Used for factory functions that can return different source types.
+ */
+export type Source = SourceConnector | CalendarSource | ContactSource | FileSource;
+
 /** Result of upserting one message into a target. */
 export interface UpsertResult {
   /** Target-side id (e.g. a JMAP Email id). */
@@ -294,3 +300,89 @@ export interface ReindexResult {
  * from the target's existing items so a fresh install does not re-copy what is already there.
  */
 export type RunReindex = (deps: ReindexDeps) => Promise<ReindexResult>;
+
+/**
+ * OAuth2 token response with expiry information.
+ */
+export interface OAuth2Token {
+  /** Access token string. */
+  readonly accessToken: string;
+  /** Token type (typically "Bearer"). */
+  readonly tokenType: string;
+  /** Unix timestamp (seconds since epoch) when the token expires. */
+  readonly expiresAt: number;
+  /** Refresh token, if available (for delegated flows). */
+  readonly refreshToken?: string;
+  /** Space-separated list of granted scopes. */
+  readonly scope?: string;
+}
+
+/**
+ * Configuration for TokenProvider.
+ */
+export interface TokenProviderConfig {
+  /** OAuth2 token endpoint URL. */
+  readonly tokenEndpoint: string;
+  /** OAuth2 client ID. */
+  readonly clientId: string;
+  /** OAuth2 client secret (for client-credentials flow). */
+  readonly clientSecret?: string;
+  /** Client certificate key (for certificate-based auth). */
+  readonly clientCertificateKey?: string;
+  /** Client certificate thumbprint (for certificate-based auth). */
+  readonly clientCertificateThumbprint?: string;
+  /** OAuth2 tenant ID (for Azure AD). */
+  readonly tenantId?: string;
+  /** Resource/scopes for the token request. */
+  readonly scope: string;
+  /** Refresh token (for refresh-token flow). */
+  readonly refreshToken?: string;
+  /** Username (for refresh-token flow). */
+  readonly username?: string;
+  /** Password (for refresh-token flow). */
+  readonly password?: string;
+}
+
+/**
+ * Token status information.
+ */
+export interface TokenStatus {
+  /** Whether the token is currently valid. */
+  readonly isValid: boolean;
+  /** Time until expiry in seconds (negative if already expired). */
+  readonly timeUntilExpiry: number;
+  /** Token type. */
+  readonly tokenType?: string;
+  /** Scopes granted. */
+  readonly scope?: string;
+}
+
+/**
+ * Token provider interface for managing OAuth2 tokens.
+ * Provides token caching, automatic refresh, and single-flight refresh for concurrent callers.
+ */
+export interface TokenProvider {
+  /**
+   * Get the current access token, refreshing if necessary.
+   * Returns a token that is guaranteed to be valid (not expired) at the time of return.
+   * Concurrent callers will share a single refresh request (single-flight).
+   */
+  getToken(): Promise<OAuth2Token>;
+
+  /**
+   * Force a token refresh, bypassing the cache.
+   * Returns the newly refreshed token.
+   */
+  refresh(): Promise<OAuth2Token>;
+
+  /**
+   * Check if the current token is valid (not expired).
+   * Does not trigger a refresh.
+   */
+  isTokenValid(): boolean;
+
+  /**
+   * Get detailed token status information.
+   */
+  getTokenStatus(): TokenStatus;
+}

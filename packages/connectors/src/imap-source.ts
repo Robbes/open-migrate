@@ -4,7 +4,7 @@
 // T2 from workplan 0001-first-slice-jmap-mail.
 
 import imap, { ImapSimple } from "imap-simple";
-import type { SourceConnector, SyncCursor } from "@openmig/shared";
+import type { SourceConnector, SyncCursor, TokenProvider } from "@openmig/shared";
 import type {
   MailFolder,
   MailItem,
@@ -30,6 +30,13 @@ export interface ImapSourceConfig {
     accessToken?: string; // For XOAUTH2
   };
   authType?: "LOGIN" | "XOAUTH2";
+}
+
+/**
+ * Extended configuration for IMAP connection with TokenProvider support.
+ */
+export interface ImapSourceConfigWithTokenProvider extends ImapSourceConfig {
+  tokenProvider?: TokenProvider;
 }
 
 /**
@@ -90,23 +97,33 @@ function mapImapSpecialUse(attributes: string[]): SpecialUse {
  * IMAP source connector implementation.
  */
 export class ImapSource implements SourceConnector {
-  private readonly config: ImapSourceConfig;
+  private readonly config: ImapSourceConfigWithTokenProvider;
+  private readonly tokenProvider?: TokenProvider;
 
-  constructor(config: ImapSourceConfig) {
+  constructor(config: ImapSourceConfigWithTokenProvider) {
     this.config = config;
+    this.tokenProvider = config.tokenProvider;
   }
 
   /**
    * Connect to the IMAP server and return a connection.
    */
   async connect(): Promise<ImapSimple> {
+    // Get access token from TokenProvider if available
+    let accessToken: string | undefined = this.config.auth.accessToken;
+    
+    if (this.tokenProvider && this.config.authType === "XOAUTH2") {
+      const token = await this.tokenProvider.getToken();
+      accessToken = token.accessToken;
+    }
+
     const connectionConfig: imap.ImapSimpleOptions = {
       imap: {
         user: this.config.auth.user,
         password: this.config.auth.password ?? "",
         xoauth2:
           this.config.authType === "XOAUTH2"
-            ? this.config.auth.accessToken
+            ? accessToken
             : undefined,
         host: this.config.host,
         port: this.config.port,
@@ -167,6 +184,40 @@ export class ImapSource implements SourceConnector {
       }
 
       return folders;
+    } catch (error) {
+      // Check if this is an authentication error and we have a token provider
+      if (this.isAuthError(error) && this.tokenProvider) {
+        // Force refresh the token and retry once
+        await this.tokenProvider.refresh();
+        const conn = await this.connect();
+        try {
+          type MailboxInfo = { attributes?: string[] };
+          const list = await (
+            conn.imap.getBoxes as () => Promise<Record<string, MailboxInfo>>
+          )();
+
+          if (!list) {
+            throw new Error(
+              'IMAP getBoxes() returned undefined after token refresh. ' +
+              'This indicates a server-side issue or missing account configuration.'
+            );
+          }
+
+          const folders: MailFolder[] = [];
+          for (const [path, mailbox] of Object.entries(list)) {
+            const specialUse = mapImapSpecialUse(mailbox.attributes || []);
+            folders.push({
+              path,
+              name: path.split("/").pop(),
+              specialUse,
+            });
+          }
+          return folders;
+        } finally {
+          conn.end();
+        }
+      }
+      throw error;
     } finally {
       conn.end();
     }
@@ -182,7 +233,34 @@ export class ImapSource implements SourceConnector {
   ): Promise<{ items: ReadonlyArray<MailItem>; nextCursor: SyncCursor }> {
     const conn = await this.connect();
     try {
-      await conn.openBox(folder.path);
+      return await this.listSinceInternal(conn, folder, cursor);
+    } catch (error) {
+      // Check if this is an authentication error and we have a token provider
+      if (this.isAuthError(error) && this.tokenProvider) {
+        // Force refresh the token and retry once
+        await this.tokenProvider.refresh();
+        const conn = await this.connect();
+        try {
+          return await this.listSinceInternal(conn, folder, cursor);
+        } finally {
+          conn.end();
+        }
+      }
+      throw error;
+    } finally {
+      conn.end();
+    }
+  }
+
+  /**
+   * Internal method to list messages (without reconnection logic).
+   */
+  private async listSinceInternal(
+    conn: ImapSimple,
+    folder: MailFolder,
+    cursor?: SyncCursor,
+  ): Promise<{ items: ReadonlyArray<MailItem>; nextCursor: SyncCursor }> {
+    await conn.openBox(folder.path);
 
       // Get UIDVALIDITY from the opened box
       // Note: node-imap uses _box (with underscore) internally
@@ -286,9 +364,6 @@ export class ImapSource implements SourceConnector {
         value: encodeImapCursor(uidValidity, maxUidNext),
       };
       return { items, nextCursor };
-    } finally {
-      conn.end();
-    }
   }
 
   /**
@@ -297,7 +372,33 @@ export class ImapSource implements SourceConnector {
   async fetch(item: MailItem): Promise<RawMessage> {
     const conn = await this.connect();
     try {
-      await conn.openBox(item.folder.path);
+      return await this.fetchInternal(conn, item);
+    } catch (error) {
+      // Check if this is an authentication error and we have a token provider
+      if (this.isAuthError(error) && this.tokenProvider) {
+        // Force refresh the token and retry once
+        await this.tokenProvider.refresh();
+        const conn = await this.connect();
+        try {
+          return await this.fetchInternal(conn, item);
+        } finally {
+          conn.end();
+        }
+      }
+      throw error;
+    } finally {
+      conn.end();
+    }
+  }
+
+  /**
+   * Internal method to fetch a message (without reconnection logic).
+   */
+  private async fetchInternal(
+    conn: ImapSimple,
+    item: MailItem,
+  ): Promise<RawMessage> {
+    await conn.openBox(item.folder.path);
 
       const uid = this.extractUidFromSourceRef(item.sourceRef);
       
@@ -345,9 +446,6 @@ export class ImapSource implements SourceConnector {
         item,
         rfc822: rfc822Buffer,
       };
-    } finally {
-      conn.end();
-    }
   }
 
   /**
@@ -378,5 +476,25 @@ export class ImapSource implements SourceConnector {
     const uidStr = parts[parts.length - 1];
     const uid = parseInt(uidStr || "0", 10);
     return isNaN(uid) ? 0 : uid;
+  }
+
+  /**
+   * Check if an error is an authentication error.
+   * IMAP authentication errors typically contain specific error messages.
+   */
+  private isAuthError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+      return false;
+    }
+    const message = error.message.toLowerCase();
+    // Common IMAP authentication error patterns
+    return (
+      message.includes("authentication failed") ||
+      message.includes("unauthorized") ||
+      message.includes("xoauth2") ||
+      message.includes("invalid token") ||
+      message.includes("token expired") ||
+      message.includes("401")
+    );
   }
 }

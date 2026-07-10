@@ -8,8 +8,20 @@ import {
   type MappingConfig,
   type SourceConnector,
   type TargetWriter,
+  type TokenProviderConfig,
+  type TokenProvider,
+  ThrottleLimiter,
+  type ThrottleConfig,
+  createThrottleLimiterFromMapping,
 } from '@openmig/shared';
-import { ImapSource, ImapDavMailTarget, type ImapDavTargetConfig } from '@openmig/connectors';
+import { 
+  ImapSource, 
+  ImapDavMailTarget, 
+  type ImapDavTargetConfig, 
+  createTokenProvider,
+  GraphCalendarSource,
+  GraphContactsSource,
+} from '@openmig/connectors';
 import { JmapTargetWriter } from '@openmig/connectors';
 import { PgLedger } from '@openmig/ledger';
 import { PgCursorStore } from '@openmig/ledger';
@@ -38,8 +50,11 @@ export async function buildDeps(config: MappingConfig): Promise<ReconcileDeps> {
   // Create cursor store
   const cursors = new PgCursorStore(db);
 
+  // Build throttle limiter from domain configuration
+  const throttleLimiter = buildThrottleLimiter(config);
+
   // Build source connector from config
-  const source = buildSourceConnector(config.source);
+  const source = buildSourceConnector(config.source, throttleLimiter);
 
   // Build target writer from config
   const target = buildTargetWriter(config.target);
@@ -56,15 +71,79 @@ export async function buildDeps(config: MappingConfig): Promise<ReconcileDeps> {
 }
 
 /**
- * Build a source connector from the mapping config.
- * Currently only supports imap-oauth2 (O365 with XOAUTH2).
+ * Build a throttle limiter from the mapping configuration.
+ * Uses per-domain throttle config if available, otherwise uses defaults.
  */
-function buildSourceConnector(sourceConfig: MappingConfig['source']): SourceConnector {
-  // Only ImapOAuth2Source is supported for now
-  if (sourceConfig.type !== 'imap-oauth2') {
-    throw new Error(`Unsupported source type: ${sourceConfig.type}. Only 'imap-oauth2' is currently supported.`);
+function buildThrottleLimiter(config: MappingConfig): ThrottleLimiter | undefined {
+  // If we have domain-specific throttle configs, create a limiter from them
+  if (config.domains) {
+    const throttleConfigMapping: Record<string, Partial<ThrottleConfig>> = {};
+    
+    // Collect throttle configs from all domains
+    for (const [domainName, domainConfig] of Object.entries(config.domains)) {
+      if (domainConfig?.throttleConfig) {
+        // Use the domain name as the key for the throttle config
+        throttleConfigMapping[domainName] = domainConfig.throttleConfig;
+      }
+    }
+    
+    // If we have any throttle configs, create a limiter
+    if (Object.keys(throttleConfigMapping).length > 0) {
+      return createThrottleLimiterFromMapping(throttleConfigMapping);
+    }
   }
   
+  // Return undefined if no throttle config is specified
+  return undefined;
+}
+
+/**
+ * Build a source connector from the mapping config.
+ * Supports imap-oauth2 with TokenProvider for automatic token refresh.
+ * Note: For graph-calendar and graph-contacts, use separate build functions.
+ */
+function buildSourceConnector(sourceConfig: MappingConfig['source'], throttleLimiter?: ThrottleLimiter): SourceConnector {
+  switch (sourceConfig.type) {
+    case 'imap-oauth2':
+      return buildImapSource(sourceConfig, throttleLimiter);
+    
+    default:
+      throw new Error(`Unsupported source type for ReconcileDeps: ${(sourceConfig as {type: string}).type}. Use buildGraphCalendarSource or buildGraphContactsSource for graph sources.`);
+  }
+}
+
+/**
+ * Build an IMAP source connector.
+ */
+function buildImapSource(sourceConfig: MappingConfig['source'], throttleLimiter?: ThrottleLimiter): SourceConnector {
+  if (sourceConfig.type !== 'imap-oauth2') {
+    throw new Error(`Expected imap-oauth2 source, got: ${sourceConfig.type}`);
+  }
+  
+  // Build TokenProvider if we have OAuth2 credentials configured
+  let tokenProviderConfig: TokenProviderConfig | undefined;
+  
+  if (sourceConfig.auth.kind === 'xoauth2') {
+    // Check if we have additional OAuth2 configuration for token provider
+    // This would typically come from environment variables or config
+    const tenantId = process.env.OAUTH2_TENANT_ID;
+    const clientId = process.env.OAUTH2_CLIENT_ID;
+    const clientSecret = process.env.OAUTH2_CLIENT_SECRET;
+    const refreshToken = process.env.OAUTH2_REFRESH_TOKEN;
+    
+    // Only create TokenProvider if we have the necessary credentials
+    if (tenantId && clientId) {
+      tokenProviderConfig = {
+        tokenEndpoint: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+        clientId,
+        clientSecret,
+        tenantId,
+        scope: 'https://outlook.office.com/IMAP.AccessAsUser.All',
+        refreshToken,
+      };
+    }
+  }
+
   const imapConfig = {
     host: sourceConfig.host,
     port: sourceConfig.port,
@@ -76,9 +155,93 @@ function buildSourceConnector(sourceConfig: MappingConfig['source']): SourceConn
         : undefined,
     },
     authType: 'XOAUTH2' as const,
+    tokenProvider: tokenProviderConfig ? createTokenProvider(tokenProviderConfig) : undefined,
+    throttleLimiter, // Pass throttle limiter if available
   };
 
   return new ImapSource(imapConfig);
+}
+
+/**
+ * Build a Graph Calendar source connector.
+ */
+function buildGraphCalendarSource(sourceConfig: MappingConfig['source'], throttleLimiter?: ThrottleLimiter) {
+  if (sourceConfig.type !== 'graph-calendar') {
+    throw new Error(`Expected graph-calendar source, got: ${sourceConfig.type}`);
+  }
+  
+  // Get OAuth2 credentials from environment
+  const tenantId = process.env.OAUTH2_TENANT_ID;
+  const clientId = process.env.OAUTH2_CLIENT_ID;
+  const clientSecret = process.env.OAUTH2_CLIENT_SECRET;
+  const refreshToken = process.env.OAUTH2_REFRESH_TOKEN;
+  
+  if (!tenantId || !clientId) {
+    throw new Error(
+      'Graph Calendar requires OAUTH2_TENANT_ID and OAUTH2_CLIENT_ID environment variables'
+    );
+  }
+  
+  const tokenProviderConfig: TokenProviderConfig = {
+    tokenEndpoint: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+    clientId,
+    clientSecret,
+    tenantId,
+    scope: 'https://graph.microsoft.com/.default',
+    refreshToken,
+  };
+  
+  const tokenProvider = createTokenProvider(tokenProviderConfig);
+  
+  return new GraphCalendarSource(
+    tokenProvider,
+    tenantId,
+    {
+      baseUrl: sourceConfig.baseUrl,
+      throttleLimiter,
+    }
+  );
+}
+
+/**
+ * Build a Graph Contacts source connector.
+ */
+function buildGraphContactsSource(sourceConfig: MappingConfig['source'], throttleLimiter?: ThrottleLimiter) {
+  if (sourceConfig.type !== 'graph-contacts') {
+    throw new Error(`Expected graph-contacts source, got: ${sourceConfig.type}`);
+  }
+  
+  // Get OAuth2 credentials from environment
+  const tenantId = process.env.OAUTH2_TENANT_ID;
+  const clientId = process.env.OAUTH2_CLIENT_ID;
+  const clientSecret = process.env.OAUTH2_CLIENT_SECRET;
+  const refreshToken = process.env.OAUTH2_REFRESH_TOKEN;
+  
+  if (!tenantId || !clientId) {
+    throw new Error(
+      'Graph Contacts requires OAUTH2_TENANT_ID and OAUTH2_CLIENT_ID environment variables'
+    );
+  }
+  
+  const tokenProviderConfig: TokenProviderConfig = {
+    tokenEndpoint: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+    clientId,
+    clientSecret,
+    tenantId,
+    scope: 'https://graph.microsoft.com/.default',
+    refreshToken,
+  };
+  
+  const tokenProvider = createTokenProvider(tokenProviderConfig);
+  
+  return new GraphContactsSource(
+    tokenProvider,
+    tenantId,
+    {
+      baseUrl: sourceConfig.baseUrl,
+      throttleLimiter,
+    }
+  );
 }
 
 /**

@@ -16,10 +16,17 @@ export type SqliteDatabase = ReturnType<typeof drizzleSqlite<typeof schemaSqlite
 /**
  * Create a Postgres database handle for the ledger.
  * Uses the `postgres` driver (postgres-js) which is compatible with Drizzle.
+ * Returns an object with the db and a close method.
  */
-export function createPgDb(connectionString: string): PgDatabase {
+export function createPgDb(connectionString: string): PgDatabase & { $client: postgres.Sql<{}>; close: () => Promise<void> } {
   const client = postgres(connectionString);
-  return drizzlePg(client, { schema: schemaPg });
+  const db = drizzlePg(client, { schema: schemaPg });
+  return Object.assign(db, {
+    $client: client,
+    close: async () => {
+      await client.end();
+    },
+  });
 }
 
 /**

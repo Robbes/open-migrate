@@ -4,7 +4,7 @@
 
 The Unified Sync Engine is the orchestration layer that coordinates synchronization across all data types: mail, calendar, contacts, and files. It provides a single entry point for running complete migrations while maintaining the idempotency and non-destructive properties of individual sync engines.
 
-**Key Design Principle**: Uses the `GenericSyncEngine` for domain-neutral sync logic, with domain-specific source connectors and target writers.
+**Key Design Principle**: Uses the `GenericSyncEngine` for domain-neutral sync logic, with domain-specific **native source connectors** (CalDAV, CardDAV, WebDAV) and target writers.
 
 ## Architecture
 
@@ -18,6 +18,12 @@ The Unified Sync Engine is the orchestration layer that coordinates synchronizat
 │  │  Sync    │  │  Sync    │  │  Sync    │  │  Sync    │       │
 │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘       │
 │       │             │              │             │              │
+│       ▼             ▼              ▼             ▼              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
+│  │  IMAP    │  │ CalDAV   │  │ CardDAV  │  │ WebDAV   │       │
+│  │ Source   │  │ Source   │  │ Source   │  │ Source     │     │
+│  │ (Native) │  │(Native)  │  │(Native)  │  │(Native)    │     │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘       │
 │       └─────────────┴──────────────┴─────────────┘              │
 │                          │                                       │
 │                          ▼                                       │
@@ -34,6 +40,14 @@ The Unified Sync Engine is the orchestration layer that coordinates synchronizat
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+**Native Connector Implementations:**
+
+- **CalDAV Source** (`packages/connectors/src/caldav-source.ts`): Native TypeScript implementation following RFC 4791 and RFC 6578. Uses PROPFIND for discovery and sync-collection REPORT for incremental sync with sync-token/CTag fallback.
+- **CardDAV Source** (`packages/connectors/src/carddav-source.ts`): Native TypeScript implementation following RFC 4791, RFC 6350, and RFC 6578. Supports vCard 3.0/4.0 with case-sensitive UID handling.
+- **WebDAV Source** (`packages/connectors/src/webdav-source.ts`): Native TypeScript implementation following RFC 4918. Uses ETag/size/mtime for change detection.
+
+All connectors are **pure TypeScript implementations** - no shell-out wrappers to vdirsyncer or rclone.
 
 ## Components
 
@@ -84,17 +98,17 @@ interface UnifiedSyncConfig {
   };
   calendar: {
     enabled: boolean;
-    source: CalendarSource;
+    source: CalendarSource;  // CalDAVSource for CalDAV calendars
     target: CalendarTargetWriter;
   };
   contacts: {
     enabled: boolean;
-    source: ContactSource;
+    source: ContactSource;   // CarddavSource for CardDAV address books
     target: ContactTargetWriter;
   };
   files: {
     enabled: boolean;
-    source: FileSource;
+    source: FileSource;      // WebdavFileSource for WebDAV file storage
     target: FileTargetWriter;
   };
   
@@ -104,7 +118,72 @@ interface UnifiedSyncConfig {
 }
 ```
 
-### 3. Domains Configuration (Multi-Domain Sync)
+### 3. Native Source Connector Examples
+
+#### CalDAV Source Configuration
+
+```typescript
+import { CalDAVSource } from '@openmig/connectors';
+
+const caldavSource = new CalDAVSource({
+  url: 'https://caldav.example.com/dav/',
+  username: 'user@example.com',
+  passwordEnv: 'CALDAV_PASSWORD',  // Password from environment variable
+  calendarHomeSet: '/dav/calendars/user/',  // Optional: auto-discovered if omitted
+});
+
+// List calendar folders
+const folders = await caldavSource.listFolders();
+// → [{ name: 'Personal', path: '/dav/calendars/user/personal/', ... }]
+
+// List events changed since cursor
+const { items, nextCursor } = await caldavSource.listSince(folders[0], cursor);
+// → { items: [{ uid: 'event-123', icalendar: 'BEGIN:VCALENDAR...', ... }], nextCursor: 'sync-token:abc123' }
+```
+
+#### CardDAV Source Configuration
+
+```typescript
+import { CarddavSource } from '@openmig/connectors';
+
+const carddavSource = new CarddavSource({
+  url: 'https://carddav.example.com/dav/',
+  username: 'user@example.com',
+  passwordEnv: 'CARDDAV_PASSWORD',
+  addressBookHomeSet: '/dav/addressbooks/user/',  // Optional: auto-discovered
+});
+
+// List address book folders
+const folders = await carddavSource.listFolders();
+// → [{ name: 'Contacts', path: '/dav/addressbooks/user/contacts/', ... }]
+
+// List contacts changed since cursor
+const { items, nextCursor } = await carddavSource.listSince(folders[0], cursor);
+// → { items: [{ uid: 'contact-456', vcard: 'BEGIN:VCARD...', ... }], nextCursor: 'sync-token:def456' }
+```
+
+#### WebDAV Source Configuration
+
+```typescript
+import { WebdavFileSource } from '@openmig/connectors';
+
+const webdavSource = new WebdavFileSource({
+  url: 'https://webdav.example.com/dav/',
+  username: 'user@example.com',
+  passwordEnv: 'WEBDAV_PASSWORD',
+  rootPath: '/files/user/',
+});
+
+// List file folders
+const folders = await webdavSource.listFolders();
+// → [{ name: 'Documents', path: '/files/user/documents', ... }]
+
+// List files changed since cursor
+const { items, nextCursor } = await webdavSource.listSince(folders[0], cursor);
+// → { items: [{ path: '/files/user/documents/report.pdf', size: 12345, ... }], nextCursor: 'base64...' }
+```
+
+### 4. Domains Configuration (Multi-Domain Sync)
 
 The optional `domains` block enables per-domain configuration for multi-domain sync. When absent, the root `source` and `target` are used (backward compatible).
 
@@ -170,7 +249,7 @@ interface DomainConfig {
 }
 ```
 
-### 4. Sync Statistics
+### 5. Sync Statistics
 
 ```typescript
 interface TypeSyncStats {
@@ -197,7 +276,7 @@ interface UnifiedSyncResult {
 }
 ```
 
-### 3. Execution Flow
+### 6. Execution Flow
 
 The unified sync follows this sequence:
 

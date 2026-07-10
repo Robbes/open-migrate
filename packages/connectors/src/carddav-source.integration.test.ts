@@ -1,0 +1,468 @@
+// Copyright 2026 OpenHands Agent (Apache-2.0)
+// Integration tests for CardDAV source connector against a real Stalwart CardDAV server.
+// Uses Testcontainers for containerized Stalwart instance.
+//
+// TEST SCENARIOS:
+// - listFolders() discovers seeded address books
+// - listSince() returns seeded contacts with correct vCard payload
+// - Cursor round-trip (second call returns only changes)
+// - Idempotency: run twice, second run creates 0 items
+
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { CarddavSource } from './carddav-source';
+import type { CardDAVSourceConfig } from './carddav-source.types';
+import type { RawContact } from '@openmig/shared';
+
+// Stalwart CardDAV configuration from Testcontainers
+const STALWART_CALENDAR_URL = process.env.STALWART_JMAP_URL;
+const CARDDAV_USERNAME = process.env.STALWART_JMAP_USERNAME || 'source@dev.local';
+const CARDDAV_PASSWORD = process.env.STALWART_JMAP_PASSWORD || 'source_password';
+
+if (!STALWART_CALENDAR_URL) {
+  throw new Error(
+    'Stalwart CardDAV is required for CardDAV source tests. ' +
+    'Set STALWART_JMAP_URL environment variable. ' +
+    'Run: pnpm test:integration'
+  );
+}
+
+// Fixed test contact UIDs
+const TEST_ADDRESSBOOK_NAME = 'Test Address Book';
+const TEST_CONTACT_UID_1 = 'contact-alice@dev.local';
+const TEST_CONTACT_UID_2 = 'contact-bob@dev.local';
+const TEST_CONTACT_UID_3 = 'contact-charlie@dev.local';
+
+/**
+ * Wait for CardDAV server to be ready.
+ */
+async function waitForCarddav(maxRetries = 30, delayMs = 2000): Promise<void> {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await fetch(`${STALWART_CALENDAR_URL}/.well-known/carddav`, {
+        method: 'GET',
+      });
+      if (response.status === 200 || response.status === 401 || response.status === 404) {
+        return;
+      }
+    } catch {
+      // CardDAV not ready yet
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  throw new Error('CardDAV server not ready after max retries');
+}
+
+/**
+ * Seed test contacts via raw DAV PUT.
+ * Creates a test address book and populates it with vCard contacts.
+ */
+async function seedContacts(): Promise<void> {
+  const carddavUrl = STALWART_CALENDAR_URL!.replace(/\/$/, '');
+  const addressbookPath = `/addressbooks/${CARDDAV_USERNAME.split('@')[0]}/test-addressbook/`;
+  const fullAddressbookUrl = `${carddavUrl}${addressbookPath}`;
+
+  // First, create the address book using MKCOL
+  try {
+    const mkcolXml = `<?xml version="1.0" encoding="utf-8"?>
+      <D:mkcol xmlns:D="DAV:" xmlns:CA="urn:ietf:params:xml:ns:carddav">
+        <D:set>
+          <D:prop>
+            <D:resourcetype>
+              <D:collection/>
+              <CA:addressbook/>
+            </D:resourcetype>
+            <D:displayname>${TEST_ADDRESSBOOK_NAME}</D:displayname>
+          </D:prop>
+        </D:set>
+      </D:mkcol>`;
+
+    const response = await fetch(fullAddressbookUrl, {
+      method: 'MKCOL',
+      headers: {
+        'Content-Type': 'application/xml',
+        Authorization: `Basic ${Buffer.from(`${CARDDAV_USERNAME}:${CARDDAV_PASSWORD}`).toString('base64')}`,
+      },
+      body: mkcolXml,
+    });
+
+    if (response.status === 201 || response.status === 409) {
+      console.log('[Seed] Created test address book');
+    } else {
+      const body = await response.text();
+      console.log(`[Seed] Address book creation response: ${response.status} - ${body.substring(0, 200)}`);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(`[Seed] Address book creation (may already exist): ${msg}`);
+  }
+
+  // Seed test contacts
+  const testContacts = [
+    {
+      uid: TEST_CONTACT_UID_1,
+      fn: 'Alice Johnson',
+      org: 'Acme Corp',
+      title: 'Software Engineer',
+      tel: '+1-555-1234',
+      email: 'alice@dev.local',
+      adr: {
+        type: 'work',
+        street: '123 Main St',
+        city: 'San Francisco',
+        region: 'CA',
+        postalCode: '94105',
+        country: 'USA',
+      },
+    },
+    {
+      uid: TEST_CONTACT_UID_2,
+      fn: 'Bob Smith',
+      org: 'Tech Inc',
+      title: 'Product Manager',
+      tel: '+1-555-5678',
+      email: 'bob@dev.local',
+      adr: {
+        type: 'work',
+        street: '456 Oak Ave',
+        city: 'New York',
+        region: 'NY',
+        postalCode: '10001',
+        country: 'USA',
+      },
+    },
+    {
+      uid: TEST_CONTACT_UID_3,
+      fn: 'Charlie Brown',
+      org: 'Design Studio',
+      title: 'UX Designer',
+      tel: '+1-555-9012',
+      email: 'charlie@dev.local',
+      adr: {
+        type: 'home',
+        street: '789 Pine Rd',
+        city: 'Austin',
+        region: 'TX',
+        postalCode: '78701',
+        country: 'USA',
+      },
+    },
+  ];
+
+  for (const contact of testContacts) {
+    const vcard = `BEGIN:VCARD
+VERSION:4.0
+UID:${contact.uid}
+FN:${contact.fn}
+ORG:${contact.org}
+TITLE:${contact.title}
+TEL;TYPE=${contact.adr.type}:${contact.tel}
+EMAIL:${contact.email}
+ADR;TYPE=${contact.adr.type};;${contact.adr.street};${contact.adr.city};${contact.adr.region};${contact.adr.postalCode};${contact.adr.country}
+N:${contact.fn.split(' ')[1] || ''};${contact.fn.split(' ')[0] || ''};;;
+END:VCARD`;
+
+    const contactUrl = `${fullAddressbookUrl}${contact.uid}.vcf`;
+    
+    try {
+      const response = await fetch(contactUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'text/vcard',
+          Authorization: `Basic ${Buffer.from(`${CARDDAV_USERNAME}:${CARDDAV_PASSWORD}`).toString('base64')}`,
+        },
+        body: vcard,
+      });
+
+      if (response.status === 201 || response.status === 204) {
+        console.log(`[Seed] Created contact: ${contact.uid}`);
+      } else {
+        const body = await response.text();
+        console.warn(`[Seed] Contact ${contact.uid} response: ${response.status} - ${body.substring(0, 200)}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[Seed] Warning: Could not seed contact ${contact.uid}: ${msg}`);
+    }
+  }
+
+  console.log('[Seed] Contacts seeded');
+}
+
+/**
+ * Clean up test address book and contacts.
+ */
+async function cleanAddressBook(): Promise<void> {
+  const carddavUrl = STALWART_CALENDAR_URL!.replace(/\/$/, '');
+  const addressbookPath = `/addressbooks/${CARDDAV_USERNAME.split('@')[0]}/test-addressbook/`;
+  const fullAddressbookUrl = `${carddavUrl}${addressbookPath}`;
+
+  try {
+    // Delete all contacts in the address book using REPORT
+    const syncCollectionXml = `<?xml version="1.0" encoding="utf-8"?>
+      <D:sync-collection xmlns:D="DAV:">
+        <D:prop>
+          <D:resourcetype/>
+          <D:getetag/>
+        </D:prop>
+        <D:sync-token/>
+      </D:sync-collection>`;
+
+    const response = await fetch(`${carddavUrl}${CARDDAV_USERNAME.split('@')[0]}/`, {
+      method: 'REPORT',
+      headers: {
+        'Content-Type': 'application/xml',
+        Authorization: `Basic ${Buffer.from(`${CARDDAV_USERNAME}:${CARDDAV_PASSWORD}`).toString('base64')}`,
+      },
+      body: syncCollectionXml,
+    });
+
+    if (response.status === 207) {
+      const body = await response.text();
+      // Parse and delete all resources
+      const hrefRegex = /<D:href>([^<]+)<\/D:href>/g;
+      let match;
+      const resourcesToDelete: string[] = [];
+      
+      while ((match = hrefRegex.exec(body)) !== null) {
+        const href = match[1];
+        if (!href) continue;
+        // Only delete resources in our test address book
+        if (href.includes('test-addressbook')) {
+          resourcesToDelete.push(href);
+        }
+      }
+
+      for (const resource of resourcesToDelete) {
+        try {
+          await fetch(resource, {
+            method: 'DELETE',
+            headers: {
+              Authorization: `Basic ${Buffer.from(`${CARDDAV_USERNAME}:${CARDDAV_PASSWORD}`).toString('base64')}`,
+            },
+          });
+        } catch {
+          // Ignore deletion errors
+        }
+      }
+    }
+
+    // Delete the address book itself
+    try {
+      await fetch(fullAddressbookUrl, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${CARDDAV_USERNAME}:${CARDDAV_PASSWORD}`).toString('base64')}`,
+        },
+      });
+    } catch {
+      // Ignore address book deletion errors
+    }
+
+    console.log('[Cleanup] Address book cleaned');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[Cleanup] Warning: Could not clean address book: ${msg}`);
+  }
+}
+
+describe('CardDAV Source Integration Tests', () => {
+  let carddavSource: CarddavSource;
+
+  beforeAll(async () => {
+    console.log('[CardDAV Tests] Waiting for CardDAV server...');
+    await waitForCarddav();
+    console.log('[CardDAV Tests] CardDAV server is ready');
+  }, 60000);
+
+  beforeEach(async () => {
+    // Clean up before each test for isolation
+    await cleanAddressBook();
+    await seedContacts();
+  });
+
+  afterAll(async () => {
+    // Final cleanup
+    await cleanAddressBook();
+  });
+
+  describe('listFolders()', () => {
+    it('should discover seeded address books', async () => {
+      carddavSource = new CarddavSource({
+        url: `${STALWART_CALENDAR_URL}/`,
+        username: CARDDAV_USERNAME,
+        passwordEnv: 'CARDDAV_PASSWORD',
+      } as CardDAVSourceConfig);
+
+      // Set password via environment
+      process.env.CARDDAV_PASSWORD = CARDDAV_PASSWORD;
+
+      const folders = await carddavSource.listFolders();
+
+      expect(folders).toBeDefined();
+      expect(Array.isArray(folders)).toBe(true);
+      
+      // Should find at least the test address book
+      const testAddressBook = folders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
+      expect(testAddressBook).toBeDefined();
+      expect(testAddressBook?.name).toBe(TEST_ADDRESSBOOK_NAME);
+
+      console.log('[listFolders] Discovered address books:', folders.map(f => f.name));
+    });
+  });
+
+  describe('listSince()', () => {
+    it('should return seeded contacts with correct vCard payload', async () => {
+      carddavSource = new CarddavSource({
+        url: `${STALWART_CALENDAR_URL}/`,
+        username: CARDDAV_USERNAME,
+        passwordEnv: 'CARDDAV_PASSWORD',
+      } as CardDAVSourceConfig);
+
+      process.env.CARDDAV_PASSWORD = CARDDAV_PASSWORD;
+
+      // First, get the address book folder
+      const folders = await carddavSource.listFolders();
+      const testAddressBook = folders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
+      expect(testAddressBook).toBeDefined();
+
+      // List contacts since epoch (all contacts)
+      const { items, nextCursor } = await carddavSource.listSince(testAddressBook!);
+
+      expect(items).toBeDefined();
+      expect(Array.isArray(items)).toBe(true);
+      expect(items.length).toBeGreaterThanOrEqual(3);
+
+      // Verify each contact has correct structure
+      for (const item of items) {
+        expect(item.item).toBeDefined();
+        expect(item.item.uid).toBeDefined();
+        expect(item.item.name).toBeDefined();
+        expect(item.item.vcard).toBeDefined();
+
+        // Verify vCard payload contains expected properties
+        const vcard = item.item.vcard;
+        expect(vcard).toContain('BEGIN:VCARD');
+        expect(vcard).toContain('END:VCARD');
+        expect(vcard).toContain('UID:');
+        expect(vcard).toContain('FN:');
+        expect(vcard).toContain('VERSION:');
+      }
+
+      // Verify our test contacts are present
+      const contactUids = items.map(i => i.item.uid.toLowerCase());
+      expect(contactUids).toContain(TEST_CONTACT_UID_1.toLowerCase());
+      expect(contactUids).toContain(TEST_CONTACT_UID_2.toLowerCase());
+      expect(contactUids).toContain(TEST_CONTACT_UID_3.toLowerCase());
+
+      expect(nextCursor).toBeDefined();
+      expect(nextCursor.value).toBeDefined();
+
+      console.log('[listSince] Found', items.length, 'contacts');
+    });
+
+    it('should support cursor round-trip (second call returns only changes)', async () => {
+      carddavSource = new CarddavSource({
+        url: `${STALWART_CALENDAR_URL}/`,
+        username: CARDDAV_USERNAME,
+        passwordEnv: 'CARDDAV_PASSWORD',
+      } as CardDAVSourceConfig);
+
+      process.env.CARDDAV_PASSWORD = CARDDAV_PASSWORD;
+
+      const folders = await carddavSource.listFolders();
+      const testAddressBook = folders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
+      expect(testAddressBook).toBeDefined();
+
+      // First call - get all contacts
+      const result1 = await carddavSource.listSince(testAddressBook!);
+      const initialCount = result1.items.length;
+      expect(initialCount).toBeGreaterThanOrEqual(3);
+      expect(result1.nextCursor.value).toBeDefined();
+
+      // Second call with cursor - should return no new items (all already seen)
+      const result2 = await carddavSource.listSince(testAddressBook!, result1.nextCursor);
+      
+      // With cursor-based sync, unchanged data should return empty or minimal results
+      expect(result2.items.length).toBeLessThanOrEqual(initialCount);
+      
+      console.log('[Cursor Round-trip] First call:', initialCount, 'contacts, Second call:', result2.items.length, 'contacts');
+    });
+  });
+
+  describe('Idempotency', () => {
+    it('should be idempotent (run twice, second run creates 0 new items)', async () => {
+      carddavSource = new CarddavSource({
+        url: `${STALWART_CALENDAR_URL}/`,
+        username: CARDDAV_USERNAME,
+        passwordEnv: 'CARDDAV_PASSWORD',
+      } as CardDAVSourceConfig);
+
+      process.env.CARDDAV_PASSWORD = CARDDAV_PASSWORD;
+
+      const folders = await carddavSource.listFolders();
+      const testAddressBook = folders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
+      expect(testAddressBook).toBeDefined();
+
+      // First sync - collect all contacts
+      const sync1 = await carddavSource.listSince(testAddressBook!);
+      const firstRunCount = sync1.items.length;
+      expect(firstRunCount).toBeGreaterThanOrEqual(3);
+
+      // Second sync with cursor - should get no new items
+      const sync2 = await carddavSource.listSince(testAddressBook!, sync1.nextCursor);
+      
+      // Idempotency: second sync should not return new items
+      expect(sync2.items.length).toBe(0);
+
+      console.log('[Idempotency] First sync:', firstRunCount, 'contacts, Second sync:', sync2.items.length, 'contacts');
+    });
+  });
+
+  describe('Contact parsing', () => {
+    it('should correctly parse vCard contact properties', async () => {
+      carddavSource = new CarddavSource({
+        url: `${STALWART_CALENDAR_URL}/`,
+        username: CARDDAV_USERNAME,
+        passwordEnv: 'CARDDAV_PASSWORD',
+      } as CardDAVSourceConfig);
+
+      process.env.CARDDAV_PASSWORD = CARDDAV_PASSWORD;
+
+      const folders = await carddavSource.listFolders();
+      const testAddressBook = folders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
+      expect(testAddressBook).toBeDefined();
+
+      const { items } = await carddavSource.listSince(testAddressBook!);
+
+      // Find our first test contact
+      const testContact = items.find(i => i.item.uid.toLowerCase() === TEST_CONTACT_UID_1.toLowerCase());
+      expect(testContact).toBeDefined();
+
+      // Verify parsed properties - using correct Contact interface properties
+      expect(testContact!.item.name).toBe('Alice Johnson');
+      expect(testContact!.item.organization?.name).toBe('Acme Corp');
+      expect(testContact!.item.organization?.title).toBe('Software Engineer');
+      
+      // Verify email exists in emails array
+      expect(testContact!.item.emails).toBeDefined();
+      const email = testContact!.item.emails?.find(e => e.value === 'alice@dev.local');
+      expect(email).toBeDefined();
+      
+      // Verify phone number exists in phones array
+      expect(testContact!.item.phones).toBeDefined();
+      const phone = testContact!.item.phones?.find(p => p.value === '+1-555-1234');
+      expect(phone).toBeDefined();
+
+      // Verify address exists in addresses array
+      expect(testContact!.item.addresses).toBeDefined();
+      const adr = testContact!.item.addresses?.find(a => a.street === '123 Main St');
+      expect(adr).toBeDefined();
+      expect(adr?.city).toBe('San Francisco');
+      expect(adr?.region).toBe('CA');
+      expect(adr?.postalCode).toBe('94105');
+      expect(adr?.country).toBe('USA');
+
+      console.log('[Contact Parsing] Verified contact properties');
+    });
+  });
+});

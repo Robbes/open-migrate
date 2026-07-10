@@ -5,9 +5,22 @@
   "type": "module",
   "main": "src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./caldav-source": "./src/caldav-source.ts",
+    "./caldav-source.types": "./src/caldav-source.types.ts",
+    "./carddav-source": "./src/carddav-source.ts",
+    "./carddav-source.types": "./src/carddav-source.types.ts",
+    "./webdav-source": "./src/webdav-source.ts",
+    "./webdav-source.types": "./src/webdav-source.types.ts",
+    "./imap-source": "./src/imap-source.ts",
+    "./imap-source.types": "./src/imap-source.types.ts",
+    "./graph-calendar-source": "./src/graph-calendar-source.ts",
+    "./graph-calendar-source.types": "./src/graph-calendar-source.types.ts",
+    "./graph-contacts-source": "./src/graph-contacts-source.ts",
+    "./graph-contacts-source.types": "./src/graph-contacts-source.types.ts"
   },
   "dependencies": {
+    "@azure/msal-node": "^5.4.0",
     "@openmig/shared": "workspace:*",
     "imap-simple": "^5.1.0",
     "jmap-jam": "^0.13.2"

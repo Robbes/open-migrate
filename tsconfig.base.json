@@ -11,6 +11,18 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "types": ["node", "vitest/globals"],
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "@openmig/shared": ["./packages/shared/src/index.ts"],
+      "@openmig/shared/*": ["./packages/shared/src/*"],
+      "@openmig/ledger": ["./packages/ledger/src/index.ts"],
+      "@openmig/ledger/*": ["./packages/ledger/src/*"],
+      "@openmig/core": ["./packages/core/src/index.ts"],
+      "@openmig/core/*": ["./packages/core/src/*"],
+      "@openmig/connectors": ["./packages/connectors/src/index.ts"],
+      "@openmig/connectors/*": ["./packages/connectors/src/*"],
+      "@openmig/engines": ["./packages/engines/src/index.ts"],
+      "@openmig/engines/*": ["./packages/engines/src/*"]
+    }
   }
 }

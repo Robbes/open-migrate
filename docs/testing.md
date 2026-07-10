@@ -68,10 +68,10 @@ For multi-domain sync (calendar, contacts, files), use the following property te
 ```typescript
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { GenericSyncEngine } from '@openmig/core';
-import { CaldavSource } from '@openmig/connectors';
+import { CalDAVSource } from '@openmig/connectors';
 
 describe('CalDAV Sync Idempotency', () => {
-  let source: CaldavSource;
+  let source: CalDAVSource;
   let target: CalDAVTargetWriter;
   let ledger: Ledger;
   let cursors: CursorStore;
@@ -81,7 +81,11 @@ describe('CalDAV Sync Idempotency', () => {
     await cleanTargetMailboxes();
     await cleanDatabaseState(TENANT_ID, MAPPING_ID);
     
-    source = new CaldavSource({ /* ... */ });
+    source = new CalDAVSource({
+      url: 'https://caldav.example.com/dav/',
+      username: 'user@example.com',
+      passwordEnv: 'CALDAV_PASSWORD',
+    });
     target = new CalDAVTargetWriter({ /* ... */ });
     ledger = createTestLedger();
     cursors = createTestCursorStore();
@@ -163,6 +167,101 @@ Use the `*.unit.test.ts` or `*.integration.test.ts` naming convention:
 - `caldav-sync.integration.test.ts` - CalDAV end-to-end integration tests
 - `carddav-sync.integration.test.ts` - CardDAV end-to-end integration tests
 - `webdav-sync.integration.test.ts` - WebDAV end-to-end integration tests
+
+### Native Connector Property Tests
+
+The native CalDAV, CardDAV, and WebDAV connectors support the following property tests:
+
+#### CalDAV-Specific Tests
+
+```typescript
+describe('CalDAV Source Properties', () => {
+  it('should normalize UIDs to lowercase (case-insensitive)', async () => {
+    const source = new CalDAVSource({ /* config */ });
+    const { items } = await source.listSince(folder);
+    
+    // All UIDs should be lowercase
+    items.forEach(item => {
+      expect(item.item.uid).toBe(item.item.uid.toLowerCase());
+    });
+  });
+
+  it('should support sync-token and CTag fallback', async () => {
+    const source = new CalDAVSource({ /* config */ });
+    
+    // First sync returns sync-token
+    const { nextCursor: cursor1 } = await source.listSince(folder);
+    expect(cursor1.value).toMatch(/^sync-token:/);
+    
+    // Simulate server that doesn't support sync-token
+    // Should fall back to CTag format
+  });
+});
+```
+
+#### CardDAV-Specific Tests
+
+```typescript
+describe('CardDAV Source Properties', () => {
+  it('should preserve UID case (case-sensitive)', async () => {
+    const source = new CarddavSource({ /* config */ });
+    const { items } = await source.listSince(folder);
+    
+    // UIDs should preserve their original case
+    items.forEach(item => {
+      // UID casing should match source exactly
+      expect(item.item.uid).toBe(originalUid);
+    });
+  });
+
+  it('should parse vCard 3.0 and 4.0 formats', async () => {
+    const source = new CarddavSource({ /* config */ });
+    const { items } = await source.listSince(folder);
+    
+    // Should handle both vCard versions
+    items.forEach(item => {
+      expect(item.vcard).toMatch(/^BEGIN:VCARD/);
+      expect(item.vcard).toMatch(/VERSION:(3\.0|4\.0)/);
+    });
+  });
+});
+```
+
+#### WebDAV-Specific Tests
+
+```typescript
+describe('WebDAV Source Properties', () => {
+  it('should detect changes via ETag', async () => {
+    const source = new WebdavFileSource({ /* config */ });
+    
+    const { items: items1, nextCursor: cursor1 } = await source.listSince(folder);
+    const { items: items2 } = await source.listSince(folder, cursor1);
+    
+    // No changes should result in empty delta
+    expect(items2).toHaveLength(0);
+  });
+
+  it('should fall back to size/mtime when ETag unavailable', async () => {
+    const source = new WebdavFileSource({ /* config */ });
+    
+    // When ETag is missing, should use size and mtime for change detection
+    const { items } = await source.listSince(folder);
+    items.forEach(item => {
+      expect(item.item.size).toBeDefined();
+      expect(item.item.modifiedAt).toBeDefined();
+    });
+  });
+
+  it('should normalize paths consistently', async () => {
+    const source = new WebdavFileSource({ /* config */ });
+    
+    // Different path formats should normalize to the same value
+    const path1 = source['normalizePath']('/Documents//Reports/');
+    const path2 = source['normalizePath']('Documents\\Reports');
+    expect(path1).toBe(path2);
+  });
+});
+```
 
 ## Test Isolation Patterns
 

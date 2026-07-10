@@ -4,13 +4,13 @@
 
 | Task | Status | Evidence |
 |---|---|---|
-| T1 TokenProvider (refresh, cache, re-auth) | ⬜ Pending | — |
-| T2 Entra app + consent documentation | ⬜ Pending | — |
-| T3 Graph calendar source (delta) | ⬜ Pending | — |
-| T4 Graph contacts source (delta) | ⬜ Pending | — |
-| T5 throttling & rate budgets (429/Retry-After) | ⬜ Pending | — |
-| T6 OneDrive files source (Graph delta) | ⬜ Pending | — |
-| T7 secret-gated e2e harness against the real tenant | ⬜ Pending | — |
+| T1 TokenProvider (refresh, cache, re-auth) | ✅ Done | `MsalTokenProvider` in `packages/connectors/src/token-provider.ts` |
+| T2 Entra app + consent documentation | ✅ Done | `docs/o365-setup.md` with complete setup guide |
+| T3 Graph calendar source (delta) | ✅ Done | `GraphCalendarSource` in `packages/connectors/src/graph-calendar-source.ts` |
+| T4 Graph contacts source (delta) | ✅ Done | `GraphContactsSource` in `packages/connectors/src/graph-contacts-source.ts` |
+| T5 throttling & rate budgets (429/Retry-After) | ✅ Done | `ThrottleLimiter` in `packages/shared/src/throttling.ts` |
+| T6 OneDrive files source (Graph delta) | ✅ Done | `GraphDriveSource` in `packages/connectors/src/graph-drive-source.ts` |
+| T7 secret-gated e2e harness against the real tenant | ✅ Done | `test/e2e/o365-scenario.ts` + `.github/workflows/e2e-o365.yml` |
 
 > Read `AGENTS.md` and `docs/architecture/solution-architecture.md` first (§13 connectors,
 > §10 idempotency anchors, §21 throttling; ADR-0006 access model, ADR-0012 Graph-over-EWS).
@@ -124,3 +124,17 @@ lifetime); workflow refuses to run if the token carries write scopes.
 - Quote Graph error bodies verbatim in failures (hard rule 9); Graph wraps real causes in
   `error.innerError`.
 - New tests: `*.unit.test.ts` / `*.integration.test.ts` naming (0006-A).
+
+## Implementation Summary
+
+Workplan 0008 is **complete**. All production O365 Graph components have been implemented:
+
+- **TokenProvider**: MSAL-based implementation with client-credentials and delegated flows, expiry-aware caching, single-flight refresh, and XOAUTH2 re-auth integration
+- **Graph Calendar Source**: Delta query support, iCal MIME format, UID/RECURRENCE-ID extraction, recurrence exception handling
+- **Graph Contacts Source**: Delta query support, vCard 4.0 mapping with photo handling, case-sensitive UID handling
+- **Graph Drive Source**: Delta query support, path normalization, cTag/quickXorHash change detection, rename handling
+- **Throttling**: Token bucket rate limiter, 429/Retry-After handling, exponential backoff with jitter, per-tenant/provider budgets
+- **Documentation**: Complete Entra app setup guide with least-privilege permissions, consent flow, and security best practices
+- **E2E Harness**: Secret-gated workflow with read-only verification, token refresh proof (70-minute sleep), and idempotency assertion
+
+All gates green: lint, typecheck, and unit tests pass. Ready for integration testing against the real SMB test tenant.

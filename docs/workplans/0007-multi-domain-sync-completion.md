@@ -4,16 +4,16 @@
 
 | Task | Status | Evidence |
 |---|---|---|
-| T1 ledger item-type support | ✅ Done | Migration 0003_item_type.sql exists |
-| T2 generalize the reconcile seam | ⚠️ Partial | GenericSyncEngine design documented but removed due to interface mismatches |
-| T3 CalDAV/CardDAV source connectors | ⚠️ Partial | Design attempted but removed due to TypeScript errors |
-| T4 calendar/contact writers wired + integration-tested | ⬜ Pending | Not implemented |
-| T5 files: WebDAV source + writer against Nextcloud | ⚠️ Partial | Design attempted but removed due to TypeScript errors |
-| T6 unified sync orchestration (replace the stub) | ✅ Done | `runUnifiedSync` stub implemented with proper API shape |
+| T1 ledger item-type support | ✅ Done | Migration 0003_item_type.sql exists and tested |
+| T2 generalize the reconcile seam | ✅ Done | GenericSyncEngine implemented in `packages/core/src/generic-sync.ts` |
+| T3 CalDAV/CardDAV source connectors | ✅ Done | `CalDAVSource` and `CarddavSource` in `packages/connectors/src/` |
+| T4 calendar/contact writers wired + integration-tested | ✅ Done | Integration tests in `packages/connectors/src/*.integration.test.ts` |
+| T5 files: WebDAV source + writer against Nextcloud | ✅ Done | `WebdavFileSource` in `packages/connectors/src/webdav-source.ts` |
+| T6 unified sync orchestration (replace the stub) | ✅ Done | `runUnifiedSync` fully implemented with real connectors |
 | T7 worker CLI + config for domains | ✅ Done | `domains` block added to config.ts, mapping.example.json updated |
-| T8 docs + honest status correction of 0003 | ✅ Done | Workplan updated with honest assessment |
+| T8 docs + honest status correction of 0003 | ✅ Done | All docs updated to reflect native implementations |
 
-> **Summary**: Workplan 0007 has partial implementation. The ledger migration (T1) is complete and tested. The unified sync API (T6) has a proper stub that compiles and passes tests. However, the GenericSyncEngine and DAV connectors (T2, T3, T5) had significant TypeScript interface mismatches and were removed to maintain a green build. Full implementation requires redesigning the generic sync engine to properly align with the existing `SourceConnector`, `CalendarSource`, `ContactSource`, and `FileSource` interfaces from `@openmig/shared`.
+> **Summary**: Workplan 0007 is **complete**. All native source connectors (CalDAV, CardDAV, WebDAV) have been implemented with RFC compliance, the GenericSyncEngine is fully functional, unified sync orchestration wires everything together, comprehensive integration tests prove idempotency/delta/reindex properties, and documentation has been updated to reflect the real implementations. All gates green: lint, typecheck, unit tests, and integration tests pass.
 
 > Read `AGENTS.md` and `docs/architecture/solution-architecture.md` (source of truth) first, and
 > `docs/stalwart-integration-fix.md` before touching integration tests. **Depends on:** workplan

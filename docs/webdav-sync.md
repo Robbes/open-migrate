@@ -4,20 +4,29 @@
 
 This document describes the WebDAV (Files) synchronization implementation for OpenMigrate. The WebDAV sync engine enables one-way or bidirectional synchronization of files and folders between source systems (OneDrive, SharePoint, generic WebDAV) and target systems (Nextcloud, ownCloud, Stalwart Files, other WebDAV servers).
 
+**Key Update**: OpenMigrate now includes a **native TypeScript WebDAV source connector** (`WebdavFileSource`) that implements RFC 4918 directly, replacing any previous shell-out wrapper approaches (like rclone).
+
 ## Architecture
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  WebDAV Source  │────▶│   Source        │────▶│   WebDAV        │
-│  (OneDrive/SP)  │     │   Connector     │     │   Target Writer │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-                                │
-                                ▼
-                        ┌─────────────────┐
-                        │   Ledger        │
-                        │   (Idempotency) │
-                        └─────────────────┘
+│  WebDAV Source  │────▶│   GenericSync   │────▶│   WebDAV        │
+│   (Native TS)   │     │     Engine      │     │   Target Writer │
+└─────────────────┘     └────────┬────────┘     └─────────────────┘
+                                 │
+                                 ▼
+                         ┌─────────────────┐
+                         │   Ledger        │
+                         │   (Idempotency) │
+                         └─────────────────┘
 ```
+
+**Native Implementation Features:**
+- **RFC 4918 Compliance**: Full WebDAV protocol support (PROPFIND, etc.)
+- **ETag-Based Change Detection**: Primary mechanism for detecting file changes
+- **Size/Mtime Fallback**: Secondary change indicators when ETag unavailable
+- **Path Normalization**: Consistent path handling across different servers
+- **No Shell Dependencies**: Pure TypeScript, no rclone or external tools
 
 ## Components
 
@@ -89,47 +98,32 @@ interface FileTargetWriter {
 
 ### 4. Sync Engine
 
-Located in `packages/engines/src/webdav-sync.ts`:
+Located in `packages/connectors/src/webdav-source.ts`:
 
 **Features:**
-- Uses **rclone** as the sync engine (robust, feature-rich)
-- Automatic configuration generation for rclone
-- Support for multiple sync modes (copy, sync, move)
-- Include/exclude pattern filtering
-- Size-based filtering (min/max file size)
-- Progress tracking and bytes transferred
-- Error handling and reporting
-- Dry run support for preview
+- **Native TypeScript Implementation**: No shell-out to rclone or other external tools
+- **PROPFIND Enumeration**: RFC 4918 compliant file/folder discovery
+- **ETag-Based Change Detection**: Primary mechanism for detecting file modifications
+- **Size/Mtime Fallback**: Uses size and modification time when ETag unavailable
+- **Path Normalization**: Handles different path formats consistently
+- **Binary Content Support**: Proper handling of all file types
 
 **Configuration:**
 ```typescript
-interface WebDAVSyncConfig {
-  source: {
-    type: 'webdav' | 'onedrive' | 'sharepoint';
-    url: string;
-    credentials: Credentials;
-    rootPath: string;
-  };
-  target: {
-    type: 'webdav';
-    url: string;
-    credentials: Credentials;
-    rootPath: string;
-  };
-  sync: {
-    mode: 'copy' | 'sync' | 'move';
-    dryRun: boolean;
-    // Filtering
-    includePatterns: string[];
-    excludePatterns: string[];
-    minSize: number; // bytes
-    maxSize: number; // bytes
-    // Performance
-    transfers: number; // concurrent transfers
-    checkers: number;  // concurrent checksum checks
-  };
+interface WebDAVSourceConfig {
+  url: string;                    // WebDAV server base URL
+  username: string;               // Username for authentication
+  passwordEnv: string;            // Environment variable name for password
+  rootPath: string;               // Root path for file operations
 }
 ```
+
+**Sync Flow:**
+1. **List Folders**: PROPFIND Depth:1 to discover collections
+2. **List Files**: PROPFIND Depth:1 for each folder
+3. **Change Detection**: Compare ETag/size/mtime against cursor
+4. **Fetch Content**: GET request for changed files
+5. **Return Items**: Raw file items with content and metadata
 
 ## Idempotency Pattern
 
@@ -148,39 +142,108 @@ The WebDAV sync follows the established idempotency pattern:
 - **Delta-aware**: Only new or changed files are transferred
 - **Resume-capable**: Large files can be resumed on failure
 
-## Sync Modes
+## Usage Examples
 
-### Copy Mode (Default)
+### Using WebdavFileSource Directly
 
+```typescript
+import { WebdavFileSource } from '@openmig/connectors';
+import type { FileSource, SyncCursor } from '@openmig/shared';
+
+// Create WebDAV source connector
+const source: FileSource = new WebdavFileSource({
+  url: 'https://webdav.example.com/dav/',
+  username: 'user@example.com',
+  passwordEnv: 'WEBDAV_PASSWORD',
+  rootPath: '/files/user/',
+});
+
+// Step 1: List file folders
+const folders = await source.listFolders();
+console.log(folders);
+// Output:
+// [
+//   {
+//     name: 'Documents',
+//     path: '/files/user/documents',
+//     displayName: 'Documents',
+//     quota: { used: 1024000, available: 10737418240 }
+//   }
+// ]
+
+// Step 2: Incremental sync with cursor
+let cursor: SyncCursor | undefined;
+const allFiles: RawFileItem[] = [];
+
+for (const folder of folders) {
+  do {
+    const { items, nextCursor } = await source.listSince(folder, cursor);
+    allFiles.push(...items);
+    cursor = nextCursor;
+  } while (cursor && cursor.value);
+}
+
+console.log(`Synced ${allFiles.length} files`);
 ```
-Source → Target
+
+### Using with GenericSyncEngine
+
+```typescript
+import { WebdavFileSource } from '@openmig/connectors';
+import { GenericSyncEngine } from '@openmig/core';
+
+const webdavSource = new WebdavFileSource({
+  url: 'https://webdav.example.com/dav/',
+  username: 'user@example.com',
+  passwordEnv: 'WEBDAV_PASSWORD',
+  rootPath: '/files/user/',
+});
+
+const engine = new GenericSyncEngine({
+  tenantId: 'tenant-123',
+  mappingId: 'mapping-456',
+  source: webdavSource,
+  target: webdavTargetWriter,
+  ledger: myLedger,
+  cursors: myCursorStore,
+  concurrency: 10,
+  itemType: 'file',
+});
+
+const result = await engine.sync();
+console.log(`Created: ${result.created}, Skipped: ${result.skipped}`);
+console.log(`Bytes transferred: ${result.bytesTransferred}`);
 ```
 
-- Copies new and changed files from source to target
-- Does not delete files on target
-- Does not propagate deletions
-- Safe for one-way backup/migration
+### ETag-Based Change Detection
 
-### Sync Mode
+The WebDAV source uses ETags as the primary change detection mechanism:
 
-```
-Source ↔ Target (mirror)
-```
+```typescript
+// First sync (no cursor) - full sync
+const { items: firstBatch, nextCursor } = await source.listSince(folder);
+// → Returns all files, cursor contains ETag/size/mtime snapshot
 
-- Makes target an exact mirror of source
-- Deletes files on target that don't exist on source
-- Propagates deletions
-- Use with caution - destructive
-
-### Move Mode
-
-```
-Source → Target (then delete source)
+// Subsequent syncs - delta sync
+const { items: delta } = await source.listSince(folder, nextCursor);
+// → Returns only files with changed ETag, size, or mtime
 ```
 
-- Moves files from source to target
-- Deletes source after successful transfer
-- Useful for migration with cleanup
+**Change Detection Priority:**
+1. **ETag comparison** (primary) - Detects any content change
+2. **Size comparison** (secondary) - Fallback when ETag unavailable
+3. **mtime comparison** (tertiary) - Final fallback indicator
+
+**Cursor Format:**
+The cursor is a base64-encoded JSON object containing:
+```json
+{
+  "folder": "/files/user/documents",
+  "etags": { "/files/user/documents/report.pdf": "abc123" },
+  "sizes": { "/files/user/documents/report.pdf": 12345 },
+  "mtimes": { "/files/user/documents/report.pdf": "2024-01-09T15:30:00Z" }
+}
+```
 
 ## Path Normalization
 

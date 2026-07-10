@@ -4,7 +4,17 @@
   "private": true,
   "type": "module",
   "main": "src/index.ts",
-  "exports": { ".": "./src/index.ts" },
+  "exports": {
+    ".": "./src/index.ts",
+    "./caldav-target-writer": "./src/caldav-target-writer.ts",
+    "./caldav-target-writer.types": "./src/caldav-target-writer.types.ts",
+    "./carddav-target-writer": "./src/carddav-target-writer.ts",
+    "./carddav-target-writer.types": "./src/carddav-target-writer.types.ts",
+    "./webdav-target-writer": "./src/webdav-target-writer.ts",
+    "./webdav-target-writer.types": "./src/webdav-target-writer.types.ts",
+    "./imap-target-writer": "./src/imap-target-writer.ts",
+    "./imap-target-writer.types": "./src/imap-target-writer.types.ts"
+  },
   "dependencies": {
     "@openmig/shared": "workspace:*"
   }

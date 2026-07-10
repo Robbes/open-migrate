@@ -28,3 +28,19 @@ export {
   type WebDAVSyncConfig,
   type WebDAVSyncResult,
 } from './webdav-sync';
+
+// Target writers
+export {
+  CalDAVTargetWriter,
+  type CalDAVTargetConfig,
+} from './caldav-target-writer';
+
+export {
+  CardDAVTargetWriter,
+  type CardDAVTargetConfig,
+} from './carddav-target-writer';
+
+export {
+  WebDAVTargetWriter,
+  type WebDAVTargetConfig,
+} from './webdav-target-writer';
