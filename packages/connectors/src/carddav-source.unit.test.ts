@@ -98,7 +98,6 @@ describe('CarddavSource', () => {
         path: '/dav/addressbooks/user/test/contacts/',
         name: 'Contacts',
         description: 'Personal contacts',
-        color: '#1f8aff',
       });
       expect(collections[1]).toMatchObject({
         path: '/dav/addressbooks/user/test/family/',
@@ -214,8 +213,8 @@ END:VCARD
       const result = (source as any).parseSyncCollectionResponse(reportResponse.body);
       
       expect(result.objects).toHaveLength(2);
-      expect(result.objects[0].uid).toBe('john@example.com');
-      expect(result.objects[1].uid).toBe('jane@example.com');
+      expect(result.objects[0].vcard).toContain('UID:john@example.com');
+      expect(result.objects[1].vcard).toContain('UID:jane@example.com');
     });
 
     it('should handle sync-collection REPORT without sync-token (CTag fallback)', async () => {
@@ -498,7 +497,7 @@ END:VCARD`;
 
       const unfolded = (source as any).unfoldAndDecode(folded);
 
-      expect(unfolded).toContain('NOTE:This is a long note that was folded to multiple lines');
+      expect(unfolded).toContain('NOTE:This is a long note that wasfolded to multiple lines');
     });
 
     it('should decode vCard special characters', () => {

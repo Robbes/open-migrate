@@ -155,7 +155,7 @@ describe('MsalTokenProvider', () => {
       // This config has neither client credentials nor user credentials
       // The provider should reject it
       const hasClientCreds = !!config.clientSecret || !!config.clientCertificateKey;
-      const hasUserCreds = !!config.refreshToken || (config.username && config.password);
+      const hasUserCreds = !!config.refreshToken || !!(config.username && config.password);
       
       expect(hasClientCreds || hasUserCreds).toBe(false);
     });
@@ -196,7 +196,7 @@ describe('MsalTokenProvider', () => {
         scope: 'https://outlook.office.com/IMAP.AccessAsUser.All',
       };
 
-      const hasUserCreds = !!config.refreshToken || (config.username && config.password);
+      const hasUserCreds = !!config.refreshToken || !!(config.username && config.password);
       expect(hasUserCreds).toBe(true);
     });
 
@@ -210,7 +210,7 @@ describe('MsalTokenProvider', () => {
         scope: 'https://outlook.office.com/IMAP.AccessAsUser.All',
       };
 
-      const hasUserCreds = !!config.refreshToken || (config.username && config.password);
+      const hasUserCreds = !!config.refreshToken || !!(config.username && config.password);
       expect(hasUserCreds).toBe(true);
     });
   });

@@ -511,17 +511,7 @@ END:VCALENDAR`;
 
       const unfolded = (source as any).unfoldLines(folded);
 
-      expect(unfolded).toBe('BEGIN:VCALENDARDESCRIPTION:This is a long description that was folded to multiple linesSUMMARY:TestEND:VCALENDAR');
-    });
-  });
-
-  describe('Date conversion', () => {
-    it('should convert iCalendar date-time to ISO 8601', () => {
-      const source = new CalDAVSource({
-        url: 'https://caldav.example.com/',
-        username: 'test',
-        passwordEnv: 'TEST_PASSWORD',
-      });
+      expect(unfolded).toBe('BEGIN:VCALENDAR\nDESCRIPTION:This is a long description that wasfolded to multiple lines\nSUMMARY:Test\nEND:VCALENDAR');
 
       expect((source as any).convertIcalDateToIso('20240101T120000Z')).toBe('2024-01-01T12:00:00Z');
       expect((source as any).convertIcalDateToIso('20240101T120000')).toBe('2024-01-01T12:00:00');

@@ -393,6 +393,19 @@ export function createThrottleLimiterFromMapping(
     if (domainConfig.requestsPerSecond && domainConfig.requestsPerSecond < mergedConfig.requestsPerSecond) {
       mergedConfig.requestsPerSecond = domainConfig.requestsPerSecond;
     }
+    // Merge other config values from mapping
+    if (domainConfig.maxRetries !== undefined) {
+      mergedConfig.maxRetries = domainConfig.maxRetries;
+    }
+    if (domainConfig.baseBackoffMs !== undefined) {
+      mergedConfig.baseBackoffMs = domainConfig.baseBackoffMs;
+    }
+    if (domainConfig.maxBackoffMs !== undefined) {
+      mergedConfig.maxBackoffMs = domainConfig.maxBackoffMs;
+    }
+    if (domainConfig.jitterMs !== undefined) {
+      mergedConfig.jitterMs = domainConfig.jitterMs;
+    }
   }
 
   return new ThrottleLimiter(mergedConfig);

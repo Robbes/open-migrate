@@ -266,7 +266,7 @@ export class CalDAVSource implements CalendarSource {
       const href = hrefMatch[1].trim();
       
       // Check if this is a calendar collection (has calendar-collection type)
-      const isCalendarCollection = /<D:calendar-collection/i.test(responseXml);
+      const isCalendarCollection = /<[CDR]:calendar-collection/i.test(responseXml);
       
       // Skip if not a calendar collection or if it's the home set itself
       if (!isCalendarCollection) continue;
@@ -424,8 +424,8 @@ export class CalDAVSource implements CalendarSource {
    * Returns the UID value (normalized to lowercase).
    */
   extractUidFromIcalendar(icalendar: string): string | null {
-    // Match UID property (case-insensitive)
-    const uidMatch = icalendar.match(/UID[:\s]([^\r\n]+)/i);
+    // Match UID property at start of line (RFC 5545: properties start at beginning of line)
+    const uidMatch = icalendar.match(/^[ \t]*UID[:\s]([^\r\n]+)/im);
     if (!uidMatch || !uidMatch[1]) {
       return null;
     }
@@ -601,7 +601,11 @@ export class CalDAVSource implements CalendarSource {
    */
   private buildUrl(path: string): string {
     const baseUrl = this.config.url.replace(/\/$/, '');
-    const normalizedPath = path.replace(/^\/+/, '');
+    let normalizedPath = path.replace(/^\/+/, '');
+    // Ensure trailing slash for collection URLs
+    if (!normalizedPath.endsWith('/')) {
+      normalizedPath += '/';
+    }
     return `${baseUrl}/${normalizedPath}`;
   }
 

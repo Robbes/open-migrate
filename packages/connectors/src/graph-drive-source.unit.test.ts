@@ -507,6 +507,8 @@ describe('GraphDriveSource', () => {
         '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/delta?deltatoken=abc',
       };
 
+      // listSince is metadata-only: 2 calls for the 2 delta pages
+      // Content fetching happens separately via fetch() (not tested here)
       fetchMock
         .mockResolvedValueOnce({
           status: 200,
@@ -516,16 +518,6 @@ describe('GraphDriveSource', () => {
         .mockResolvedValueOnce({
           status: 200,
           text: async () => JSON.stringify(page2),
-          headers: new Map(),
-        })
-        .mockResolvedValueOnce({
-          status: 200,
-          text: async () => 'content1',
-          headers: new Map(),
-        })
-        .mockResolvedValueOnce({
-          status: 200,
-          text: async () => 'content2',
           headers: new Map(),
         });
 
@@ -538,7 +530,7 @@ describe('GraphDriveSource', () => {
       const result = await driveSource.listSince({ path: '/' });
 
       expect(result.items).toHaveLength(2);
-      expect(fetchMock).toHaveBeenCalledTimes(4); // 2 for delta, 2 for content
+      expect(fetchMock).toHaveBeenCalledTimes(2); // 2 pages, metadata-only
     });
 
     it('should handle deltaLink in nextLink for continued pagination', async () => {

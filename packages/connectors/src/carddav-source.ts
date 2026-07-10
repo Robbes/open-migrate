@@ -414,7 +414,7 @@ export class CarddavSource implements ContactSource {
    * Extract given name from vCard data.
    */
   private extractGivenName(vcard: string): string | undefined {
-    const match = vcard.match(/^N[:\s]([^;]+)/im);
+    const match = vcard.match(/^N[:\s]([^\r\n]+)/im);
     if (match && match[1]) {
       const parts = match[1].split(';');
       if (parts.length >= 2 && parts[1]) {
@@ -428,7 +428,7 @@ export class CarddavSource implements ContactSource {
    * Extract family name from vCard data.
    */
   private extractFamilyName(vcard: string): string | undefined {
-    const match = vcard.match(/^N[:\s]([^;]+)/im);
+    const match = vcard.match(/^N[:\s]([^\r\n]+)/im);
     if (match && match[1]) {
       const parts = match[1].split(';');
       if (parts.length >= 1 && parts[0]) {
@@ -472,11 +472,11 @@ export class CarddavSource implements ContactSource {
       if (valueMatch && valueMatch[1]) {
         const value = this.unfoldAndDecode(valueMatch[1].trim());
         
-        // Extract type (HOME, WORK, MOBILE, etc.)
+        // Extract type (HOME, WORK, MOBILE/CELL, etc.)
         let type: 'home' | 'work' | 'mobile' | 'other' = 'other';
         if (/;HOME/i.test(fullLine)) type = 'home';
         else if (/;WORK/i.test(fullLine)) type = 'work';
-        else if (/;MOBILE/i.test(fullLine)) type = 'mobile';
+        else if (/;MOBILE/i.test(fullLine) || /;CELL/i.test(fullLine)) type = 'mobile';
         
         phones.push({ value, type });
       }
@@ -727,7 +727,11 @@ export class CarddavSource implements ContactSource {
    */
   private buildUrl(path: string): string {
     const baseUrl = this.config.url.replace(/\/$/, '');
-    const normalizedPath = path.replace(/^\/+/, '');
+    let normalizedPath = path.replace(/^\/+/, '');
+    // Ensure trailing slash for collection URLs
+    if (!normalizedPath.endsWith('/')) {
+      normalizedPath += '/';
+    }
     return `${baseUrl}/${normalizedPath}`;
   }
 

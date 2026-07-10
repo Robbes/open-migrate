@@ -112,23 +112,26 @@ describe('ThrottleLimiter', () => {
     });
 
     it('should handle 429 response with Retry-After header', async () => {
+      // Use real timers since the retry logic involves nested async operations
+      vi.useRealTimers();
+
       const limiter = new ThrottleLimiter({
         maxConcurrent: 10,
         requestsPerSecond: 100,
         maxRetries: 5,
-        baseBackoffMs: 100,
-        maxBackoffMs: 60000,
-        jitterMs: 0, // Disable jitter for predictable testing
+        baseBackoffMs: 10,  // Short backoff for faster tests
+        maxBackoffMs: 100,
+        jitterMs: 0,
       });
 
       let callCount = 0;
       const mockResponse = {
         status: 429,
-        headers: { 'retry-after': '2' }, // 2 seconds
+        headers: { 'retry-after': '1' }, // 1 second
         body: 'Rate limited',
       };
 
-      const promise = limiter.executeWithThrottling('tenant1', 'graph.microsoft.com', async () => {
+      const result = await limiter.executeWithThrottling('tenant1', 'graph.microsoft.com', async () => {
         callCount++;
         if (callCount === 1) {
           return mockResponse;
@@ -136,11 +139,8 @@ describe('ThrottleLimiter', () => {
         return { status: 200, headers: {}, body: 'Success' };
       });
 
-      // Fast-forward time to simulate waiting
-      await vi.advanceTimersByTimeAsync(2000);
-      await promise;
-
       expect(callCount).toBe(2);
+      expect(result.status).toBe(200);
       const stats = limiter.getStats();
       expect(stats.throttleEvents).toBe(1);
       expect(stats.retryAttempts).toBe(1);
@@ -260,12 +260,15 @@ describe('ThrottleLimiter', () => {
     });
 
     it('should stop retrying after max retries exceeded', async () => {
+      // Use real timers since the retry logic uses setTimeout directly
+      vi.useRealTimers();
+
       const limiter = new ThrottleLimiter({
         maxConcurrent: 10,
         requestsPerSecond: 100,
         maxRetries: 2,
-        baseBackoffMs: 100,
-        maxBackoffMs: 60000,
+        baseBackoffMs: 10,  // Short backoff for faster tests
+        maxBackoffMs: 100,
         jitterMs: 0,
       });
 
@@ -277,11 +280,8 @@ describe('ThrottleLimiter', () => {
         throw mockError;
       });
 
-      await vi.advanceTimersByTimeAsync(100);
-      await vi.advanceTimersByTimeAsync(200);
-      
       await expect(promise).rejects.toThrow('Connection timeout');
-      
+
       expect(callCount).toBe(3); // Initial + 2 retries
       const stats = limiter.getStats();
       expect(stats.exceededMaxRetries).toBe(1);
@@ -316,6 +316,8 @@ describe('ThrottleLimiter', () => {
         activeCount--;
       });
 
+      // Advance fake timers to complete all async operations
+      await vi.runAllTimersAsync();
       await Promise.all(promises);
 
       expect(maxActive).toBeLessThanOrEqual(2);
@@ -545,30 +547,33 @@ describe('ThrottleLimiter', () => {
     });
 
     it('should retry on transient errors', async () => {
+      // Use real timers for this test since it exercises the full retry loop
+      // which has nested async operations that are hard to simulate with fake timers
+      vi.useRealTimers();
+
       const limiter = new ThrottleLimiter({
         maxConcurrent: 10,
         requestsPerSecond: 100,
         maxRetries: 3,
-        baseBackoffMs: 100,
-        maxBackoffMs: 60000,
+        baseBackoffMs: 10,  // Use shorter backoff for faster tests
+        maxBackoffMs: 100,
         jitterMs: 0,
       });
 
       let callCount = 0;
 
-      const promise = limiter.executeWithThrottling('tenant1', 'graph.microsoft.com', async () => {
+      // The error message must match the transient error patterns in isTransientError()
+      // which checks for 'etimedout' (lowercase)
+      const result = await limiter.executeWithThrottling('tenant1', 'graph.microsoft.com', async () => {
         callCount++;
         if (callCount < 3) {
-          throw new Error('ETIMEDOUT');
+          throw new Error('Connection timeout - ETIMEDOUT');
         }
         return { status: 200, headers: {}, body: 'Success' };
       });
 
-      await vi.advanceTimersByTimeAsync(100);
-      await vi.advanceTimersByTimeAsync(200);
-      await promise;
-
       expect(callCount).toBe(3);
+      expect(result.status).toBe(200);
     });
   });
 });

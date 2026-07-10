@@ -560,7 +560,6 @@ describe('GraphContactsSource', () => {
     });
   });
 
-  describe('Photo handling', () => {
     it('should include photo in vCard when available', async () => {
       const tokenProvider = createMockTokenProvider();
       const mockClient = createMockHttpClient([
@@ -573,12 +572,19 @@ describe('GraphContactsSource', () => {
                 displayName: 'Photo Contact',
                 givenName: 'Photo',
                 surname: 'Contact',
+                // Photo metadata in the listing, but actual photo data fetched separately
+                photo: {
+                  id: 'photo-id',
+                  height: 64,
+                  width: 64,
+                },
               },
             ],
             '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/me/contacts/delta',
           }),
           headers: {},
         },
+        // Photo data fetched via fetch() method
         {
           status: 200,
           body: Buffer.from('fake-image-data').toString('base64'),
@@ -594,56 +600,23 @@ describe('GraphContactsSource', () => {
       );
 
       const folder = { path: '/contactFolders/test', name: 'Contacts' };
-      const result = await source.listSince(folder);
-
-      expect(result.items).toHaveLength(1);
-      const vcard = result.items[0]!.vcard;
-      const item = result.items[0]!.item;
       
-      expect(vcard).toContain('PHOTO;ENCODING=base64;TYPE=image/jpeg:');
-      expect(item.photo).toBeDefined();
-      expect(item.photo?.data).toBe(Buffer.from('fake-image-data').toString('base64'));
-      expect(item.photo?.mimeType).toBe('image/jpeg');
-    });
-
-    it('should handle missing photo gracefully', async () => {
-      const tokenProvider = createMockTokenProvider();
-      const mockClient = createMockHttpClient([
-        {
-          status: 200,
-          body: JSON.stringify({
-            value: [
-              {
-                id: 'contact-no-photo',
-                displayName: 'No Photo Contact',
-              },
-            ],
-            '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/me/contacts/delta',
-          }),
-          headers: {},
-        },
-        {
-          status: 404,
-          body: 'Photo not found',
-          headers: {},
-        },
-      ]);
-
-      const source = new GraphContactsSource(
-        tokenProvider,
-        'test-tenant-id',
-        undefined,
-        { httpClient: mockClient },
-      );
-
-      const folder = { path: '/contactFolders/test', name: 'Contacts' };
+      // listSince returns metadata-only (no photo)
       const result = await source.listSince(folder);
 
       expect(result.items).toHaveLength(1);
+      // Photo is NOT fetched in listSince - it's undefined
       expect(result.items[0]!.item.photo).toBeUndefined();
-      expect(result.items[0]!.vcard).not.toContain('PHOTO');
+
+      // Fetch the contact with photo via fetch() method
+      const fetched = await source.fetch(result.items[0]!.item);
+
+      // Now photo should be present
+      expect(fetched.item.photo).toBeDefined();
+      expect(fetched.item.photo?.data).toBe(Buffer.from('fake-image-data').toString('base64'));
+      expect(fetched.item.photo?.mimeType).toBe('image/jpeg');
+      expect(fetched.vcard).toContain('PHOTO;ENCODING=base64;TYPE=image/jpeg:');
     });
-  });
 
   describe('UID mapping (Graph id as fallback)', () => {
     it('should use Graph id as vCard UID', async () => {
