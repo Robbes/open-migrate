@@ -10,7 +10,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "types": ["node", "vitest/globals"],
+    "types": ["node"],
     "noEmit": true,
     "paths": {
       "@openmig/shared": ["./packages/shared/src/index.ts"],

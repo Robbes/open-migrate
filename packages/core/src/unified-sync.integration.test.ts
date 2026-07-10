@@ -9,7 +9,7 @@
 // - Reindex (wipe ledger → reindex creates 0)
 // - Multi-domain test: All domains sync together with aggregated stats
 
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { createPgDb, PgLedger, PgCursorStore } from '@openmig/ledger';
 import { CalDAVSource } from '@openmig/connectors/caldav-source';

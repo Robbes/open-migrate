@@ -12,7 +12,7 @@
 // - Cursor round-trip (second call returns only changes)
 // - Idempotency: run twice, second run creates 0 items
 
-import { describe, it, expect, beforeAll, beforeEach, afterAll, skip } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { CalDAVSource } from './caldav-source';
 import type { CalDAVSourceConfig } from './caldav-source.types';
 import type { RawCalendarEvent as _RawCalendarEvent } from '@openmig/shared';
