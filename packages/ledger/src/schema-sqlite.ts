@@ -403,6 +403,99 @@ export const cutover = sqliteTable(
   },
 );
 
+// ========================= Cutover State Machine (persistent) =========================
+
+export const cutoverState = sqliteTable(
+  'cutover_state',
+  {
+    id: text('id').primaryKey(),
+    tenantId: text('tenant_id')
+      .notNull()
+      .references(() => tenant.id),
+    mappingId: text('mapping_id')
+      .notNull()
+      .references(() => mailboxMapping.id),
+    state: text('state', {
+      enum: [
+        'PREPARING',
+        'READY_FOR_CUTOVER',
+        'CUTOVER_IN_PROGRESS',
+        'GRACE_PERIOD',
+        'COMPLETED',
+        'FAILED',
+        'ROLLED_BACK',
+      ],
+    })
+      .notNull()
+      .default('PREPARING'),
+    phase: text('phase', {
+      enum: ['verification', 'approval', 'cutover', 'grace', 'completion', 'rollback'],
+    })
+      .notNull()
+      .default('verification'),
+    verificationStatus: text('verification_status', {
+      enum: ['pending', 'pass', 'fail', 'warn', 'skipped'],
+    })
+      .notNull()
+      .default('pending'),
+    verificationReport: text('verification_report', { mode: 'json' }).notNull().default('{}'),
+    gracePeriodHours: integer('grace_period_hours').notNull().default(72),
+    gracePeriodStartedAt: text('grace_period_started_at'),
+    gracePeriodCompletedAt: text('grace_period_completed_at'),
+    metadata: text('metadata', { mode: 'json' }).notNull().default('{}'),
+    createdAt: text('created_at').notNull().default(''),
+    updatedAt: text('updated_at').notNull().default(''),
+  },
+  (t) => [
+    uniqueIndex('uk_cutover_state_mapping').on(t.tenantId, t.mappingId),
+    index('ix_cutover_state_tenant').on(t.tenantId),
+    index('ix_cutover_state_mapping').on(t.mappingId),
+  ],
+);
+
+export const cutoverEvent = sqliteTable(
+  'cutover_event',
+  {
+    id: text('id').primaryKey(),
+    tenantId: text('tenant_id')
+      .notNull()
+      .references(() => tenant.id),
+    mappingId: text('mapping_id')
+      .notNull()
+      .references(() => mailboxMapping.id),
+    timestamp: text('timestamp').notNull().default(''),
+    fromState: text('from_state', {
+      enum: [
+        'PREPARING',
+        'READY_FOR_CUTOVER',
+        'CUTOVER_IN_PROGRESS',
+        'GRACE_PERIOD',
+        'COMPLETED',
+        'FAILED',
+        'ROLLED_BACK',
+      ],
+    }).notNull(),
+    toState: text('to_state', {
+      enum: [
+        'PREPARING',
+        'READY_FOR_CUTOVER',
+        'CUTOVER_IN_PROGRESS',
+        'GRACE_PERIOD',
+        'COMPLETED',
+        'FAILED',
+        'ROLLED_BACK',
+      ],
+    }).notNull(),
+    triggeredBy: text('triggered_by').notNull(),
+    reason: text('reason'),
+    metadata: text('metadata', { mode: 'json' }).notNull().default('{}'),
+  },
+  (t) => [
+    index('ix_cutover_event_mapping').on(t.mappingId, t.timestamp),
+    index('ix_cutover_event_tenant').on(t.tenantId, t.timestamp),
+  ],
+);
+
 // ========================= Optional backup target =========================
 
 export const backupTarget = sqliteTable(

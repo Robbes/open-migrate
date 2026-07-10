@@ -393,6 +393,95 @@ export const cutover = pgTable(
   },
 );
 
+// ========================= Cutover State Machine (persistent) =========================
+
+export const cutoverState = pgTable(
+  'cutover_state',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenant.id, { onDelete: 'cascade' }),
+    mappingId: uuid('mapping_id')
+      .notNull()
+      .references(() => mailboxMapping.id, { onDelete: 'cascade' }),
+    state: text('state', {
+      enum: [
+        'PREPARING',
+        'READY_FOR_CUTOVER',
+        'CUTOVER_IN_PROGRESS',
+        'GRACE_PERIOD',
+        'COMPLETED',
+        'FAILED',
+        'ROLLED_BACK',
+      ],
+    })
+      .notNull()
+      .default('PREPARING'),
+    phase: text('phase', {
+      enum: ['verification', 'approval', 'cutover', 'grace', 'completion', 'rollback'],
+    })
+      .notNull()
+      .default('verification'),
+    verificationStatus: text('verification_status', {
+      enum: ['pending', 'pass', 'fail', 'warn', 'skipped'],
+    })
+      .notNull()
+      .default('pending'),
+    verificationReport: jsonb('verification_report').notNull().default({}),
+    gracePeriodHours: integer('grace_period_hours').notNull().default(72),
+    gracePeriodStartedAt: timestamp('grace_period_started_at', { withTimezone: true }),
+    gracePeriodCompletedAt: timestamp('grace_period_completed_at', { withTimezone: true }),
+    metadata: jsonb('metadata').notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('uk_cutover_state_mapping').on(t.tenantId, t.mappingId),
+    index('ix_cutover_state_tenant').on(t.tenantId),
+    index('ix_cutover_state_mapping').on(t.mappingId),
+  ],
+);
+
+export const cutoverEvent = pgTable(
+  'cutover_event',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenant.id, { onDelete: 'cascade' }),
+    mappingId: uuid('mapping_id')
+      .notNull()
+      .references(() => mailboxMapping.id, { onDelete: 'cascade' }),
+    timestamp: timestamp('timestamp', { withTimezone: true }).notNull().defaultNow(),
+    fromState: text('from_state', {
+      enum: [
+        'PREPARING',
+        'READY_FOR_CUTOVER',
+        'CUTOVER_IN_PROGRESS',
+        'GRACE_PERIOD',
+        'COMPLETED',
+        'FAILED',
+        'ROLLED_BACK',
+      ],
+    }).notNull(),
+    toState: text('to_state', {
+      enum: [
+        'PREPARING',
+        'READY_FOR_CUTOVER',
+        'CUTOVER_IN_PROGRESS',
+        'GRACE_PERIOD',
+        'COMPLETED',
+        'FAILED',
+        'ROLLED_BACK',
+      ],
+    }).notNull(),
+    triggeredBy: text('triggered_by').notNull(),
+    reason: text('reason'),
+    metadata: jsonb('metadata').notNull().default({}),
+  },
+  (t) => [
+    index('ix_cutover_event_mapping').on(t.mappingId, t.timestamp),
+    index('ix_cutover_event_tenant').on(t.tenantId, t.timestamp),
+  ],
+);
+
 // ========================= Optional backup target =========================
 
 export const backupTarget = pgTable(
