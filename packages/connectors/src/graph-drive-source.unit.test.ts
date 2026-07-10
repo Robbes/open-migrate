@@ -36,6 +36,12 @@ describe('GraphDriveSource', () => {
     // Setup fetch mock
     fetchMock = vi.fn();
     global.fetch = fetchMock;
+    
+    // Mock setTimeout to return immediately for faster tests
+    vi.spyOn(global, 'setTimeout').mockImplementation((fn: () => void) => {
+      fn();
+      return {} as any;
+    });
   });
 
   afterEach(() => {
