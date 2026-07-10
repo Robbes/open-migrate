@@ -13,21 +13,57 @@
  * 
  * Architecture: Connectors are injected via UnifiedSyncDeps following ports & adapters.
  * This keeps the core stack-independent - no direct dependency on @openmig/connectors.
+ * Config interfaces are defined locally to avoid coupling to implementation packages.
  */
 
 import type { TenantId, MappingId, Ledger, CursorStore } from '@openmig/shared';
-import { runGenericSync, type GenericSyncResult, type GenericSource, type GenericTargetWriter, type GenericFolder, type GenericItem, type GenericRawItem } from './generic-sync';
+import { runGenericSync, type GenericSyncResult, type GenericSource, type GenericTargetWriter, type GenericFolder, type GenericItem } from './generic-sync';
 
-// Type-only imports for config interfaces (used in UnifiedSyncConfig)
-import type { CalDAVSourceConfig } from '@openmig/connectors';
-import type { RawCalendarEvent } from '@openmig/shared';
-import type { CalDAVTargetConfig } from '@openmig/engines';
-import type { CardDAVSourceConfig } from '@openmig/connectors';
-import type { RawContact } from '@openmig/shared';
-import type { CardDAVTargetConfig } from '@openmig/engines';
-import type { WebDAVSourceConfig } from '@openmig/connectors';
-import type { RawFileItem } from '@openmig/shared';
-import type { WebDAVTargetConfig } from '@openmig/engines';
+// Local config interfaces (ports & adapters - core doesn't depend on connectors/engines)
+export interface CalDAVSourceConfig {
+  url: string;
+  username: string;
+  passwordEnv: string;
+  calendarHomeSet?: string;
+}
+
+export interface CalDAVTargetConfig {
+  url: string;
+  username: string;
+  password: string;
+  homeSet?: string;
+  color?: string;
+  description?: string;
+}
+
+export interface CardDAVSourceConfig {
+  url: string;
+  username: string;
+  passwordEnv: string;
+  addressBookHomeSet?: string;
+}
+
+export interface CardDAVTargetConfig {
+  url: string;
+  username: string;
+  password: string;
+  homeSet?: string;
+}
+
+export interface WebDAVSourceConfig {
+  url: string;
+  username: string;
+  passwordEnv: string;
+  rootPath?: string;
+}
+
+export interface WebDAVTargetConfig {
+  url: string;
+  username: string;
+  password: string;
+  rootPath?: string;
+  httpClient?: unknown;
+}
 
 export interface UnifiedSyncConfig {
   tenantId: TenantId;
@@ -72,17 +108,18 @@ export interface UnifiedSyncDeps {
   // Injected connector instances (ports & adapters pattern)
   // Core doesn't construct connectors - they're provided by the caller
   caldavSource?: GenericSource<CalDAVFolder, CalDAVItem>;
-  caldavWriter?: GenericTargetWriter<CalDAVFolder, CalDAVItem>;
+  caldavWriter?: GenericTargetWriter<CalDAVFolder>;
   carddavSource?: GenericSource<CardDAVFolder, CardDAVItem>;
-  carddavWriter?: GenericTargetWriter<CardDAVFolder, CardDAVItem>;
+  carddavWriter?: GenericTargetWriter<CardDAVFolder>;
   webdavSource?: GenericSource<WebDAVFolder, WebDAVItem>;
-  webdavWriter?: GenericTargetWriter<WebDAVFolder, WebDAVItem>;
+  webdavWriter?: GenericTargetWriter<WebDAVFolder>;
 }
 
 /**
  * CalDAV Folder type implementing GenericFolder
  */
 export interface CalDAVFolder extends GenericFolder {
+  readonly id: string;
   readonly path: string;
   readonly name: string;
   readonly color?: string;
@@ -93,6 +130,7 @@ export interface CalDAVFolder extends GenericFolder {
  * CalDAV Item type implementing GenericItem
  */
 export interface CalDAVItem extends GenericItem {
+  readonly naturalKey: string;
   readonly uid: string;
   readonly type: string;
   readonly summary: string;
@@ -103,6 +141,7 @@ export interface CalDAVItem extends GenericItem {
  * CardDAV Folder type implementing GenericFolder
  */
 export interface CardDAVFolder extends GenericFolder {
+  readonly id: string;
   readonly path: string;
   readonly name: string;
   readonly description?: string;
@@ -113,6 +152,7 @@ export interface CardDAVFolder extends GenericFolder {
  * CardDAV Item type implementing GenericItem
  */
 export interface CardDAVItem extends GenericItem {
+  readonly naturalKey: string;
   readonly uid: string;
   readonly type: string;
   readonly name: string;
@@ -123,6 +163,7 @@ export interface CardDAVItem extends GenericItem {
  * WebDAV Folder type implementing GenericFolder
  */
 export interface WebDAVFolder extends GenericFolder {
+  readonly id: string;
   readonly path: string;
   readonly name: string;
   readonly description?: string;
@@ -136,138 +177,12 @@ export interface WebDAVFolder extends GenericFolder {
  * WebDAV Item type implementing GenericItem
  */
 export interface WebDAVItem extends GenericItem {
+  readonly naturalKey: string;
   readonly path: string;
   readonly isDirectory: boolean;
   readonly size: number;
-}
-
-/**
- * Adapter to wrap CalDAVTargetWriter for GenericTargetWriter interface
- */
-class CalDAVTargetWriterAdapter implements GenericTargetWriter<CalDAVFolder> {
-  private readonly writer: CalDAVTargetWriter;
-
-  constructor(config: CalDAVTargetConfig, deps: { ledger: Ledger; tenantId: TenantId; mappingId: MappingId }) {
-    this.writer = new CalDAVTargetWriter(config, deps);
-  }
-
-  async ensureFolder(folder: CalDAVFolder): Promise<string> {
-    return this.writer.ensureCalendar(folder);
-  }
-
-  async upsertItem(folderId: string, naturalKey: string, raw: GenericRawItem): Promise<{ targetId: string; created: boolean }> {
-    // Convert GenericRawItem to RawCalendarEvent
-    const rawCalendarEvent: RawCalendarEvent = {
-      item: {
-        uid: naturalKey,
-        type: 'event',
-        summary: raw.metadata?.summary || 'Untitled Event',
-        start: '2024-01-01T00:00:00Z',
-        sourcePath: raw.metadata?.sourcePath || '',
-        icalendar: raw.content as string,
-      },
-      icalendar: raw.content as string,
-    };
-
-    const result = await this.writer.upsertCalendarEvent(folderId, rawCalendarEvent);
-    return {
-      targetId: result.targetId,
-      created: result.created,
-    };
-  }
-
-  async findByNaturalKey(folderId: string, naturalKey: string): Promise<string | undefined> {
-    return this.writer.findCalendarByNaturalKey(folderId, naturalKey);
-  }
-}
-
-/**
- * Adapter to wrap CardDAVTargetWriter for GenericTargetWriter interface
- */
-class CardDAVTargetWriterAdapter implements GenericTargetWriter<CardDAVFolder> {
-  private readonly writer: CardDAVTargetWriter;
-
-  constructor(config: CardDAVTargetConfig, deps: { ledger: Ledger; tenantId: TenantId; mappingId: MappingId }) {
-    this.writer = new CardDAVTargetWriter(config, deps);
-  }
-
-  async ensureFolder(folder: CardDAVFolder): Promise<string> {
-    return this.writer.ensureContactFolder(folder);
-  }
-
-  async upsertItem(folderId: string, naturalKey: string, raw: GenericRawItem): Promise<{ targetId: string; created: boolean }> {
-    // Convert GenericRawItem to RawContact
-    const rawContact: RawContact = {
-      item: {
-        uid: naturalKey,
-        type: 'person',
-        name: raw.metadata?.name || 'Unknown Contact',
-        sourcePath: raw.metadata?.sourcePath || '',
-        vcard: raw.content as string,
-        version: '4.0',
-      },
-      vcard: raw.content as string,
-    };
-
-    const result = await this.writer.upsertContact(folderId, rawContact);
-    return {
-      targetId: result.targetId,
-      created: result.created,
-    };
-  }
-
-  async findByNaturalKey(folderId: string, naturalKey: string): Promise<string | undefined> {
-    return this.writer.findContactByNaturalKey(folderId, naturalKey);
-  }
-}
-
-/**
- * Adapter to wrap WebDAVTargetWriter for GenericTargetWriter interface
- */
-class WebDAVTargetWriterAdapter implements GenericTargetWriter<WebDAVFolder> {
-  private readonly writer: WebDAVTargetWriter;
-
-  constructor(config: WebDAVTargetConfig, deps: { ledger: Ledger; tenantId: TenantId; mappingId: MappingId }) {
-    this.writer = new WebDAVTargetWriter(config, deps);
-  }
-
-  async ensureFolder(folder: WebDAVFolder): Promise<string> {
-    return this.writer.ensureDirectory(folder);
-  }
-
-  async upsertItem(folderId: string, naturalKey: string, raw: GenericRawItem): Promise<{ targetId: string; created: boolean }> {
-    // Convert GenericRawItem to RawFileItem
-    // Handle both string and ArrayBuffer content
-    let content: Uint8Array | undefined;
-    if (raw.content instanceof ArrayBuffer) {
-      content = new Uint8Array(raw.content);
-    } else if (typeof raw.content === 'string') {
-      // Convert string to Uint8Array
-      const encoder = new TextEncoder();
-      content = encoder.encode(raw.content);
-    }
-    
-    const rawFileItem: RawFileItem = {
-      item: {
-        path: naturalKey,
-        isDirectory: raw.metadata?.type === 'directory',
-        size: parseInt(raw.metadata?.size || '0', 10),
-        modifiedAt: new Date().toISOString(),
-        sourceRef: naturalKey,
-      },
-      content,
-    };
-
-    const result = await this.writer.upsertFile(folderId, rawFileItem);
-    return {
-      targetId: result.targetId,
-      created: result.created,
-    };
-  }
-
-  async findByNaturalKey(folderId: string, naturalKey: string): Promise<string | undefined> {
-    return this.writer.findFileByNaturalKey(folderId, naturalKey);
-  }
+  readonly type: string;
+  readonly sourcePath: string;
 }
 
 /**
@@ -289,10 +204,9 @@ function convertToTypeSyncStats(result: GenericSyncResult, durationSeconds: numb
  * Run unified sync across all enabled domains.
  * 
  * For each enabled domain:
- * 1. Use the injected source connector (or create from config if not injected)
- * 2. Use the injected target writer (or create from config if not injected)
- * 3. Call runGenericSync with the source, writer, ledger, and cursors
- * 4. Aggregate results into UnifiedSyncResult
+ * 1. Use the injected source connector and target writer (must be provided)
+ * 2. Call runGenericSync with the source, writer, ledger, and cursors
+ * 3. Aggregate results into UnifiedSyncResult
  * 
  * Fail loud: if a domain errors, surface the error (don't return zeros)
  */
@@ -319,26 +233,20 @@ export async function runUnifiedSync(
   // Calendar domain
   if (config.calendar?.enabled) {
     const caldavSource = deps.caldavSource;
-    const caldavTarget = config.caldavTarget;
-    if (!caldavSource || !caldavTarget) {
-      throw new Error('CalDAV source and target configuration required for calendar sync');
+    const caldavWriter = deps.caldavWriter;
+    if (!caldavSource || !caldavWriter) {
+      throw new Error('CalDAV source and writer required for calendar sync (inject via UnifiedSyncDeps)');
     }
 
     domainPromises.push(
       (async () => {
         const domainStart = Date.now();
         try {
-          const writer = new CalDAVTargetWriterAdapter(caldavTarget, {
-            ledger,
-            tenantId: config.tenantId,
-            mappingId: config.mappingId,
-          });
-
           const syncResult = await runGenericSync({
             tenantId: config.tenantId,
             mappingId: config.mappingId,
             source: caldavSource,
-            target: writer,
+            target: caldavWriter,
             ledger,
             cursors,
             concurrency,
@@ -361,26 +269,20 @@ export async function runUnifiedSync(
   // Contacts domain
   if (config.contacts?.enabled) {
     const carddavSource = deps.carddavSource;
-    const carddavTarget = config.carddavTarget;
-    if (!carddavSource || !carddavTarget) {
-      throw new Error('CardDAV source and target configuration required for contacts sync');
+    const carddavWriter = deps.carddavWriter;
+    if (!carddavSource || !carddavWriter) {
+      throw new Error('CardDAV source and writer required for contacts sync (inject via UnifiedSyncDeps)');
     }
 
     domainPromises.push(
       (async () => {
         const domainStart = Date.now();
         try {
-          const writer = new CardDAVTargetWriterAdapter(carddavTarget, {
-            ledger,
-            tenantId: config.tenantId,
-            mappingId: config.mappingId,
-          });
-
           const syncResult = await runGenericSync({
             tenantId: config.tenantId,
             mappingId: config.mappingId,
             source: carddavSource,
-            target: writer,
+            target: carddavWriter,
             ledger,
             cursors,
             concurrency,
@@ -403,26 +305,20 @@ export async function runUnifiedSync(
   // Files domain
   if (config.files?.enabled) {
     const webdavSource = deps.webdavSource;
-    const webdavTarget = config.webdavTarget;
-    if (!webdavSource || !webdavTarget) {
-      throw new Error('WebDAV source and target configuration required for files sync');
+    const webdavWriter = deps.webdavWriter;
+    if (!webdavSource || !webdavWriter) {
+      throw new Error('WebDAV source and writer required for files sync (inject via UnifiedSyncDeps)');
     }
 
     domainPromises.push(
       (async () => {
         const domainStart = Date.now();
         try {
-          const writer = new WebDAVTargetWriterAdapter(webdavTarget, {
-            ledger,
-            tenantId: config.tenantId,
-            mappingId: config.mappingId,
-          });
-
           const syncResult = await runGenericSync({
             tenantId: config.tenantId,
             mappingId: config.mappingId,
             source: webdavSource,
-            target: writer,
+            target: webdavWriter,
             ledger,
             cursors,
             concurrency,
@@ -453,3 +349,13 @@ export async function runUnifiedSync(
 
   return result;
 }
+
+// Re-export types for external usage
+export type {
+  GenericSyncResult,
+  GenericSource,
+  GenericTargetWriter,
+  GenericFolder,
+  GenericItem,
+  GenericRawItem,
+} from './generic-sync';

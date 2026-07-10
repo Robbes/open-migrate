@@ -11,83 +11,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Ledger, CursorStore, SyncCursor, GenericSource, GenericTargetWriter } from '@openmig/shared';
-import { runUnifiedSync, type UnifiedSyncConfig, type CalDAVFolder, type CalDAVItem, type CardDAVFolder, type CardDAVItem, type WebDAVFolder, type WebDAVItem } from './unified-sync';
+import type { Ledger, CursorStore } from '@openmig/shared';
+import { asTenantId, asMappingId } from '@openmig/shared';
+import { runUnifiedSync, type UnifiedSyncConfig } from './unified-sync';
+import { createFakeCalDAVSource, createFakeCardDAVSource, createFakeWebDAVSource, createFakeCalDAVTargetWriter, createFakeCardDAVTargetWriter, createFakeWebDAVTargetWriter } from './unified-sync.test-fakes';
 
-// Fake implementations for testing
-function createFakeCalDAVSource() {
-  const listFolders = vi.fn().mockResolvedValue([]);
-  const listSince = vi.fn().mockResolvedValue({ items: [], nextCursor: { value: '' } as SyncCursor });
-  const fetch = vi.fn().mockResolvedValue({ content: '', metadata: {} });
-
-  return {
-    listFolders,
-    listSince,
-    fetch,
-  } as unknown as GenericSource<CalDAVFolder, CalDAVItem>;
-}
-
-function createFakeCardDAVSource() {
-  const listFolders = vi.fn().mockResolvedValue([]);
-  const listSince = vi.fn().mockResolvedValue({ items: [], nextCursor: { value: '' } as SyncCursor });
-  const fetch = vi.fn().mockResolvedValue({ content: '', metadata: {} });
-
-  return {
-    listFolders,
-    listSince,
-    fetch,
-  } as unknown as GenericSource<CardDAVFolder, CardDAVItem>;
-}
-
-function createFakeWebDAVSource() {
-  const listFolders = vi.fn().mockResolvedValue([]);
-  const listSince = vi.fn().mockResolvedValue({ items: [], nextCursor: { value: '' } as SyncCursor });
-  const fetch = vi.fn().mockResolvedValue({ content: '', metadata: {} });
-
-  return {
-    listFolders,
-    listSince,
-    fetch,
-  } as unknown as GenericSource<WebDAVFolder, WebDAVItem>;
-}
-
-function createFakeCalDAVTargetWriter() {
-  const ensureFolder = vi.fn().mockResolvedValue('calendar/');
-  const upsertItem = vi.fn().mockResolvedValue({ targetId: 'calendar/event.ics', created: true });
-  const findByNaturalKey = vi.fn().mockResolvedValue(undefined);
-
-  return {
-    ensureFolder,
-    upsertItem,
-    findByNaturalKey,
-  } as unknown as GenericTargetWriter<CalDAVFolder, CalDAVItem>;
-}
-
-function createFakeCardDAVTargetWriter() {
-  const ensureFolder = vi.fn().mockResolvedValue('contacts/');
-  const upsertItem = vi.fn().mockResolvedValue({ targetId: 'contacts/contact.vcf', created: true });
-  const findByNaturalKey = vi.fn().mockResolvedValue(undefined);
-
-  return {
-    ensureFolder,
-    upsertItem,
-    findByNaturalKey,
-  } as unknown as GenericTargetWriter<CardDAVFolder, CardDAVItem>;
-}
-
-function createFakeWebDAVTargetWriter() {
-  const ensureFolder = vi.fn().mockResolvedValue('files/');
-  const upsertItem = vi.fn().mockResolvedValue({ targetId: 'files/file.txt', created: true });
-  const findByNaturalKey = vi.fn().mockResolvedValue(undefined);
-
-  return {
-    ensureFolder,
-    upsertItem,
-    findByNaturalKey,
-  } as unknown as GenericTargetWriter<WebDAVFolder, WebDAVItem>;
-}
-
-// Mock ledger
 const mockLedger: Ledger = {
   find: vi.fn().mockResolvedValue(undefined),
   recordIfAbsent: vi.fn().mockResolvedValue(undefined),
@@ -106,8 +34,8 @@ describe('runUnifiedSync', () => {
 
   it('should return empty stats when no domains are enabled', async () => {
     const config: UnifiedSyncConfig = {
-      tenantId: 'tenant-1',
-      mappingId: 'mapping-1',
+      tenantId: asTenantId('tenant-1'),
+      mappingId: asMappingId('mapping-1'),
     };
 
     const result = await runUnifiedSync({
@@ -145,12 +73,14 @@ describe('runUnifiedSync', () => {
     });
 
     const config: UnifiedSyncConfig = {
-      tenantId: 'tenant-1',
-      mappingId: 'mapping-1',
+      tenantId: asTenantId('tenant-1'),
+      mappingId: asMappingId('mapping-1'),
       calendar: { enabled: true },
       caldavTarget: {
-        calendarHomeSet: 'https://caldav.example.com/',
-        httpClient: { request: vi.fn() },
+        url: 'https://caldav.example.com',
+        username: 'user',
+        password: 'pass',
+        homeSet: 'https://caldav.example.com/',
       },
     };
 
@@ -186,12 +116,14 @@ describe('runUnifiedSync', () => {
     });
 
     const config: UnifiedSyncConfig = {
-      tenantId: 'tenant-1',
-      mappingId: 'mapping-1',
+      tenantId: asTenantId('tenant-1'),
+      mappingId: asMappingId('mapping-1'),
       contacts: { enabled: true },
       carddavTarget: {
-        addressBookHomeSet: 'https://carddav.example.com/',
-        httpClient: { request: vi.fn() },
+        url: 'https://carddav.example.com',
+        username: 'user',
+        password: 'pass',
+        homeSet: 'https://carddav.example.com/',
       },
     };
 
@@ -217,22 +149,24 @@ describe('runUnifiedSync', () => {
     ]);
     webdavSource.listSince.mockResolvedValue({
       items: [
-        { path: '/files/file1.txt', isDirectory: false, size: 1024, naturalKey: 'file1', uid: 'file1', type: 'file', sourcePath: '/files/file1.txt' }
+        { path: '/files/file1.txt', isDirectory: false, size: 1024, naturalKey: 'file1', type: 'file', sourcePath: '/files/file1.txt' }
       ],
       nextCursor: { value: 'cursor1' }
     });
     webdavSource.fetch.mockResolvedValue({
       content: 'file content',
-      metadata: { path: '/files/file1.txt', isDirectory: false, size: 1024 }
+      metadata: { path: '/files/file1.txt', isDirectory: 'false', size: '1024' }
     });
 
     const config: UnifiedSyncConfig = {
-      tenantId: 'tenant-1',
-      mappingId: 'mapping-1',
+      tenantId: asTenantId('tenant-1'),
+      mappingId: asMappingId('mapping-1'),
       files: { enabled: true },
       webdavTarget: {
+        url: 'https://webdav.example.com',
+        username: 'user',
+        password: 'pass',
         rootPath: '/files',
-        httpClient: { request: vi.fn() },
       },
     };
 
@@ -266,18 +200,15 @@ describe('runUnifiedSync', () => {
     carddavSource.fetch.mockResolvedValue({ content: 'vcard', metadata: {} });
 
     webdavSource.listFolders.mockResolvedValue([{ id: 'files1', name: 'Files', path: '/files/' }]);
-    webdavSource.listSince.mockResolvedValue({ items: [{ path: '/files/file1.txt', isDirectory: false, size: 1024, naturalKey: 'file1', uid: 'file1', type: 'file', sourcePath: '/files/file1.txt' }], nextCursor: { value: 'cursor1' } });
+    webdavSource.listSince.mockResolvedValue({ items: [{ path: '/files/file1.txt', isDirectory: false, size: 1024, naturalKey: 'file1', type: 'file', sourcePath: '/files/file1.txt' }], nextCursor: { value: 'cursor1' } });
     webdavSource.fetch.mockResolvedValue({ content: 'content', metadata: {} });
 
     const config: UnifiedSyncConfig = {
-      tenantId: 'tenant-1',
-      mappingId: 'mapping-1',
+      tenantId: asTenantId('tenant-1'),
+      mappingId: asMappingId('mapping-1'),
       calendar: { enabled: true },
       contacts: { enabled: true },
       files: { enabled: true },
-      caldavTarget: { calendarHomeSet: 'https://caldav.example.com/', httpClient: { request: vi.fn() } },
-      carddavTarget: { addressBookHomeSet: 'https://carddav.example.com/', httpClient: { request: vi.fn() } },
-      webdavTarget: { rootPath: '/files', httpClient: { request: vi.fn() } },
     };
 
     const result = await runUnifiedSync({
@@ -304,15 +235,18 @@ describe('runUnifiedSync', () => {
     const caldavSource = createFakeCalDAVSource();
     const caldavWriter = createFakeCalDAVTargetWriter();
     
+    caldavSource.listFolders.mockResolvedValue([{ id: 'cal1', name: 'Calendar', path: '/calendar/', color: '#FF0000' }]);
     caldavSource.listSince.mockRejectedValue(new Error('Calendar sync failed'));
 
     const config: UnifiedSyncConfig = {
-      tenantId: 'tenant-1',
-      mappingId: 'mapping-1',
+      tenantId: asTenantId('tenant-1'),
+      mappingId: asMappingId('mapping-1'),
       calendar: { enabled: true },
       caldavTarget: {
-        calendarHomeSet: 'https://caldav.example.com/',
-        httpClient: { request: vi.fn() },
+        url: 'https://caldav.example.com',
+        username: 'user',
+        password: 'pass',
+        homeSet: 'https://caldav.example.com/',
       },
     };
 
@@ -329,15 +263,18 @@ describe('runUnifiedSync', () => {
     const carddavSource = createFakeCardDAVSource();
     const carddavWriter = createFakeCardDAVTargetWriter();
     
+    carddavSource.listFolders.mockResolvedValue([{ id: 'addr1', name: 'Address Book', path: '/addressbook/' }]);
     carddavSource.listSince.mockRejectedValue(new Error('Contacts sync failed'));
 
     const config: UnifiedSyncConfig = {
-      tenantId: 'tenant-1',
-      mappingId: 'mapping-1',
+      tenantId: asTenantId('tenant-1'),
+      mappingId: asMappingId('mapping-1'),
       contacts: { enabled: true },
       carddavTarget: {
-        addressBookHomeSet: 'https://carddav.example.com/',
-        httpClient: { request: vi.fn() },
+        url: 'https://carddav.example.com',
+        username: 'user',
+        password: 'pass',
+        homeSet: 'https://carddav.example.com/',
       },
     };
 
@@ -354,15 +291,18 @@ describe('runUnifiedSync', () => {
     const webdavSource = createFakeWebDAVSource();
     const webdavWriter = createFakeWebDAVTargetWriter();
     
+    webdavSource.listFolders.mockResolvedValue([{ id: 'files1', name: 'Files', path: '/files/' }]);
     webdavSource.listSince.mockRejectedValue(new Error('Files sync failed'));
 
     const config: UnifiedSyncConfig = {
-      tenantId: 'tenant-1',
-      mappingId: 'mapping-1',
+      tenantId: asTenantId('tenant-1'),
+      mappingId: asMappingId('mapping-1'),
       files: { enabled: true },
       webdavTarget: {
+        url: 'https://webdav.example.com',
+        username: 'user',
+        password: 'pass',
         rootPath: '/files',
-        httpClient: { request: vi.fn() },
       },
     };
 
@@ -377,8 +317,8 @@ describe('runUnifiedSync', () => {
 
   it('should throw error when calendar config is missing', async () => {
     const config: UnifiedSyncConfig = {
-      tenantId: 'tenant-1',
-      mappingId: 'mapping-1',
+      tenantId: asTenantId('tenant-1'),
+      mappingId: asMappingId('mapping-1'),
       calendar: { enabled: true },
     };
 
@@ -386,13 +326,13 @@ describe('runUnifiedSync', () => {
       config,
       ledger: mockLedger,
       cursors: mockCursors,
-    })).rejects.toThrow('CalDAV source and target configuration required for calendar sync');
+    })).rejects.toThrow('CalDAV source and writer required for calendar sync (inject via UnifiedSyncDeps)');
   });
 
   it('should throw error when contacts config is missing', async () => {
     const config: UnifiedSyncConfig = {
-      tenantId: 'tenant-1',
-      mappingId: 'mapping-1',
+      tenantId: asTenantId('tenant-1'),
+      mappingId: asMappingId('mapping-1'),
       contacts: { enabled: true },
     };
 
@@ -400,13 +340,13 @@ describe('runUnifiedSync', () => {
       config,
       ledger: mockLedger,
       cursors: mockCursors,
-    })).rejects.toThrow('CardDAV source and target configuration required for contacts sync');
+    })).rejects.toThrow('CardDAV source and writer required for contacts sync (inject via UnifiedSyncDeps)');
   });
 
   it('should throw error when files config is missing', async () => {
     const config: UnifiedSyncConfig = {
-      tenantId: 'tenant-1',
-      mappingId: 'mapping-1',
+      tenantId: asTenantId('tenant-1'),
+      mappingId: asMappingId('mapping-1'),
       files: { enabled: true },
     };
 
@@ -414,6 +354,6 @@ describe('runUnifiedSync', () => {
       config,
       ledger: mockLedger,
       cursors: mockCursors,
-    })).rejects.toThrow('WebDAV source and target configuration required for files sync');
+    })).rejects.toThrow('WebDAV source and writer required for files sync (inject via UnifiedSyncDeps)');
   });
 });
