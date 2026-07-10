@@ -207,17 +207,12 @@ describe('GraphDriveSource', () => {
         '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/delta?deltatoken=abc123',
       };
 
-      fetchMock
-        .mockResolvedValueOnce({
-          status: 200,
-          text: async () => JSON.stringify(mockDeltaResponse),
-          headers: new Map(),
-        })
-        .mockResolvedValueOnce({
-          status: 200,
-          text: async () => 'binary content here',
-          headers: new Map(),
-        });
+      // Only mock the delta query - listSince should be metadata-only
+      fetchMock.mockResolvedValueOnce({
+        status: 200,
+        text: async () => JSON.stringify(mockDeltaResponse),
+        headers: new Map(),
+      });
 
       const config: GraphDriveSourceConfig = {
         tokenProvider: mockTokenProvider,
@@ -230,7 +225,60 @@ describe('GraphDriveSource', () => {
       expect(result.items).toHaveLength(2); // Only files, not folders
       expect(result.items[0]?.item.path).toBe('/Documents/document.docx');
       expect(result.items[0]?.item.contentHash).toBe('abc123');
+      expect(result.items[0]?.content).toBeUndefined(); // Metadata-only, no content
+      expect(result.items[1]?.item.contentHash).toBe('xyz789');
       expect(result.nextCursor.value).toContain('graph-drive-delta:');
+    });
+
+    it('should fetch file content using fetch method', async () => {
+      const mockDeltaResponse = {
+        value: [
+          {
+            id: 'file1',
+            name: 'document.docx',
+            path: '/Documents/document.docx',
+            file: {
+              mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            },
+            lastModifiedDateTime: '2024-01-15T00:00:00Z',
+            size: 2048,
+            quickXorHash: 'abc123',
+          },
+        ],
+        '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/delta?deltatoken=abc123',
+      };
+
+      // Mock delta query
+      fetchMock.mockResolvedValueOnce({
+        status: 200,
+        text: async () => JSON.stringify(mockDeltaResponse),
+        headers: new Map(),
+      });
+
+      // Mock content fetch
+      fetchMock.mockResolvedValueOnce({
+        status: 200,
+        text: async () => 'file content here',
+        headers: new Map(),
+      });
+
+      const config: GraphDriveSourceConfig = {
+        tokenProvider: mockTokenProvider,
+        tenantId: 'test-tenant-id',
+      };
+      const driveSource = new GraphDriveSource(config);
+
+      // First get metadata
+      const listResult = await driveSource.listSince({ path: '/' });
+      expect(listResult.items).toHaveLength(1);
+      expect(listResult.items[0]?.content).toBeUndefined();
+
+      // Then fetch content separately
+      const item = listResult.items[0]!;
+      const fetched = await driveSource.fetch(item.item);
+      
+      expect(fetched.content).toBeInstanceOf(Uint8Array);
+      expect(new TextDecoder().decode(fetched.content)).toBe('file content here');
     });
 
     it('should use deltaLink from cursor for incremental sync', async () => {

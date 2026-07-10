@@ -19,7 +19,7 @@
  * for idempotency tracking.
  */
 
-import type { ContactSource, ContactFolder, RawContact, SyncCursor, ContactPhone, ContactEmail, ContactAddress, ContactUrl, EmailType, UrlType } from '@openmig/shared';
+import type { ContactSource, ContactFolder, RawContact, SyncCursor, ContactPhone, ContactEmail, ContactAddress, ContactUrl, EmailType, UrlType, Contact } from '@openmig/shared';
 import type { TokenProvider } from '@openmig/shared';
 import type { GraphContactsSourceConfig, GraphContactFolder, GraphContact, GraphContactsDeltaCursor, VCardFieldMapping, GraphContactWithPhoto } from './graph-contacts-source.types';
 import type { HttpClient, HttpRequestOptions, HttpResponse } from './dav-http.types';
@@ -143,15 +143,12 @@ export class GraphContactsSource implements ContactSource {
       nextLink = data['@odata.nextLink'];
     } while (nextLink);
 
-    // Generate vCard 4.0 for each contact
+    // Generate vCard 4.0 for each contact (metadata-only, no photo fetch)
     const items: RawContact[] = [];
     for (const contact of contacts) {
       try {
-        // Fetch photo if available
-        const contactWithPhoto = await this.fetchContactWithPhoto(contact, folderId);
-        
-        // Map to vCard 4.0
-        const vcard = this.mapToVCard4(contactWithPhoto);
+        // Map to vCard 4.0 without photo (photo fetched lazily via fetch() method)
+        const vcard = this.mapToVCard4(contact);
         
         const item: RawContact = {
           item: {
@@ -172,10 +169,8 @@ export class GraphContactsSource implements ContactSource {
             urls: this.mapUrls(contact),
             note: contact.personalNotes,
             birthday: contact.birthday,
-            photo: contactWithPhoto.photoData ? {
-              data: contactWithPhoto.photoData,
-              mimeType: contactWithPhoto.photoMimeType || 'image/jpeg',
-            } : undefined,
+            // Photo is NOT fetched here - use fetch() method instead
+            photo: undefined,
             categories: contact.categories,
             sourcePath: `/contactFolders/${folderId}/contacts/${contact.id}`,
             vcard,
@@ -200,6 +195,44 @@ export class GraphContactsSource implements ContactSource {
     };
 
     return { items, nextCursor };
+  }
+
+  /**
+   * Fetch full raw data for a contact including photo (implements ContactSource interface).
+   */
+  async fetch(item: Contact): Promise<RawContact> {
+    // Extract contact ID from sourcePath
+    const sourcePath = item.sourcePath;
+    if (!sourcePath) {
+      throw new Error(`Contact missing sourcePath: ${JSON.stringify(item)}`);
+    }
+
+    // Extract folder ID and contact ID from sourcePath (format: /contactFolders/{folderId}/contacts/{contactId})
+    const match = sourcePath.match(/\/contactFolders\/([^/]+)\/contacts\/([^/]+)$/);
+    if (!match) {
+      throw new Error(`Invalid sourcePath format: ${sourcePath}`);
+    }
+
+    const folderId = match[1];
+    const contactId = match[2];
+
+    // Fetch photo
+    const contactWithPhoto = await this.fetchContactWithPhoto({ id: contactId } as GraphContact, folderId);
+
+    // Re-map vCard with photo
+    const vcard = this.mapToVCard4(contactWithPhoto);
+
+    return {
+      item: {
+        ...item,
+        photo: contactWithPhoto.photoData ? {
+          data: contactWithPhoto.photoData,
+          mimeType: contactWithPhoto.photoMimeType || 'image/jpeg',
+        } : item.photo,
+        vcard,
+      },
+      vcard,
+    };
   }
 
   // Private helper methods

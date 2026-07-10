@@ -160,7 +160,7 @@ export class GraphDriveSource implements FileSource {
       nextLink = data['@odata.nextLink'];
     } while (nextLink);
 
-    // Fetch content for each file
+    // Build metadata-only items (no content fetch in listSince)
     const fileItems: RawFileItem[] = [];
     for (const item of items) {
       try {
@@ -169,9 +169,6 @@ export class GraphDriveSource implements FileSource {
         
         // Get change detection hash (quickXorHash or cTag)
         const changeHash = item.quickXorHash || item.cTag;
-        
-        // Fetch file content
-        const content = await this.fetchFileContent(item.id);
         
         const fileItem: RawFileItem = {
           item: {
@@ -183,12 +180,13 @@ export class GraphDriveSource implements FileSource {
             mimeType: item.file?.mimeType,
             sourceRef: item.id,
           },
-          content: content,
+          // Content is NOT fetched here - use fetch() method instead
+          content: undefined,
         };
 
         fileItems.push(fileItem);
       } catch (error) {
-        // Skip files that fail to fetch
+        // Skip files that fail to process
         console.warn(`Failed to process file ${item.id}:`, error);
       }
     }
@@ -224,6 +222,25 @@ export class GraphDriveSource implements FileSource {
     // Convert response body to Uint8Array
     const encoder = new TextEncoder();
     return encoder.encode(response.body);
+  }
+
+  /**
+   * Fetch full raw data for an item (implements GenericSource interface).
+   */
+  async fetch(item: FileItem): Promise<RawFileItem> {
+    // Extract item ID from sourceRef
+    const itemId = item.sourceRef;
+    if (!itemId) {
+      throw new Error(`Item missing sourceRef: ${JSON.stringify(item)}`);
+    }
+
+    // Fetch content
+    const content = await this.fetchFileContent(itemId);
+
+    return {
+      item,
+      content,
+    };
   }
 
   // Private helper methods
