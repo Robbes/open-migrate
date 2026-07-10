@@ -14,7 +14,7 @@
  * - Rate limiting and throttling support
  */
 
-import type { FileSource, FileFolder, RawFileItem, SyncCursor, ThrottleLimiter } from '@openmig/shared';
+import type { FileSource, FileFolder, RawFileItem, SyncCursor, ThrottleLimiter, FileItem } from '@openmig/shared';
 import type { GraphDriveSourceConfig, GraphDriveItem, GraphDriveDeltaResponse, GraphDriveDeltaCursor, ParsedPath, NormalizePathOptions } from './graph-drive-source.types';
 import type { HttpClient as _HttpClient, HttpRequestOptions, HttpResponse } from './dav-http.types';
 

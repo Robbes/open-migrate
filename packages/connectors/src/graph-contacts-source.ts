@@ -213,8 +213,8 @@ export class GraphContactsSource implements ContactSource {
       throw new Error(`Invalid sourcePath format: ${sourcePath}`);
     }
 
-    const folderId = match[1];
-    const contactId = match[2];
+    const folderId = match[1]!;
+    const contactId = match[2]!;
 
     // Fetch photo
     const contactWithPhoto = await this.fetchContactWithPhoto({ id: contactId } as GraphContact, folderId);
