@@ -16,25 +16,25 @@ import type { TenantId, MappingId, Ledger, CursorStore, SyncCursor } from '@open
 import { runGenericSync, type GenericSyncResult, type GenericSource, type GenericTargetWriter, type GenericFolder, type GenericItem, type GenericRawItem } from './generic-sync';
 
 // CalDAV imports
-import { CalDAVSource } from '@openmig/connectors/caldav-source';
-import type { CalDAVSourceConfig } from '@openmig/connectors/caldav-source.types';
+import { CalDAVSource } from '@openmig/connectors';
+import type { CalDAVSourceConfig } from '@openmig/connectors';
 import type { RawCalendarEvent } from '@openmig/shared';
-import { CalDAVTargetWriter } from '@openmig/engines/caldav-target-writer';
-import type { CalDAVTargetConfig } from '@openmig/engines/caldav-target-writer';
+import { CalDAVTargetWriter } from '@openmig/engines';
+import type { CalDAVTargetConfig } from '@openmig/engines';
 
 // CardDAV imports
-import { CarddavSource } from '@openmig/connectors/carddav-source';
-import type { CardDAVSourceConfig } from '@openmig/connectors/carddav-source.types';
+import { CarddavSource } from '@openmig/connectors';
+import type { CardDAVSourceConfig } from '@openmig/connectors';
 import type { RawContact } from '@openmig/shared';
-import { CardDAVTargetWriter } from '@openmig/engines/carddav-target-writer';
-import type { CardDAVTargetConfig } from '@openmig/engines/carddav-target-writer';
+import { CardDAVTargetWriter } from '@openmig/engines';
+import type { CardDAVTargetConfig } from '@openmig/engines';
 
 // WebDAV imports
-import { WebdavFileSource } from '@openmig/connectors/webdav-source';
-import type { WebDAVSourceConfig } from '@openmig/connectors/webdav-source.types';
+import { WebdavFileSource } from '@openmig/connectors';
+import type { WebDAVSourceConfig } from '@openmig/connectors';
 import type { RawFileItem } from '@openmig/shared';
-import { WebDAVTargetWriter } from '@openmig/engines/webdav-target-writer';
-import type { WebDAVTargetConfig } from '@openmig/engines/webdav-target-writer';
+import { WebDAVTargetWriter } from '@openmig/engines';
+import type { WebDAVTargetConfig } from '@openmig/engines';
 
 export interface UnifiedSyncConfig {
   tenantId: TenantId;
