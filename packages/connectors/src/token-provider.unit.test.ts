@@ -1,7 +1,7 @@
 // Copyright 2026 OpenHands Agent (Apache-2.0)
 // Unit tests for MSAL-based TokenProvider
 
-import { describe, it, expect, _vi, _beforeEach, _afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import type { TokenProviderConfig, OAuth2Token } from '@openmig/shared';
 
 // We'll test the logic without actual MSAL dependency by mocking the dynamic import
