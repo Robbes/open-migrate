@@ -92,10 +92,49 @@ export class CalDAVSource implements CalendarSource {
   // Private helper methods
 
   /**
-   * Discover the calendar home set using PROPFIND.
-   * RFC 4791 Section 5.2
+   * Discover the calendar home set using RFC 6764 well-known URIs.
+   * First tries /.well-known/caldav, then falls back to PROPFIND on base URL.
+   * RFC 6764 Section 4.1
    */
   private async discoverCalendarHomeSet(): Promise<void> {
+    // Step 1: Try RFC 6764 well-known URI discovery
+    try {
+      const wellKnownUrl = this.buildUrl('.well-known/caldav');
+      const response = await this.httpClient.request({
+        method: 'GET',
+        url: wellKnownUrl,
+        headers: {
+          Authorization: this.getAuthorizationHeader(),
+        },
+      });
+
+      // Follow redirect to get principal URL
+      if (response.status === 301 || response.status === 302 || response.status === 307 || response.status === 308) {
+        // Extract redirect location
+        const location = response.headers['location'] || response.headers['Location'];
+        if (location) {
+          const principalUrl = this.normalizePath(location);
+          // Step 2: PROPFIND the principal to get calendar-home-set
+          const homeSet = await this.discoverHomeSetFromPrincipal(principalUrl);
+          if (homeSet) {
+            this.calendarHomeSet = homeSet;
+            return;
+          }
+        }
+      } else if (response.status === 200 || response.status === 204) {
+        // Well-known URI exists but may not redirect - try PROPFIND on it
+        const homeSet = await this.discoverHomeSetFromPrincipal(wellKnownUrl);
+        if (homeSet) {
+          this.calendarHomeSet = homeSet;
+          return;
+        }
+      }
+      // Well-known URI not available or didn't help, fall through to PROPFIND on base URL
+    } catch {
+      // Well-known discovery failed, fall through to PROPFIND on base URL
+    }
+
+    // Fallback: PROPFIND on base URL (original behavior)
     const propfind = `<?xml version="1.0" encoding="utf-8"?>
       <D:propfind xmlns:D="DAV:">
         <D:prop>
@@ -122,9 +161,39 @@ export class CalDAVSource implements CalendarSource {
     if (homeSet) {
       this.calendarHomeSet = homeSet;
     } else {
-      // Fallback: use the configured URL as the home set
+      // Final fallback: use the configured URL as the home set
       this.calendarHomeSet = this.config.calendarHomeSet || this.normalizePath(this.config.url);
     }
+  }
+
+  /**
+   * Discover calendar-home-set by PROPFINDing a principal URL.
+   * Used after following RFC 6764 well-known redirect.
+   */
+  private async discoverHomeSetFromPrincipal(principalUrl: string): Promise<string | null> {
+    const propfind = `<?xml version="1.0" encoding="utf-8"?>
+      <D:propfind xmlns:D="DAV:">
+        <D:prop>
+          <C:calendar-home-set xmlns:C="urn:ietf:params:xml:ns:caldav"/>
+        </D:prop>
+      </D:propfind>`;
+
+    const response = await this.httpClient.request({
+      method: 'PROPFIND',
+      url: principalUrl,
+      body: propfind,
+      headers: {
+        'Content-Type': 'application/xml',
+        Depth: '0',
+        Authorization: this.getAuthorizationHeader(),
+      },
+    });
+
+    if (response.status !== 207) {
+      return null;
+    }
+
+    return this.parseCalendarHomeSetResponse(response.body);
   }
 
   /**
