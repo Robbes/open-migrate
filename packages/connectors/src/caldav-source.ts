@@ -675,7 +675,8 @@ export class CalDAVSource implements CalendarSource {
     if (!normalizedPath.endsWith('/')) {
       normalizedPath += '/';
     }
-    return `${baseUrl}/${normalizedPath}`;
+    const url = new URL(path, baseUrl);
+    return url.toString();
   }
 
   /**

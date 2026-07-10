@@ -526,7 +526,8 @@ export class WebdavFileSource implements FileSource {
       return baseUrl;
     }
     
-    return `${baseUrl}/${normalizedPath}`;
+    const url = new URL(path, baseUrl);
+    return url.toString();
   }
 
   /**

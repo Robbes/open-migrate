@@ -801,7 +801,8 @@ export class CarddavSource implements ContactSource {
     if (!normalizedPath.endsWith('/')) {
       normalizedPath += '/';
     }
-    return `${baseUrl}/${normalizedPath}`;
+    const url = new URL(path, baseUrl);
+    return url.toString();
   }
 
   /**
