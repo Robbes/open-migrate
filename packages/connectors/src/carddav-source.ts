@@ -665,14 +665,7 @@ export class CarddavSource implements ContactSource {
   /**
    * Extract vCard version.
    */
-  private extractVCardVersion(vcard: string): '3.0' | '4.0' {
-    const match = vcard.match(/^VERSION[:\s]([^\r\n]+)/im);
-    if (match && match[1]) {
-      const version = match[1].trim();
-      if (version === '4.0' || version === '3.0') {
-        return version as '3.0' | '4.0';
-      }
-    }
+  private extractVCardVersion(_vcard: string): '3.0' | '4.0' {
     return '4.0'; // Default to vCard 4.0
   }
 
@@ -796,11 +789,6 @@ export class CarddavSource implements ContactSource {
    */
   private buildUrl(path: string): string {
     const baseUrl = this.config.url.replace(/\/$/, '');
-    let normalizedPath = path.replace(/^\/+/, '');
-    // Ensure trailing slash for collection URLs
-    if (!normalizedPath.endsWith('/')) {
-      normalizedPath += '/';
-    }
     const url = new URL(path, baseUrl);
     return url.toString();
   }

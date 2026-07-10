@@ -670,11 +670,6 @@ export class CalDAVSource implements CalendarSource {
    */
   private buildUrl(path: string): string {
     const baseUrl = this.config.url.replace(/\/$/, '');
-    let normalizedPath = path.replace(/^\/+/, '');
-    // Ensure trailing slash for collection URLs
-    if (!normalizedPath.endsWith('/')) {
-      normalizedPath += '/';
-    }
     const url = new URL(path, baseUrl);
     return url.toString();
   }
