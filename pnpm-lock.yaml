@@ -278,6 +278,16 @@ importers:
       '@openmig/shared':
         specifier: workspace:*
         version: link:../shared
+    devDependencies:
+      '@openmig/connectors':
+        specifier: workspace:*
+        version: link:../connectors
+      '@openmig/engines':
+        specifier: workspace:*
+        version: link:../engines
+      '@openmig/ledger':
+        specifier: workspace:*
+        version: link:../ledger
 
   packages/engines:
     dependencies:
