@@ -11,8 +11,8 @@
  * - Case-insensitive UID handling (UIDs are lowercased for comparison)
  */
 
-import type { CalendarSource, CalendarFolder, RawCalendarEvent, SyncCursor } from '@openmig/shared';
-import type { CalDAVSourceConfig, CalDAVSyncToken, CalDAVCalendarObject, CalDAVHomeSet, CalDAVCollection } from './caldav-source.types';
+import type { CalendarSource, CalendarFolder, SyncCursor } from '@openmig/shared';
+import type { CalDAVSourceConfig, CalDAVSyncToken, CalDAVCalendarObject } from './caldav-source.types';
 import type { HttpClient, HttpRequestOptions, HttpResponse } from './dav-http.types';
 
 /**
@@ -248,7 +248,7 @@ export class CalDAVSource implements CalendarSource {
   /**
    * Parse collections from PROPFIND multi-status response.
    */
-  private parseCollectionsResponse(body: string, homeSet: string): CalendarFolder[] {
+  private parseCollectionsResponse(body: string, _homeSet: string): CalendarFolder[] {
     const folders: CalendarFolder[] = [];
 
     // Extract all response elements

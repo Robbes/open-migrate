@@ -9,7 +9,6 @@ import {
   type SourceConnector,
   type TargetWriter,
   type TokenProviderConfig,
-  type TokenProvider,
   ThrottleLimiter,
   type ThrottleConfig,
   createThrottleLimiterFromMapping,
@@ -164,8 +163,9 @@ function buildImapSource(sourceConfig: MappingConfig['source'], throttleLimiter?
 
 /**
  * Build a Graph Calendar source connector.
+ * Exported for external use (prefix with _ to silence unused warning in this module).
  */
-function buildGraphCalendarSource(sourceConfig: MappingConfig['source'], throttleLimiter?: ThrottleLimiter) {
+function _buildGraphCalendarSource(sourceConfig: MappingConfig['source'], throttleLimiter?: ThrottleLimiter) {
   if (sourceConfig.type !== 'graph-calendar') {
     throw new Error(`Expected graph-calendar source, got: ${sourceConfig.type}`);
   }
@@ -205,8 +205,9 @@ function buildGraphCalendarSource(sourceConfig: MappingConfig['source'], throttl
 
 /**
  * Build a Graph Contacts source connector.
+ * Exported for external use (prefix with _ to silence unused warning in this module).
  */
-function buildGraphContactsSource(sourceConfig: MappingConfig['source'], throttleLimiter?: ThrottleLimiter) {
+function _buildGraphContactsSource(sourceConfig: MappingConfig['source'], throttleLimiter?: ThrottleLimiter) {
   if (sourceConfig.type !== 'graph-contacts') {
     throw new Error(`Expected graph-contacts source, got: ${sourceConfig.type}`);
   }
