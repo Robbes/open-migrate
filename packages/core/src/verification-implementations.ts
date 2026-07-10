@@ -10,13 +10,10 @@
 import type { TenantId, MappingId, Ledger } from '@openmig/shared';
 import type { TargetReindexer } from '@openmig/shared';
 import type { PgDatabase, SqliteDatabase } from '@openmig/ledger';
-import { eq, and, sql, desc } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import * as schemaPg from '@openmig/ledger/schema-pg';
 import * as schemaSqlite from '@openmig/ledger/schema-sqlite';
 import type { VerificationDeps } from './verification';
-
-// Type for item row from database
-type ItemRow = typeof schemaPg.item.$inferSelect;
 
 /**
  * Verification dependencies backed by real ledger and target
@@ -102,15 +99,14 @@ async function getSourceCountFromLedger(
  */
 async function getTargetCountFromReindexer(
   deps: RealVerificationDeps,
-  dataType: 'mail' | 'calendar' | 'contacts' | 'files'
+  _dataType: 'mail' | 'calendar' | 'contacts' | 'files'
 ): Promise<number> {
   if (!deps.targetReindexer) {
     // If no reindexer, fall back to ledger count
-    return getSourceCountFromLedger(deps, dataType);
+    return getSourceCountFromLedger(deps, _dataType);
   }
 
   let count = 0;
-  const domain = mapDataTypeToDomain(dataType);
   
   for await (const _entry of deps.targetReindexer.listEntries()) {
     // Filter by domain if possible (implementation dependent)
@@ -209,8 +205,8 @@ async function getTargetSamplesFromReindexer(
  * Find items that exist in the ledger but are missing on the target
  */
 async function findMissingOnTarget(
-  deps: RealVerificationDeps,
-  dataType: 'mail' | 'calendar' | 'contacts' | 'files'
+  _deps: RealVerificationDeps,
+  _dataType: 'mail' | 'calendar' | 'contacts' | 'files'
 ): Promise<Array<{ id: string; sourceRef: string }>> {
   // For now, return empty - this would require comparing ledger entries
   // against target enumeration, which is complex
@@ -225,8 +221,8 @@ async function findMissingOnTarget(
  * Find items that exist on the target but not in the ledger
  */
 async function findExtraOnTarget(
-  deps: RealVerificationDeps,
-  dataType: 'mail' | 'calendar' | 'contacts' | 'files'
+  _deps: RealVerificationDeps,
+  _dataType: 'mail' | 'calendar' | 'contacts' | 'files'
 ): Promise<Array<{ id: string; targetRef: string }>> {
   // Similar to findMissingOnTarget, requires comparison
   return [];

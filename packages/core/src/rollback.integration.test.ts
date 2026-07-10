@@ -12,7 +12,6 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { createPgDb } from '@openmig/ledger';
-import { PgLedger } from '@openmig/ledger';
 import { CutoverPersistence } from '@openmig/core';
 import { asTenantId, asMappingId } from '@openmig/shared';
 
@@ -166,7 +165,7 @@ describe('Rollback Paths (integration)', () => {
       { approvedBy: 'test-user', timestamp: new Date().toISOString() }
     );
 
-    const inProgressState = await cutoverPersistence.transitionState(
+    await cutoverPersistence.transitionState(
       TEST_TENANT_ID,
       TEST_MAPPING_ID,
       'CUTOVER_IN_PROGRESS',

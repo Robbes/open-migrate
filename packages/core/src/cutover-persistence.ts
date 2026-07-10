@@ -17,7 +17,6 @@ import type {
   CutoverPhase,
   CutoverStatus,
   CutoverEvent,
-  CutoverConfig,
 } from './cutover-state';
 
 // Type aliases for database-specific types
@@ -33,6 +32,37 @@ export class CutoverPersistence {
   constructor(db: PgDatabase | SqliteDatabase, dbKind: DbKind = 'pg') {
     this.db = db;
     this.dbKind = dbKind;
+  }
+
+  /**
+   * Initialize a new cutover and return the status
+   */
+  async initializeCutover(params: {
+    tenantId: TenantId;
+    mappingId: MappingId;
+    targetMailServer?: string;
+    startedBy?: string;
+  }): Promise<CutoverStatus> {
+    const now = new Date().toISOString();
+    const status: CutoverStatus = {
+      tenantId: params.tenantId,
+      mappingId: params.mappingId,
+      state: 'PREPARING',
+      phase: 'PREPARATION',
+      startedAt: now,
+      updatedAt: now,
+      verificationStatus: 'PENDING',
+      totalItemsMigrated: 0,
+      itemsVerified: 0,
+      discrepanciesFound: 0,
+      rollbackAvailable: false,
+      currentState: 'PREPARING',
+      targetMailServer: params.targetMailServer,
+      startedBy: params.startedBy,
+    };
+
+    await this.saveCutoverState(status);
+    return status;
   }
 
   /**
@@ -111,7 +141,7 @@ export class CutoverPersistence {
     tenantId: TenantId,
     mappingId: MappingId
   ): Promise<CutoverStatus | undefined> {
-    let result: any;
+    let result: CutoverStatus[];
 
     if (this.dbKind === 'pg') {
       const db = this.db as PgDatabase;
@@ -185,13 +215,14 @@ export class CutoverPersistence {
    */
   async getEventHistory(
     tenantId: TenantId,
-    mappingId: MappingId
+    mappingId: MappingId,
+    limit?: number
   ): Promise<CutoverEvent[]> {
-    let result: any;
+    let result: CutoverEvent[];
 
     if (this.dbKind === 'pg') {
       const db = this.db as PgDatabase;
-      result = await db
+      let query = db
         .select()
         .from(schemaPg.cutoverEvent)
         .where(
@@ -201,9 +232,14 @@ export class CutoverPersistence {
           )
         )
         .orderBy(desc(schemaPg.cutoverEvent.timestamp));
+      
+      if (limit) {
+        query = query.limit(limit);
+      }
+      result = await query;
     } else {
       const db = this.db as SqliteDatabase;
-      result = await db
+      let query = db
         .select()
         .from(schemaSqlite.cutoverEvent)
         .where(
@@ -212,10 +248,15 @@ export class CutoverPersistence {
             eq(schemaSqlite.cutoverEvent.mappingId, mappingId)
           )
         )
-        .orderBy(schemaSqlite.cutoverEvent.timestamp DESC);
+        .orderBy(schemaSqlite.cutoverEvent.timestamp.desc());
+      
+      if (limit) {
+        query = query.limit(limit);
+      }
+      result = await query;
     }
 
-    return result.map((row: any) => ({
+    return result.map((row) => ({
       tenantId: row.tenantId,
       mappingId: row.mappingId,
       timestamp: row.timestamp,
@@ -224,6 +265,8 @@ export class CutoverPersistence {
       triggeredBy: row.triggeredBy,
       reason: row.reason,
       metadata: this.dbKind === 'pg' ? row.metadata : JSON.parse(row.metadata),
+      eventType: row.fromState ? `${row.fromState}_to_${row.toState}` : undefined,
+      description: `Transitioned from ${row.fromState} to ${row.toState}`,
     }));
   }
 
@@ -234,8 +277,7 @@ export class CutoverPersistence {
     tenantId: TenantId,
     mappingId: MappingId,
     toState: CutoverState,
-    triggeredBy: string,
-    reason?: string
+    metadataOrReason?: string | Record<string, unknown>
   ): Promise<CutoverStatus> {
     // Load current state
     const current = await this.loadCutoverState(tenantId, mappingId);
@@ -246,9 +288,22 @@ export class CutoverPersistence {
     // Validate transition (import from cutover-state)
     const { isValidTransition } = await import('./cutover-state');
     if (!isValidTransition(current.state, toState)) {
+      const reason = typeof metadataOrReason === 'string' ? metadataOrReason : 'No reason provided';
       throw new Error(
-        `Invalid state transition from ${current.state} to ${toState}. Reason: ${reason || 'No reason provided'}`
+        `Invalid state transition from ${current.state} to ${toState}. Reason: ${reason}`
       );
+    }
+
+    // Extract reason and metadata from the parameter
+    let reason: string | undefined;
+    let metadata: Record<string, unknown> | undefined;
+    
+    if (typeof metadataOrReason === 'string') {
+      reason = metadataOrReason;
+    } else if (metadataOrReason && typeof metadataOrReason === 'object') {
+      metadata = metadataOrReason;
+      // Extract reason from metadata if present
+      reason = (metadata.reason as string) || (metadata.failureReason as string);
     }
 
     // Create event
@@ -258,8 +313,11 @@ export class CutoverPersistence {
       timestamp: new Date().toISOString(),
       fromState: current.state,
       toState,
-      triggeredBy,
+      triggeredBy: typeof metadataOrReason === 'string' ? 'system' : 'cli',
       reason,
+      metadata,
+      eventType: `${current.state}_to_${toState}`,
+      description: `Transitioned from ${current.state} to ${toState}`,
     };
 
     // Log event
@@ -268,6 +326,11 @@ export class CutoverPersistence {
     // Update state
     const { updateCutoverStatus } = await import('./cutover-state');
     const updated = updateCutoverStatus(current, toState, reason);
+
+    // Merge metadata into the status if provided
+    if (metadata) {
+      Object.assign(updated, metadata);
+    }
 
     await this.saveCutoverState(updated);
 
@@ -330,7 +393,7 @@ export class CutoverPersistence {
     return meta;
   }
 
-  private mapRowToStatus(row: any): CutoverStatus {
+  private mapRowToStatus(row: CutoverStatus): CutoverStatus {
     const verificationStatusMap: Record<string, 'PENDING' | 'PASS' | 'WARN' | 'FAIL'> = {
       'pending': 'PENDING',
       'pass': 'PASS',

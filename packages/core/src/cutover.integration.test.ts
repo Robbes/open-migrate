@@ -11,7 +11,6 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { createPgDb } from '@openmig/ledger';
-import { PgLedger } from '@openmig/ledger';
 import { CutoverPersistence } from '@openmig/core';
 import { asTenantId, asMappingId } from '@openmig/shared';
 
@@ -172,7 +171,7 @@ describe('Cutover Lifecycle (integration)', () => {
    */
   it('should persist state across worker restarts', async () => {
     // Simulate first worker session
-    const initialState = await cutoverPersistence.initializeCutover({
+    await cutoverPersistence.initializeCutover({
       tenantId: TEST_TENANT_ID,
       mappingId: TEST_MAPPING_ID,
       targetMailServer: 'mail.example.com',

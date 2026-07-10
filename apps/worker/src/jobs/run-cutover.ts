@@ -13,7 +13,7 @@
 
 import { z } from 'zod';
 import { schemaTask } from '@trigger.dev/sdk/v3';
-import { CutoverPersistence, runVerification, createRealVerificationDeps } from '@openmig/core';
+import { CutoverPersistence } from '@openmig/core';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 
@@ -79,9 +79,10 @@ export const runCutover = schemaTask({
         console.log('Running verification checks');
         await ctx.logger.log('Running verification checks...');
         
-        // Create verification deps with real implementations
-        // Note: This would need actual ledger and target access
-        const verificationConfig = {
+        // Placeholder for real verification - would need actual ledger and target access
+        // TODO: Implement real verification with createRealVerificationDeps()
+        // Note: verificationConfig structure defined for future use
+        const _verificationConfig = {
           checksumSamplePercentage: 5,
           minSampleSize: 10,
           maxSampleSize: 1000,
@@ -92,21 +93,6 @@ export const runCutover = schemaTask({
           verifyContacts: true,
           verifyFiles: true,
         };
-
-        // Placeholder for real verification
-        // const verificationDeps = createRealVerificationDeps({
-        //   tenantId,
-        //   mappingId,
-        //   config: verificationConfig,
-        //   ledger: /* ledger instance */,
-        //   targetReindexer: /* target reindexer */,
-        //   db,
-        //   dbKind: 'pg',
-        // });
-        // const verificationResult = await runVerification(verificationDeps);
-        // if (!verificationResult.canProceedToCutover) {
-        //   throw new Error(`Verification failed: ${verificationResult.recommendations.join(', ')}`);
-        // }
         
         await ctx.logger.log('Verification checks passed');
       }

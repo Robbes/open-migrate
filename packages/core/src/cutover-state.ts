@@ -22,6 +22,7 @@ import type { TenantId, MappingId } from '@openmig/shared';
 export type CutoverState = 
   | 'PREPARING'
   | 'READY_FOR_CUTOVER'
+  | 'APPROVED'
   | 'CUTOVER_IN_PROGRESS'
   | 'GRACE_PERIOD'
   | 'COMPLETED'
@@ -70,6 +71,14 @@ export interface CutoverStatus {
   // Rollback support
   rollbackAvailable: boolean;
   rollbackReason?: string;
+  
+  // Extended properties for CLI and runbook
+  currentState?: CutoverState; // Alias for state, for CLI compatibility
+  targetMailServer?: string;
+  startedBy?: string;
+  rolledBackAt?: string;
+  failedAt?: string;
+  failureReason?: string;
 }
 
 /** Cutover configuration */
@@ -112,6 +121,10 @@ export interface CutoverEvent {
   triggeredBy: string; // 'system' or user ID
   reason?: string;
   metadata?: Record<string, unknown>;
+  
+  // Extended properties for CLI compatibility
+  eventType?: string; // Alias for state transition type
+  description?: string; // Human-readable description
 }
 
 /** Cutover manager interface */
@@ -145,7 +158,8 @@ export interface CutoverManager {
 /** Valid state transitions */
 const VALID_TRANSITIONS: Record<CutoverState, CutoverState[]> = {
   PREPARING: ['READY_FOR_CUTOVER', 'FAILED'],
-  READY_FOR_CUTOVER: ['CUTOVER_IN_PROGRESS', 'PREPARING', 'FAILED'],
+  READY_FOR_CUTOVER: ['APPROVED', 'PREPARING', 'FAILED'],
+  APPROVED: ['CUTOVER_IN_PROGRESS', 'READY_FOR_CUTOVER', 'FAILED'],
   CUTOVER_IN_PROGRESS: ['GRACE_PERIOD', 'FAILED', 'ROLLED_BACK'],
   GRACE_PERIOD: ['COMPLETED', 'ROLLED_BACK', 'FAILED'],
   COMPLETED: [], // Terminal state
@@ -157,6 +171,7 @@ const VALID_TRANSITIONS: Record<CutoverState, CutoverState[]> = {
 const STATE_TO_PHASE: Record<CutoverState, CutoverPhase> = {
   PREPARING: 'PREPARATION',
   READY_FOR_CUTOVER: 'VERIFICATION',
+  APPROVED: 'VERIFICATION',
   CUTOVER_IN_PROGRESS: 'CUTOVER',
   GRACE_PERIOD: 'GRACE',
   COMPLETED: 'COMPLETION',

@@ -17,6 +17,8 @@ interface DesecRRset {
   records: string[];
 }
 
+/** deSEC API record type (internal use) */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 interface DesecRecord {
   subdomain: string;
   type: string;

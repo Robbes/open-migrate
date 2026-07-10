@@ -140,33 +140,39 @@ async function main() {
   const cutoverPersistence = new CutoverPersistence(db);
 
   const deps: cutoverCli.CutoverCliDeps = {
-    tenantId: tenantId as any,
-    mappingId: mappingId as any,
+    tenantId: tenantId as TenantId,
+    mappingId: mappingId as MappingId,
     cutoverPersistence,
     dnsDomain: domain,
     targetMailServer: targetMailServer || `mail.${domain}`,
   };
 
   switch (command) {
-    case 'start-cutover':
+    case 'start-cutover': {
       await cutoverCli.startCutover(deps);
       break;
-    case 'verify':
+    }
+    case 'verify': {
       const verified = await cutoverCli.verifyCutover(deps);
       process.exit(verified ? 0 : 1);
       break;
-    case 'approve':
+    }
+    case 'approve': {
       await cutoverCli.approveCutover(deps);
       break;
-    case 'execute':
+    }
+    case 'execute': {
       await cutoverCli.executeCutover(deps);
       break;
-    case 'rollback':
+    }
+    case 'rollback': {
       await cutoverCli.rollbackCutover(deps);
       break;
-    case 'status':
+    }
+    case 'status': {
       await cutoverCli.showStatus(deps);
       break;
+    }
     default:
       console.error(`Unknown cutover command: ${command}`);
       console.error('Use: start-cutover, verify, approve, execute, rollback, status');

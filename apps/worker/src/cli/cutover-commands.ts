@@ -13,7 +13,6 @@
  */
 
 import type { TenantId, MappingId } from '@openmig/shared';
-import type { CutoverState } from '@openmig/core';
 import { CutoverPersistence } from '@openmig/core';
 import { verifyAllDns, checkPropagation } from '@openmig/core';
 

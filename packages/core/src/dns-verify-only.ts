@@ -40,7 +40,7 @@ export async function verifyMX(domain: string): Promise<DnsVerificationResult> {
   try {
     const mxRecords = await dns.resolveMx(domain);
     
-    const found = mxRecords.map((r: any) => `${r.priority}:${r.exchange}`);
+    const found = mxRecords.map((r) => `${r.priority}:${r.exchange}`);
     const expected: string[] = []; // No specific expected values for verification-only
     
     return {
@@ -73,16 +73,16 @@ export async function verifySPF(domain: string, expectedSender?: string): Promis
     
     // Find SPF records (start with "v=spf1")
     const spfRecords = txtRecords
-      .filter((r: any[]) => r.length > 0 && r[0].startsWith('v=spf1'))
-      .map((r: any[]) => r[0]);
+      .filter((r) => r.length > 0 && r[0].startsWith('v=spf1'))
+      .map((r) => r[0]);
     
-    const found = spfRecords;
+    const _found = spfRecords;
     const hasSpf = spfRecords.length > 0;
     
-    let warnings: string[] = [];
+    const warnings: string[] = [];
     if (!hasSpf) {
       warnings.push('No SPF record found - domain may not be able to send email');
-    } else if (expectedSender && !spfRecords.some((r: string) => r.includes(expectedSender))) {
+    } else if (expectedSender && !spfRecords.some((r) => r.includes(expectedSender))) {
       warnings.push(`Expected sender "${expectedSender}" not found in SPF record`);
     }
     
@@ -116,10 +116,10 @@ export async function verifyDKIM(domain: string, selector: string): Promise<DnsV
     const txtRecords = await dns.resolveTxt(dkimDomain);
     
     const dkimRecords = txtRecords
-      .filter((r: any[]) => r.length > 0 && r[0].startsWith('v=DKIM1'))
-      .map((r: any[]) => r[0]);
+      .filter((r) => r.length > 0 && r[0].startsWith('v=DKIM1'))
+      .map((r) => r[0]);
     
-    const found = dkimRecords;
+    const _found = dkimRecords;
     const hasDkim = dkimRecords.length > 0;
     
     return {
@@ -152,10 +152,10 @@ export async function verifyDMARC(domain: string): Promise<DnsVerificationResult
     const txtRecords = await dns.resolveTxt(dmarcDomain);
     
     const dmarcRecords = txtRecords
-      .filter((r: any[]) => r.length > 0 && r[0].startsWith('v=DMARC1'))
-      .map((r: any[]) => r[0]);
+      .filter((r) => r.length > 0 && r[0].startsWith('v=DMARC1'))
+      .map((r) => r[0]);
     
-    const found = dmarcRecords;
+    const _found = dmarcRecords;
     const hasDmarc = dmarcRecords.length > 0;
     
     // Parse policy if present
@@ -260,15 +260,15 @@ export async function checkPropagation(
       try {
         if (expected.type === 'MX') {
           const mxRecords = await dns.resolveMx(domain);
-          const found = mxRecords.map((r: any) => `${r.priority}:${r.exchange}`);
+          const found = mxRecords.map((r) => `${r.priority}:${r.exchange}`);
           if (!found.some((f: string) => f.includes(expected.value))) {
             allFound = false;
           }
         } else if (expected.type === 'TXT') {
           const txtRecords = await dns.resolveTxt(domain);
           const found = txtRecords
-            .filter((r: any[]) => r.length > 0)
-            .map((r: any[]) => r[0]);
+            .filter((r) => r.length > 0)
+            .map((r) => r[0]);
           if (!found.some((f: string) => f.includes(expected.value))) {
             allFound = false;
           }
