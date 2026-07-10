@@ -520,14 +520,13 @@ export class WebdavFileSource implements FileSource {
    */
   private buildUrl(path: string): string {
     const baseUrl = this.config.url.replace(/\/$/, '');
-    const normalizedPath = path.replace(/^\/+/, '');
-    
-    if (!normalizedPath) {
+    // Handle empty path case
+    if (path === '') {
       return baseUrl;
     }
-    
-    const url = new URL(path, baseUrl);
-    return url.toString();
+    // Manually join paths to avoid URL constructor replacing base path
+    const result = baseUrl + (path.startsWith('/') ? path : '/' + path);
+    return result;
   }
 
   /**

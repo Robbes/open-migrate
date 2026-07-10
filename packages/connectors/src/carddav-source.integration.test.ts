@@ -34,17 +34,24 @@ if (STALWART_CALENDAR_URL) {
       signal: AbortSignal.timeout(5000),
     });
     
-    // Stalwart v0.16.10 does not support DAV - returns 404 for all DAV endpoints
-    if (response.status === 404) {
+    // Check content-type to detect HTML responses (Stalwart portal)
+    const contentType = response.headers.get('content-type') || '';
+    
+    // Stalwart v0.16.10 does not support DAV - returns HTML for all DAV endpoints
+    const isHtml = contentType.includes('text/html') || contentType.includes('application/xhtml+xml');
+
+    if (response.status === 404 || isHtml) {
       skipReason = 'Stalwart v0.16.10 does not support CardDAV protocol (only JMAP/IMAP)';
-    } else if (response.status === 401 || response.status === 200) {
+    } else if ((response.status === 401 || response.status === 200) && (contentType.includes('xml') || contentType.includes('calendar'))) {
+      // 401 means the endpoint exists but requires auth - DAV might be supported
+      // 200 means the endpoint is accessible - DAV is supported
       carddavSupported = true;
     }
   } catch (err) {
     skipReason = `Could not probe Stalwart CardDAV: ${err instanceof Error ? err.message : String(err)}`;
   }
 } else {
-  skipReason = 'Stalwart CardDAV URL not configured (STALWART_JMAP_URL not set)';
+  skipReason = 'Stalwart CardDAV URL not configured (STALWART_CALENDAR_URL not set)';
 }
 
 // Skip all tests if CardDAV is not supported
@@ -81,14 +88,28 @@ async function waitForCarddav(maxRetries = 30, delayMs = 2000): Promise<void> {
 /**
  * Seed test contacts via raw DAV PUT.
  * Creates a test address book and populates it with vCard contacts.
+ * Uses RFC 6764 discovery to get the correct addressbook-home-set URL.
  */
-async function seedContacts(): Promise<void> {
+async function seedContacts(carddavSource: CarddavSource): Promise<void> {
   const carddavUrl = STALWART_CALENDAR_URL!.replace(/\/$/, '');
-  const addressbookPath = `/addressbooks/${CARDDAV_USERNAME.split('@')[0]}/test-addressbook/`;
-  const fullAddressbookUrl = `${carddavUrl}${addressbookPath}`;
-
-  // First, create the address book using MKCOL
-  try {
+  
+  // Trigger discovery to get the addressbook-home-set
+  const folders = await carddavSource.listFolders();
+  
+  // Try to find or create the test address book
+  let testAddressBook = folders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
+  let addressBookUrl: string | undefined;
+  
+  if (!testAddressBook) {
+    // Address book doesn't exist, we need to create it
+    const addressBookHomeSet = (carddavSource as any).addressBookHomeSet;
+    if (!addressBookHomeSet) {
+      throw new Error('Address book home-set not discovered. DAV may not be enabled on the server.');
+    }
+    
+    // Create the test address book using MKCOL
+    addressBookUrl = new URL(`test-addressbook/`, addressBookHomeSet).toString();
+    
     const mkcolXml = `<?xml version="1.0" encoding="utf-8"?>
       <D:mkcol xmlns:D="DAV:" xmlns:CA="urn:ietf:params:xml:ns:carddav">
         <D:set>
@@ -102,24 +123,36 @@ async function seedContacts(): Promise<void> {
         </D:set>
       </D:mkcol>`;
 
-    const response = await fetch(fullAddressbookUrl, {
-      method: 'MKCOL',
-      headers: {
-        'Content-Type': 'application/xml',
-        Authorization: `Basic ${Buffer.from(`${CARDDAV_USERNAME}:${CARDDAV_PASSWORD}`).toString('base64')}`,
-      },
-      body: mkcolXml,
-    });
+    try {
+      const response = await fetch(addressBookUrl, {
+        method: 'MKCOL',
+        headers: {
+          'Content-Type': 'application/xml',
+          Authorization: `Basic ${Buffer.from(`${CARDDAV_USERNAME}:${CARDDAV_PASSWORD}`).toString('base64')}`,
+        },
+        body: mkcolXml,
+      });
 
-    if (response.status === 201 || response.status === 409) {
-      console.log('[Seed] Created test address book');
-    } else {
-      const body = await response.text();
-      console.log(`[Seed] Address book creation response: ${response.status} - ${body.substring(0, 200)}`);
+      if (response.status === 201 || response.status === 409) {
+        console.log('[Seed] Created test address book');
+        // Refresh folders to get the new address book
+        const refreshedFolders = await carddavSource.listFolders();
+        testAddressBook = refreshedFolders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
+      } else {
+        const body = await response.text();
+        console.log(`[Seed] Address book creation response: ${response.status} - ${body.substring(0, 200)}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`[Seed] Address book creation error: ${msg}`);
     }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.log(`[Seed] Address book creation (may already exist): ${msg}`);
+  } else {
+    // Use the discovered address book path
+    addressBookUrl = new URL(`${testAddressBook.path.replace(/\/$/, '')}/`, carddavUrl).toString();
+  }
+  
+  if (!testAddressBook || !addressBookUrl) {
+    throw new Error('No address book available for seeding. DAV configuration may be incorrect.');
   }
 
   // Seed test contacts
@@ -187,7 +220,7 @@ ADR;TYPE=${contact.adr.type};;${contact.adr.street};${contact.adr.city};${contac
 N:${contact.fn.split(' ')[1] || ''};${contact.fn.split(' ')[0] || ''};;;
 END:VCARD`;
 
-    const contactUrl = `${fullAddressbookUrl}${contact.uid}.vcf`;
+    const contactUrl = new URL(`${contact.uid}.vcf`, addressBookUrl!).toString();
     
     try {
       const response = await fetch(contactUrl, {
@@ -216,13 +249,22 @@ END:VCARD`;
 
 /**
  * Clean up test address book and contacts.
+ * Uses RFC 6764 discovery to get the correct addressbook-home-set URL.
  */
-async function cleanAddressBook(): Promise<void> {
-  const carddavUrl = STALWART_CALENDAR_URL!.replace(/\/$/, '');
-  const addressbookPath = `/addressbooks/${CARDDAV_USERNAME.split('@')[0]}/test-addressbook/`;
-  const fullAddressbookUrl = `${carddavUrl}${addressbookPath}`;
-
+async function cleanAddressBook(carddavSource?: CarddavSource): Promise<void> {
+  // If carddavSource is provided, use its discovered address book home-set
+  let addressBookHomeSet: string | undefined;
+  if (carddavSource) {
+    addressBookHomeSet = (carddavSource as any).addressBookHomeSet;
+  }
+  
+  // Fallback to environment variable if not discovered
+  const carddavUrl = STALWART_CALENDAR_URL || 'http://localhost:8080';
+  
   try {
+    // If we have the address book home-set, use it for cleanup
+    const baseCollectionUrl = addressBookHomeSet || `${carddavUrl.replace(/\/$/, '')}/${CARDDAV_USERNAME.split('@')[0]}/`;
+    
     // Delete all contacts in the address book using REPORT
     const syncCollectionXml = `<?xml version="1.0" encoding="utf-8"?>
       <D:sync-collection xmlns:D="DAV:">
@@ -233,7 +275,7 @@ async function cleanAddressBook(): Promise<void> {
         <D:sync-token/>
       </D:sync-collection>`;
 
-    const response = await fetch(`${carddavUrl}${CARDDAV_USERNAME.split('@')[0]}/`, {
+    const response = await fetch(baseCollectionUrl, {
       method: 'REPORT',
       headers: {
         'Content-Type': 'application/xml',
@@ -273,15 +315,18 @@ async function cleanAddressBook(): Promise<void> {
     }
 
     // Delete the address book itself
-    try {
-      await fetch(fullAddressbookUrl, {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Basic ${Buffer.from(`${CARDDAV_USERNAME}:${CARDDAV_PASSWORD}`).toString('base64')}`,
-        },
-      });
-    } catch {
-      // Ignore address book deletion errors
+    if (addressBookHomeSet) {
+      const addressBookUrl = new URL(`test-addressbook/`, addressBookHomeSet).toString();
+      try {
+        await fetch(addressBookUrl, {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Basic ${Buffer.from(`${CARDDAV_USERNAME}:${CARDDAV_PASSWORD}`).toString('base64')}`,
+          },
+        });
+      } catch {
+        // Ignore address book deletion errors
+      }
     }
 
     console.log('[Cleanup] Address book cleaned');
@@ -301,28 +346,31 @@ testSuite('CardDAV Source Integration Tests', () => {
     console.log('[CardDAV Tests] Waiting for CardDAV server...');
     await waitForCarddav();
     console.log('[CardDAV Tests] CardDAV server is ready');
+    
+    // Create the CardDAV source for seeding
+    carddavSource = new CarddavSource({
+      url: `${STALWART_CALENDAR_URL}/`,
+      username: CARDDAV_USERNAME,
+      passwordEnv: 'CARDDAV_PASSWORD',
+    } as CardDAVSourceConfig);
+    process.env.CARDDAV_PASSWORD = CARDDAV_PASSWORD;
   }, 60000);
 
   beforeEach(async () => {
     // Clean up before each test for isolation
-    await cleanAddressBook();
-    await seedContacts();
+    await cleanAddressBook(carddavSource);
+    // Seed with the carddavSource instance
+    await seedContacts(carddavSource);
   });
 
   afterAll(async () => {
     // Final cleanup
-    await cleanAddressBook();
+    await cleanAddressBook(carddavSource);
   });
 
   describe('listFolders()', () => {
     it('should discover seeded address books', async () => {
-      carddavSource = new CarddavSource({
-        url: `${STALWART_CALENDAR_URL}/`,
-        username: CARDDAV_USERNAME,
-        passwordEnv: 'CARDDAV_PASSWORD',
-      } as CardDAVSourceConfig);
-
-      // Set password via environment
+      // carddavSource is already created in beforeAll
       process.env.CARDDAV_PASSWORD = CARDDAV_PASSWORD;
 
       const folders = await carddavSource.listFolders();

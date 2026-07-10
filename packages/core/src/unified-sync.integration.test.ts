@@ -29,6 +29,52 @@ const NEXTCLOUD_WEBDAV_URL = process.env.NEXTCLOUD_WEBDAV_URL;
 const NEXTCLOUD_USERNAME = process.env.NEXTCLOUD_USERNAME || 'testadmin';
 const NEXTCLOUD_PASSWORD = process.env.NEXTCLOUD_PASSWORD || 'testadmin_password';
 
+// Probe Stalwart for CalDAV/CardDAV support (v0.16.10 only supports JMAP/IMAP)
+let caldavSupported = false;
+let carddavSupported = false;
+
+if (STALWART_URL) {
+  try {
+    // Check CalDAV support
+    const caldavResponse = await fetch(`${STALWART_URL.replace(/\/$/, '')}/.well-known/caldav`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(5000),
+    });
+    const caldavContentType = caldavResponse.headers.get('content-type') || '';
+    const caldavIsHtml = caldavContentType.includes('text/html') || caldavContentType.includes('application/xhtml+xml');
+
+    // Only consider DAV supported if response is XML/calendar (not HTML or JSON error)
+    if (caldavResponse.status === 404 || caldavIsHtml || (!caldavContentType.includes('xml') && !caldavContentType.includes('calendar'))) {
+      // DAV not supported
+    } else {
+      caldavSupported = true;
+    }
+
+    // Check CardDAV support
+    const carddavResponse = await fetch(`${STALWART_URL.replace(/\/$/, '')}/.well-known/carddav`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(5000),
+    });
+    const carddavContentType = carddavResponse.headers.get('content-type') || '';
+    const carddavIsHtml = carddavContentType.includes('text/html') || carddavContentType.includes('application/xhtml+xml');
+
+    // Only consider DAV supported if response is XML/calendar (not HTML or JSON error)
+    if (carddavResponse.status === 404 || carddavIsHtml || (!carddavContentType.includes('xml') && !carddavContentType.includes('calendar'))) {
+      // DAV not supported
+    } else {
+      carddavSupported = true;
+    }
+  } catch {
+    // DAV not supported
+  }
+}
+
+if (!caldavSupported || !carddavSupported) {
+  console.warn(`[Unified Sync Tests] Skipping: Stalwart v0.16.10 does not support CalDAV/CardDAV protocols (only JMAP/IMAP)`);
+}
+
+// Conditionally skip the entire test suite if CalDAV/CardDAV not supported
+const describeSuite = (!caldavSupported || !carddavSupported) ? describe.skip : describe;
 // Database connection
 const PG_CONNECTION_STRING = process.env.TEST_DATABASE_URL;
 if (!PG_CONNECTION_STRING) {
@@ -339,7 +385,7 @@ async function cleanTestData(): Promise<void> {
   console.log('[Cleanup] Test data cleaned');
 }
 
-describe('Unified Sync Integration Tests', () => {
+describeSuite('Unified Sync Integration Tests', () => {
   let db: ReturnType<typeof createPgDb>;
   let ledger: InstanceType<typeof PgLedger>;
   let cursors: InstanceType<typeof PgCursorStore>;

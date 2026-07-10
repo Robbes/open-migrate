@@ -34,10 +34,18 @@ if (STALWART_CALENDAR_URL) {
       signal: AbortSignal.timeout(5000),
     });
     
-    // Stalwart v0.16.10 does not support DAV - returns 404 for all DAV endpoints
-    if (response.status === 404) {
+    // Check content-type to detect HTML responses (Stalwart portal)
+    const contentType = response.headers.get('content-type') || '';
+    console.log(`[Probe] .well-known/caldav: status=${response.status}, content-type=${contentType}`);
+    
+    // Stalwart v0.16.10 does not support DAV - returns HTML for all DAV endpoints
+    const isHtml = contentType.includes('text/html') || contentType.includes('application/xhtml+xml');
+
+    if (response.status === 404 || isHtml) {
       skipReason = 'Stalwart v0.16.10 does not support CalDAV protocol (only JMAP/IMAP)';
-    } else if (response.status === 401 || response.status === 200) {
+    } else if ((response.status === 401 || response.status === 200) && (contentType.includes('xml') || contentType.includes('calendar'))) {
+      // 401 means the endpoint exists but requires auth - DAV might be supported
+      // 200 means the endpoint is accessible - DAV is supported
       caldavSupported = true;
     }
   } catch (err) {
@@ -81,39 +89,71 @@ async function waitForCaldav(maxRetries = 30, delayMs = 2000): Promise<void> {
 /**
  * Seed test calendar events via raw DAV PUT.
  * Creates a test calendar and populates it with iCalendar events.
+ * Uses RFC 6764 discovery to get the correct calendar-home-set URL.
  */
-async function seedCalendarEvents(): Promise<void> {
+async function seedCalendarEvents(caldavSource: CalDAVSource): Promise<void> {
   const caldavUrl = STALWART_CALENDAR_URL!.replace(/\/$/, '');
-  const calendarPath = `/calendars/${CALDAV_USERNAME.split('@')[0]}/test-calendar/`;
-  const fullCalendarUrl = `${caldavUrl}${calendarPath}`;
+  
+  // Trigger discovery to get the calendar-home-set
+  const folders = await caldavSource.listFolders();
+  
+  // Try to find or create the test calendar
+  let testCalendar = folders.find(f => f.name === TEST_CALENDAR_NAME);
+  let calendarUrl: string | undefined;
+  
+  if (!testCalendar) {
+    // Calendar doesn't exist, we need to create it
+    // The CalDAVSource should have discovered the calendar-home-set
+    const calendarHomeSet = (caldavSource as any).calendarHomeSet;
+    if (!calendarHomeSet) {
+      throw new Error('Calendar home-set not discovered. DAV may not be enabled on the server.');
+    }
+    
+    // Create the test calendar using MKCALENDAR
+    calendarUrl = new URL(`test-calendar/`, calendarHomeSet).toString();
+    
+    const mkcalendarXml = `<?xml version="1.0" encoding="utf-8"?>
+      <D:mkcalendar xmlns:D="DAV:" xmlns:CA="urn:ietf:params:xml:ns:caldav">
+        <D:set>
+          <D:prop>
+            <D:displayname>${TEST_CALENDAR_NAME}</D:displayname>
+            <CA:supported-calendar-component-set>
+              <CA:comp name="VEVENT"/>
+            </CA:supported-calendar-component-set>
+          </D:prop>
+        </D:set>
+      </D:mkcalendar>`;
 
-  // First, create the calendar using MKCALENDAR
-  const mkcalendarXml = `<?xml version="1.0" encoding="utf-8"?>
-    <D:mkcalendar xmlns:D="DAV:" xmlns:CA="urn:ietf:params:xml:ns:caldav">
-      <D:set>
-        <D:prop>
-          <D:displayname>${TEST_CALENDAR_NAME}</D:displayname>
-          <CA:supported-calendar-component-set>
-            <CA:comp name="VEVENT"/>
-          </CA:supported-calendar-component-set>
-        </D:prop>
-      </D:set>
-    </D:mkcalendar>`;
-
-  try {
-    await fetch(fullCalendarUrl, {
-      method: 'MKCALENDAR',
-      headers: {
-        'Content-Type': 'application/xml',
-        Authorization: `Basic ${Buffer.from(`${CALDAV_USERNAME}:${CALDAV_PASSWORD}`).toString('base64')}`,
-      },
-      body: mkcalendarXml,
-    });
-    console.log('[Seed] Created test calendar');
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    // Calendar might already exist, which is fine
-    console.log(`[Seed] Calendar creation (may already exist): ${msg}`);
+    try {
+      const response = await fetch(calendarUrl, {
+        method: 'MKCALENDAR',
+        headers: {
+          'Content-Type': 'application/xml',
+          Authorization: `Basic ${Buffer.from(`${CALDAV_USERNAME}:${CALDAV_PASSWORD}`).toString('base64')}`,
+        },
+        body: mkcalendarXml,
+      });
+      
+      if (response.status === 201 || response.status === 204) {
+        console.log('[Seed] Created test calendar');
+        // Refresh folders to get the new calendar
+        const refreshedFolders = await caldavSource.listFolders();
+        testCalendar = refreshedFolders.find(f => f.name === TEST_CALENDAR_NAME);
+      } else {
+        const body = await response.text();
+        console.warn(`[Seed] Calendar creation failed: ${response.status} - ${body.substring(0, 200)}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[Seed] Calendar creation error: ${msg}`);
+    }
+  } else {
+    // Use the discovered calendar path
+    calendarUrl = new URL(`${testCalendar.path.replace(/\/$/, '')}/`, caldavUrl).toString();
+  }
+  
+  if (!testCalendar || !calendarUrl) {
+    throw new Error('No calendar available for seeding. DAV configuration may be incorrect.');
   }
 
   // Seed test events
@@ -158,7 +198,7 @@ STATUS:CONFIRMED
 END:VEVENT
 END:VCALENDAR`;
 
-    const eventUrl = `${fullCalendarUrl}${event.uid}.ics`;
+    const eventUrl = new URL(`${event.uid}.ics`, calendarUrl!).toString();
     
     try {
       const response = await fetch(eventUrl, {
@@ -187,13 +227,22 @@ END:VCALENDAR`;
 
 /**
  * Clean up test calendar and events.
+ * Uses RFC 6764 discovery to get the correct calendar-home-set URL.
  */
-async function cleanCalendar(): Promise<void> {
-  const caldavUrl = STALWART_CALENDAR_URL!.replace(/\/$/, '');
-  const calendarPath = `/calendars/${CALDAV_USERNAME.split('@')[0]}/test-calendar/`;
-  const fullCalendarUrl = `${caldavUrl}${calendarPath}`;
-
+async function cleanCalendar(caldavSource?: CalDAVSource): Promise<void> {
+  // If caldavSource is provided, use its discovered calendar home-set
+  let calendarHomeSet: string | undefined;
+  if (caldavSource) {
+    calendarHomeSet = (caldavSource as any).calendarHomeSet;
+  }
+  
+  // Fallback to environment variable if not discovered
+  const caldavUrl = STALWART_CALENDAR_URL || 'http://localhost:8080';
+  
   try {
+    // If we have the calendar home-set, use it for cleanup
+    const baseCollectionUrl = calendarHomeSet || `${caldavUrl.replace(/\/$/, '')}/${CALDAV_USERNAME.split('@')[0]}/`;
+    
     // Delete all events in the calendar using REPORT
     const syncCollectionXml = `<?xml version="1.0" encoding="utf-8"?>
       <D:sync-collection xmlns:D="DAV:">
@@ -204,7 +253,7 @@ async function cleanCalendar(): Promise<void> {
         <D:sync-token/>
       </D:sync-collection>`;
 
-    const response = await fetch(`${caldavUrl}${CALDAV_USERNAME.split('@')[0]}/`, {
+    const response = await fetch(baseCollectionUrl, {
       method: 'REPORT',
       headers: {
         'Content-Type': 'application/xml',
@@ -244,15 +293,18 @@ async function cleanCalendar(): Promise<void> {
     }
 
     // Delete the calendar itself
-    try {
-      await fetch(fullCalendarUrl, {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Basic ${Buffer.from(`${CALDAV_USERNAME}:${CALDAV_PASSWORD}`).toString('base64')}`,
-        },
-      });
-    } catch {
-      // Ignore calendar deletion errors
+    if (calendarHomeSet) {
+      const calendarUrl = new URL(`test-calendar/`, calendarHomeSet).toString();
+      try {
+        await fetch(calendarUrl, {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Basic ${Buffer.from(`${CALDAV_USERNAME}:${CALDAV_PASSWORD}`).toString('base64')}`,
+          },
+        });
+      } catch {
+        // Ignore calendar deletion errors
+      }
     }
 
     console.log('[Cleanup] Calendar cleaned');
@@ -272,29 +324,31 @@ testSuite('CalDAV Source Integration Tests', () => {
     console.log('[CalDAV Tests] Waiting for CalDAV server...');
     await waitForCaldav();
     console.log('[CalDAV Tests] CalDAV server is ready');
+    
+    // Create the CalDAV source for seeding
+    caldavSource = new CalDAVSource({
+      url: `${STALWART_CALENDAR_URL}/`,
+      username: CALDAV_USERNAME,
+      passwordEnv: 'CALDAV_PASSWORD',
+    } as CalDAVSourceConfig);
+    process.env.CALDAV_PASSWORD = CALDAV_PASSWORD;
   }, 60000);
 
   beforeEach(async () => {
     // Clean up before each test for isolation
-    await cleanCalendar();
-    await seedCalendarEvents();
+    await cleanCalendar(caldavSource);
+    // Seed with the caldavSource instance
+    await seedCalendarEvents(caldavSource);
   });
 
   afterAll(async () => {
     // Final cleanup
-    await cleanCalendar();
+    await cleanCalendar(caldavSource);
   });
 
   describe('listFolders()', () => {
     it('should discover seeded calendars', async () => {
-      caldavSource = new CalDAVSource({
-        url: `${STALWART_CALENDAR_URL}/`,
-        username: CALDAV_USERNAME,
-        passwordEnv: 'CALDAV_PASSWORD',
-      } as CalDAVSourceConfig);
-
-      // Set password via environment
-      process.env.CALDAV_PASSWORD = CALDAV_PASSWORD;
+      // caldavSource is already created in beforeAll
 
       const folders = await caldavSource.listFolders();
 
