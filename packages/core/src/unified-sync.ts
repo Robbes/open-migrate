@@ -18,14 +18,10 @@
 import type { TenantId, MappingId, Ledger, CursorStore, SyncCursor, GenericSource, GenericTargetWriter, GenericFolder, GenericItem, GenericRawItem } from '@openmig/shared';
 import { runGenericSync, type GenericSyncResult } from './generic-sync';
 
-// Type-only imports for config interfaces
-import type { CalDAVSourceConfig } from '@openmig/connectors/caldav-source';
-import type { CardDAVSourceConfig } from '@openmig/connectors/carddav-source';
-import type { WebDAVSourceConfig } from '@openmig/connectors/webdav-source';
+// Type-only imports for config interfaces (used in UnifiedSyncConfig)
 import type { CalDAVTargetConfig } from '@openmig/engines';
 import type { CardDAVTargetConfig } from '@openmig/engines';
 import type { WebDAVTargetConfig } from '@openmig/engines';
-import type { RawCalendarEvent, RawContact, RawFileItem } from '@openmig/shared';
 
 export interface UnifiedSyncConfig {
   tenantId: TenantId;
@@ -98,60 +94,6 @@ interface CalDAVItem extends GenericItem {
 }
 
 /**
- * Adapter to wrap CalDAVSource for GenericSource interface
- */
-class CalDAVSourceAdapter implements GenericSource<CalDAVFolder, CalDAVItem> {
-  private readonly source: CalDAVSource;
-
-  constructor(config: CalDAVSourceConfig) {
-    this.source = new CalDAVSource(config);
-  }
-
-  async listFolders(): Promise<ReadonlyArray<CalDAVFolder>> {
-    const folders = await this.source.listFolders();
-    return folders.map(folder => ({
-      id: folder.path,
-      name: folder.name || folder.path,
-      path: folder.path,
-      color: folder.color,
-    }));
-  }
-
-  async listSince(
-    folder: CalDAVFolder,
-    cursor?: SyncCursor,
-  ): Promise<{ items: ReadonlyArray<CalDAVItem>; nextCursor: SyncCursor }> {
-    const result = await this.source.listSince(folder, cursor);
-    return {
-      items: result.items.map(item => ({
-        naturalKey: item.item.uid,
-        uid: item.item.uid,
-        type: item.item.type,
-        summary: item.item.summary,
-        sourcePath: item.item.sourcePath,
-      })),
-      nextCursor: result.nextCursor,
-    };
-  }
-
-  async fetch(item: CalDAVItem): Promise<GenericRawItem> {
-    // For CalDAV, we need to get the raw icalendar data
-    // Since we can't re-fetch from the source, we construct a minimal iCalendar
-    // In production, this would fetch from the source again
-    const icalendar = item.summary ? `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//OpenMigrate//\r\nBEGIN:VEVENT\r\nUID:${item.uid}\r\nSUMMARY:${item.summary}\r\nDTSTART:20240101T000000Z\r\nDTEND:20240101T010000Z\r\nEND:VEVENT\r\nEND:VCALENDAR` : '';
-    return {
-      content: icalendar,
-      metadata: {
-        uid: item.uid,
-        type: item.type,
-        summary: item.summary,
-        sourcePath: item.sourcePath,
-      },
-    };
-  }
-}
-
-/**
  * CardDAV Folder type implementing GenericFolder
  */
 interface CardDAVFolder extends GenericFolder {
@@ -169,59 +111,6 @@ interface CardDAVItem extends GenericItem {
   readonly type: string;
   readonly name: string;
   readonly sourcePath: string;
-}
-
-/**
- * Adapter to wrap CarddavSource for GenericSource interface
- */
-class CarddavSourceAdapter implements GenericSource<CardDAVFolder, CardDAVItem> {
-  private readonly source: CarddavSource;
-
-  constructor(config: CardDAVSourceConfig) {
-    this.source = new CarddavSource(config);
-  }
-
-  async listFolders(): Promise<ReadonlyArray<CardDAVFolder>> {
-    const folders = await this.source.listFolders();
-    return folders.map(folder => ({
-      id: folder.path,
-      name: folder.name || folder.path,
-      path: folder.path,
-      description: folder.description,
-    }));
-  }
-
-  async listSince(
-    folder: CardDAVFolder,
-    cursor?: SyncCursor,
-  ): Promise<{ items: ReadonlyArray<CardDAVItem>; nextCursor: SyncCursor }> {
-    const result = await this.source.listSince(folder, cursor);
-    return {
-      items: result.items.map(item => ({
-        naturalKey: item.item.uid,
-        uid: item.item.uid,
-        type: item.item.type,
-        name: item.item.name,
-        sourcePath: item.item.sourcePath,
-      })),
-      nextCursor: result.nextCursor,
-    };
-  }
-
-  async fetch(item: CardDAVItem): Promise<GenericRawItem> {
-    // For CardDAV, we need to get the raw vcard data
-    // In production, this would fetch from the source again
-    const vcard = item.name ? `BEGIN:VCARD\r\nVERSION:4.0\r\nFN:${item.name}\r\nUID:${item.uid}\r\nEND:VCARD` : '';
-    return {
-      content: vcard,
-      metadata: {
-        uid: item.uid,
-        type: item.type,
-        name: item.name,
-        sourcePath: item.sourcePath,
-      },
-    };
-  }
 }
 
 /**
@@ -244,59 +133,6 @@ interface WebDAVItem extends GenericItem {
   readonly path: string;
   readonly isDirectory: boolean;
   readonly size: number;
-}
-
-/**
- * Adapter to wrap WebdavFileSource for GenericSource interface
- */
-class WebdavFileSourceAdapter implements GenericSource<WebDAVFolder, WebDAVItem> {
-  private readonly source: WebdavFileSource;
-
-  constructor(config: WebDAVSourceConfig) {
-    this.source = new WebdavFileSource(config);
-  }
-
-  async listFolders(): Promise<ReadonlyArray<WebDAVFolder>> {
-    const folders = await this.source.listFolders();
-    return folders.map(folder => ({
-      id: folder.path,
-      name: folder.name || folder.path,
-      path: folder.path,
-      description: folder.description,
-    }));
-  }
-
-  async listSince(
-    folder: WebDAVFolder,
-    cursor?: SyncCursor,
-  ): Promise<{ items: ReadonlyArray<WebDAVItem>; nextCursor: SyncCursor }> {
-    const result = await this.source.listSince(folder, cursor);
-    return {
-      items: result.items.map(item => ({
-        naturalKey: item.item.path,
-        path: item.item.path,
-        isDirectory: item.item.isDirectory,
-        size: item.item.size,
-        type: item.item.isDirectory ? 'directory' : 'file',
-        summary: item.item.path,
-        sourcePath: item.item.sourceRef,
-      })),
-      nextCursor: result.nextCursor,
-    };
-  }
-
-  async fetch(item: WebDAVItem): Promise<GenericRawItem> {
-    // For WebDAV, we need to get the raw file content
-    // In production, this would fetch from the source again
-    return {
-      content: new ArrayBuffer(0),
-      metadata: {
-        path: item.path,
-        type: item.isDirectory ? 'directory' : 'file',
-        size: String(item.size),
-      },
-    };
-  }
 }
 
 /**
