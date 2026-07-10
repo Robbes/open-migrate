@@ -29,7 +29,7 @@ export interface GraphDriveItem {
   readonly quickXorHash?: string;
   readonly file?: { mimeType?: string };
   readonly folder?: { childCount?: number };
-  readonly deleted?: {};
+  readonly deleted?: object;
   readonly '@odata.deltaLink'?: string;
 }
 

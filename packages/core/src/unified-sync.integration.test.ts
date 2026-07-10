@@ -15,9 +15,7 @@ import { createPgDb, PgLedger, PgCursorStore } from '@openmig/ledger';
 import { CalDAVSource } from '@openmig/connectors/caldav-source';
 import { CarddavSource } from '@openmig/connectors/carddav-source';
 import { WebdavFileSource } from '@openmig/connectors/webdav-source';
-import { CalDAVTargetWriter } from '@openmig/engines/caldav-target-writer';
-import { CardDAVTargetWriter } from '@openmig/engines/carddav-target-writer';
-import { WebDAVTargetWriter } from '@openmig/engines/webdav-target-writer';
+import { CalDAVTargetWriter as _CalDAVTargetWriter, CardDAVTargetWriter as _CardDAVTargetWriter, WebDAVTargetWriter as _WebDAVTargetWriter } from '@openmig/engines';
 import { runUnifiedSync, type UnifiedSyncConfig } from './unified-sync';
 import { asTenantId, asMappingId } from '@openmig/shared';
 
@@ -371,14 +369,14 @@ describe('Unified Sync Integration Tests', () => {
   describe('Idempotency property', () => {
     it('should sync all domains idempotently (first run creates all, second run creates 0)', async () => {
       // Set up source connectors
-      const caldavSource = new CalDAVSource({
+      const _caldavSource = new CalDAVSource({
         url: `${STALWART_URL}/`,
         username: STALWART_USERNAME,
         passwordEnv: 'STALWART_JMAP_PASSWORD',
       });
       process.env.STALWART_JMAP_PASSWORD = STALWART_PASSWORD;
 
-      const carddavSource = new CarddavSource({
+      const _carddavSource = new CarddavSource({
         url: `${STALWART_URL}/`,
         username: STALWART_USERNAME,
         passwordEnv: 'STALWART_JMAP_PASSWORD',
@@ -471,14 +469,14 @@ describe('Unified Sync Integration Tests', () => {
   describe('Delta sync', () => {
     it('should handle delta correctly (adding one item creates exactly 1)', async () => {
       // Set up sources for delta test
-      const caldavSource = new CalDAVSource({
+      const _caldavSource = new CalDAVSource({
         url: `${STALWART_URL}/`,
         username: STALWART_USERNAME,
         passwordEnv: 'STALWART_JMAP_PASSWORD',
       });
       process.env.STALWART_JMAP_PASSWORD = STALWART_PASSWORD;
 
-      const carddavSource = new CarddavSource({
+      const _carddavSource = new CarddavSource({
         url: `${STALWART_URL}/`,
         username: STALWART_USERNAME,
         passwordEnv: 'STALWART_JMAP_PASSWORD',
@@ -542,8 +540,8 @@ describe('Unified Sync Integration Tests', () => {
       });
 
       const initialCalendarCount = result1.calendar.createdCount;
-      const initialContactCount = result1.contacts.createdCount;
-      const initialFileCount = webdavSource ? result1.files.createdCount : 0;
+      const _initialContactCount = result1.contacts.createdCount;
+      const _initialFileCount = webdavSource ? result1.files.createdCount : 0;
 
       expect(initialCalendarCount).toBeGreaterThan(0);
 
@@ -595,14 +593,14 @@ END:VCALENDAR`;
   describe('Reindex test', () => {
     it('should handle reindex correctly (wipe ledger → re-run creates 0)', async () => {
       // Set up sources for reindex test
-      const caldavSource = new CalDAVSource({
+      const _caldavSource = new CalDAVSource({
         url: `${STALWART_URL}/`,
         username: STALWART_USERNAME,
         passwordEnv: 'STALWART_JMAP_PASSWORD',
       });
       process.env.STALWART_JMAP_PASSWORD = STALWART_PASSWORD;
 
-      const carddavSource = new CarddavSource({
+      const _carddavSource = new CarddavSource({
         url: `${STALWART_URL}/`,
         username: STALWART_USERNAME,
         passwordEnv: 'STALWART_JMAP_PASSWORD',
@@ -694,14 +692,14 @@ END:VCALENDAR`;
   describe('Multi-domain aggregation', () => {
     it('should aggregate stats across all domains correctly', async () => {
       // Set up sources for multi-domain test
-      const caldavSource = new CalDAVSource({
+      const _caldavSource = new CalDAVSource({
         url: `${STALWART_URL}/`,
         username: STALWART_USERNAME,
         passwordEnv: 'STALWART_JMAP_PASSWORD',
       });
       process.env.STALWART_JMAP_PASSWORD = STALWART_PASSWORD;
 
-      const carddavSource = new CarddavSource({
+      const _carddavSource = new CarddavSource({
         url: `${STALWART_URL}/`,
         username: STALWART_USERNAME,
         passwordEnv: 'STALWART_JMAP_PASSWORD',

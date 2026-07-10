@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { WebdavFileSource } from './webdav-source';
 import type { WebDAVSourceConfig } from './webdav-source.types';
-import type { RawFileItem } from '@openmig/shared';
+import type { RawFileItem as _RawFileItem } from '@openmig/shared';
 
 // Nextcloud WebDAV configuration from Testcontainers
 const NEXTCLOUD_WEBDAV_URL = process.env.NEXTCLOUD_WEBDAV_URL;

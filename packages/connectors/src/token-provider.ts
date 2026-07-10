@@ -208,7 +208,7 @@ export class MsalTokenProvider implements TokenProvider {
         if (tokenResponse) {
           return this.mapMsalTokenResponse(tokenResponse);
         }
-      } catch (refreshError) {
+      } catch (_refreshError) {
         // If refresh fails (e.g., refresh token expired), fall through to username/password
       }
     }

@@ -239,16 +239,12 @@ export class ThrottleLimiter {
   handleRateLimited(responseStatus: number, retryAfterHeader?: string): number {
     this.stats.throttleEvents++;
     
-    let waitTime = 0;
-    
     if (retryAfterHeader) {
-      waitTime = this.parseRetryAfterHeader(retryAfterHeader);
-    } else {
-      // Default backoff if no Retry-After header
-      waitTime = this.calculateBackoff(0);
+      return this.parseRetryAfterHeader(retryAfterHeader);
     }
-
-    return waitTime;
+    
+    // Default backoff if no Retry-After header
+    return this.calculateBackoff(0);
   }
 
   /**
@@ -259,7 +255,7 @@ export class ThrottleLimiter {
    * @param requestFn - Async function that returns { status, headers, body }
    * @returns The response from the request
    */
-  async executeWithThrottling<T>(
+  async executeWithThrottling(
     tenantId: string,
     provider: string,
     requestFn: () => Promise<{ status: number; headers: Record<string, string>; body: string }>,

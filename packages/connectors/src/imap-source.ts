@@ -199,7 +199,8 @@ export class ImapSource implements SourceConnector {
           if (!list) {
             throw new Error(
               'IMAP getBoxes() returned undefined after token refresh. ' +
-              'This indicates a server-side issue or missing account configuration.'
+              'This indicates a server-side issue or missing account configuration.',
+              { cause: error }
             );
           }
 

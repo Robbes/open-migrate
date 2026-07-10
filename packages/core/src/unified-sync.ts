@@ -512,7 +512,7 @@ export async function runUnifiedSync(
           console.error(`[UnifiedSync] Calendar domain failed: ${errMsg}`);
           result.calendar.failureCount = 1;
           result.calendar.failures.push({ id: 'calendar', error: errMsg });
-          throw new Error(`Calendar sync failed: ${errMsg}`);
+          throw new Error(`Calendar sync failed: ${errMsg}`, { cause: error });
         }
       })()
     );
@@ -555,7 +555,7 @@ export async function runUnifiedSync(
           console.error(`[UnifiedSync] Contacts domain failed: ${errMsg}`);
           result.contacts.failureCount = 1;
           result.contacts.failures.push({ id: 'contacts', error: errMsg });
-          throw new Error(`Contacts sync failed: ${errMsg}`);
+          throw new Error(`Contacts sync failed: ${errMsg}`, { cause: error });
         }
       })()
     );
@@ -598,7 +598,7 @@ export async function runUnifiedSync(
           console.error(`[UnifiedSync] Files domain failed: ${errMsg}`);
           result.files.failureCount = 1;
           result.files.failures.push({ id: 'files', error: errMsg });
-          throw new Error(`Files sync failed: ${errMsg}`);
+          throw new Error(`Files sync failed: ${errMsg}`, { cause: error });
         }
       })()
     );

@@ -11,8 +11,8 @@
  * Uses @azure/msal-node to decode JWT and verify scopes
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createHash } from 'node:crypto';
+import { describe, it, expect, beforeAll, _afterAll } from 'vitest';
+import { createHash as _createHash } from 'node:crypto';
 import { ConfidentialClientApplication, PublicClientApplication } from '@azure/msal-node';
 
 // ============================================================================
@@ -102,7 +102,7 @@ export function decodeJwtToken(token: string): TokenClaims {
     const jsonPayload = Buffer.from(padded, 'base64').toString('utf-8');
     return JSON.parse(jsonPayload);
   } catch (error) {
-    throw new Error(`Failed to decode JWT: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`Failed to decode JWT: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
 }
 

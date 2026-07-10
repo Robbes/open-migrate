@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Ledger, CursorStore, TenantId, MappingId } from '@openmig/shared';
-import { runUnifiedSync, type UnifiedSyncConfig, type UnifiedSyncDeps } from './unified-sync';
+import { runUnifiedSync, type UnifiedSyncConfig, type UnifiedSyncDeps as _UnifiedSyncDeps } from './unified-sync';
 
 // Mock the connectors and engines with default implementations
 vi.mock('@openmig/connectors/caldav-source', () => ({

@@ -8,7 +8,7 @@
  * - Mocked version that doesn't require real secrets
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, _vi, _beforeEach, _afterEach } from 'vitest';
 import {
   decodeJwtToken,
   isTokenReadOnly,
