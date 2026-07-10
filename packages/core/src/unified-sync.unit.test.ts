@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Ledger, CursorStore, SyncCursor, GenericSource, GenericTargetWriter } from '@openmig/shared';
+import type { Ledger, CursorStore, GenericSource, GenericTargetWriter } from '@openmig/shared';
 import { runUnifiedSync, type UnifiedSyncConfig, type CalDAVFolder, type CalDAVItem, type CardDAVFolder, type CardDAVItem, type WebDAVFolder, type WebDAVItem } from './unified-sync';
 
 // Fake implementations for testing
