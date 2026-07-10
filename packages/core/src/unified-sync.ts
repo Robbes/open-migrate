@@ -15,12 +15,18 @@
  * This keeps the core stack-independent - no direct dependency on @openmig/connectors.
  */
 
-import type { TenantId, MappingId, Ledger, CursorStore, GenericSource, GenericTargetWriter, GenericFolder, GenericItem, GenericRawItem } from '@openmig/shared';
-import { runGenericSync, type GenericSyncResult } from './generic-sync';
+import type { TenantId, MappingId, Ledger, CursorStore, SyncCursor } from '@openmig/shared';
+import { runGenericSync, type GenericSyncResult, type GenericSource, type GenericTargetWriter, type GenericFolder, type GenericItem, type GenericRawItem } from './generic-sync';
 
 // Type-only imports for config interfaces (used in UnifiedSyncConfig)
+import type { CalDAVSourceConfig } from '@openmig/connectors';
+import type { RawCalendarEvent } from '@openmig/shared';
 import type { CalDAVTargetConfig } from '@openmig/engines';
+import type { CardDAVSourceConfig } from '@openmig/connectors';
+import type { RawContact } from '@openmig/shared';
 import type { CardDAVTargetConfig } from '@openmig/engines';
+import type { WebDAVSourceConfig } from '@openmig/connectors';
+import type { RawFileItem } from '@openmig/shared';
 import type { WebDAVTargetConfig } from '@openmig/engines';
 
 export interface UnifiedSyncConfig {
@@ -76,7 +82,7 @@ export interface UnifiedSyncDeps {
 /**
  * CalDAV Folder type implementing GenericFolder
  */
-interface CalDAVFolder extends GenericFolder {
+export interface CalDAVFolder extends GenericFolder {
   readonly path: string;
   readonly name: string;
   readonly color?: string;
@@ -86,7 +92,7 @@ interface CalDAVFolder extends GenericFolder {
 /**
  * CalDAV Item type implementing GenericItem
  */
-interface CalDAVItem extends GenericItem {
+export interface CalDAVItem extends GenericItem {
   readonly uid: string;
   readonly type: string;
   readonly summary: string;
@@ -96,7 +102,7 @@ interface CalDAVItem extends GenericItem {
 /**
  * CardDAV Folder type implementing GenericFolder
  */
-interface CardDAVFolder extends GenericFolder {
+export interface CardDAVFolder extends GenericFolder {
   readonly path: string;
   readonly name: string;
   readonly description?: string;
@@ -106,7 +112,7 @@ interface CardDAVFolder extends GenericFolder {
 /**
  * CardDAV Item type implementing GenericItem
  */
-interface CardDAVItem extends GenericItem {
+export interface CardDAVItem extends GenericItem {
   readonly uid: string;
   readonly type: string;
   readonly name: string;
@@ -116,7 +122,7 @@ interface CardDAVItem extends GenericItem {
 /**
  * WebDAV Folder type implementing GenericFolder
  */
-interface WebDAVFolder extends GenericFolder {
+export interface WebDAVFolder extends GenericFolder {
   readonly path: string;
   readonly name: string;
   readonly description?: string;
@@ -129,7 +135,7 @@ interface WebDAVFolder extends GenericFolder {
 /**
  * WebDAV Item type implementing GenericItem
  */
-interface WebDAVItem extends GenericItem {
+export interface WebDAVItem extends GenericItem {
   readonly path: string;
   readonly isDirectory: boolean;
   readonly size: number;

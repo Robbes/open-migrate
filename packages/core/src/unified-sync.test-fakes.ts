@@ -5,7 +5,9 @@
  * injected into runUnifiedSync via UnifiedSyncDeps.
  */
 
-import type { GenericSource, GenericTargetWriter, SyncCursor } from '@openmig/shared';
+import { vi } from 'vitest';
+import type { SyncCursor } from '@openmig/shared';
+import type { GenericSource, GenericTargetWriter } from './generic-sync';
 import type { CalDAVFolder, CalDAVItem } from './unified-sync';
 import type { CardDAVFolder, CardDAVItem } from './unified-sync';
 import type { WebDAVFolder, WebDAVItem } from './unified-sync';
