@@ -13,3 +13,4 @@ export * from './specialUse';
 export * from './cursor';
 export * from './concurrency';
 export * from './config';
+export * from './throttling';

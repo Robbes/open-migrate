@@ -291,6 +291,45 @@ async function waitForHttpEndpoint(
   throw new Error(`Endpoint ${url} not available after ${maxAttempts} attempts`);
 }
 
+/**
+ * Start Nextcloud container for WebDAV testing.
+ * Uses SQLite for lightweight testing.
+ */
+async function startNextcloud(): Promise<{
+  webdavUrl: string;
+  username: string;
+  password: string;
+  container: StartedTestContainer;
+}> {
+  console.log('[NextcloudSetup] Starting Nextcloud container...');
+
+  const nextcloudContainer = await new GenericContainer('nextcloud:34-apache')
+    .withEnvironment({
+      SQLITE_DATABASE: 'nextcloud',
+      NEXTCLOUD_ADMIN_USER: 'testadmin',
+      NEXTCLOUD_ADMIN_PASSWORD: 'testadmin_password',
+      NEXTCLOUD_TRUSTED_DOMAINS: 'localhost',
+    })
+    .withExposedPorts(80)
+    .withStartupTimeout(300000) // 5 minutes for Nextcloud to initialize
+    .withWaitStrategy(Wait.forHttp('/status.php', 80).forStatusCodeMatching(status => status === 200));
+
+  const container = await nextcloudContainer.start();
+
+  const nextcloudHost = container.getHost();
+  const nextcloudPort = container.getMappedPort(80);
+  const webdavUrl = `http://${nextcloudHost}:${nextcloudPort}/remote.php/dav`;
+
+  console.log(`[NextcloudSetup] Nextcloud ready at ${webdavUrl}`);
+
+  return {
+    webdavUrl,
+    username: 'testadmin',
+    password: 'testadmin_password',
+    container,
+  };
+}
+
 export interface TestEnvironment {
   postgres: {
     host: string;
@@ -304,6 +343,12 @@ export interface TestEnvironment {
     jmapUrl: string;
     jmapUsername: string;
     jmapPassword: string;
+    container: StartedTestContainer;
+  };
+  nextcloud?: {
+    webdavUrl: string;
+    username: string;
+    password: string;
     container: StartedTestContainer;
   };
 }
@@ -681,10 +726,11 @@ async function startStalwart(): Promise<{
 
 /**
  * Start the test environment using Testcontainers.
- * Spins up Postgres and optionally Stalwart (two-phase startup) containers.
+ * Spins up Postgres and optionally Stalwart (two-phase startup) and Nextcloud.
  * @param skipStalwart - If true, skip starting Stalwart container (useful for unit tests)
+ * @param skipNextcloud - If true, skip starting Nextcloud container (useful for CalDAV/CardDAV only tests)
  */
-export async function startTestEnvironment(skipStalwart: boolean = false): Promise<TestEnvironment> {
+export async function startTestEnvironment(skipStalwart: boolean = false, skipNextcloud: boolean = false): Promise<TestEnvironment> {
   console.log('[Testcontainers] Starting test environment...');
 
   // Create a shared network for containers
@@ -730,6 +776,28 @@ export async function startTestEnvironment(skipStalwart: boolean = false): Promi
     console.log('[Testcontainers] Skipping Stalwart startup (unit test mode).');
   }
 
+  // Start Nextcloud only if not skipped
+  let nextcloudEnv: TestEnvironment['nextcloud'] | undefined;
+  
+  if (!skipNextcloud) {
+    try {
+      const nextcloud = await startNextcloud();
+      nextcloudEnv = {
+        webdavUrl: nextcloud.webdavUrl,
+        username: nextcloud.username,
+        password: nextcloud.password,
+        container: nextcloud.container,
+      };
+      console.log(`[NextcloudSetup] Nextcloud ready - WebDAV: ${nextcloud.webdavUrl}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[Testcontainers] Warning: Could not start Nextcloud: ${msg}`);
+      console.warn('[Testcontainers] Continuing without Nextcloud - WebDAV tests will be skipped.');
+    }
+  } else {
+    console.log('[Testcontainers] Skipping Nextcloud startup.');
+  }
+
   const result: TestEnvironment = {
     postgres: {
       host: postgresHost,
@@ -741,6 +809,10 @@ export async function startTestEnvironment(skipStalwart: boolean = false): Promi
   
   if (stalwartEnv) {
     result.stalwart = stalwartEnv;
+  }
+  
+  if (nextcloudEnv) {
+    result.nextcloud = nextcloudEnv;
   }
   
   return result;
@@ -792,6 +864,24 @@ export async function stopTestEnvironment(env: TestEnvironment): Promise<void> {
     }
   } else {
     console.log('[Testcontainers] No Stalwart container to stop.');
+  }
+  
+  // Stop Nextcloud if it was started
+  if (env.nextcloud) {
+    try {
+      await env.nextcloud.container.stop();
+      console.log('[Testcontainers] Nextcloud stopped.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[Testcontainers] Error stopping Nextcloud:', msg);
+      await captureContainerDiagnostics(
+        env.nextcloud.container,
+        'nextcloud',
+        ['ps aux', 'df -h']
+      );
+    }
+  } else {
+    console.log('[Testcontainers] No Nextcloud container to stop.');
   }
   
   console.log('[Testcontainers] All containers stopped.');

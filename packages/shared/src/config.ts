@@ -6,6 +6,9 @@ export class ConfigError extends Error {
   }
 }
 
+// Import ThrottleConfig from throttling module for type reference
+import type { ThrottleConfig } from './throttling';
+
 export type SourceAuth =
   | { readonly kind: 'xoauth2'; readonly tokenFromEnv: string }
   | { readonly kind: 'login'; readonly passwordFromEnv: string };
@@ -64,6 +67,20 @@ export interface WebDAVSource {
   readonly auth: SourceAuth;
 }
 
+/** Microsoft Graph Calendar source */
+export interface GraphCalendarSource {
+  readonly type: 'graph-calendar';
+  readonly baseUrl?: string;
+  readonly tenantId: string;
+}
+
+/** Microsoft Graph Contacts source */
+export interface GraphContactsSource {
+  readonly type: 'graph-contacts';
+  readonly baseUrl?: string;
+  readonly tenantId: string;
+}
+
 /** CalDAV target for calendar data */
 export interface CalDAVTarget {
   readonly type: 'caldav';
@@ -98,6 +115,8 @@ export interface DomainConfig {
   readonly target: TargetConfig;
   /** Optional per-domain concurrency override */
   readonly concurrency?: number;
+  /** Optional per-domain throttle configuration */
+  readonly throttleConfig?: Partial<ThrottleConfig>;
 }
 
 /** Per-domain configuration block for multi-domain sync */
@@ -108,7 +127,7 @@ export interface DomainsConfig {
   files?: DomainConfig;
 }
 
-export type SourceConfig = ImapOAuth2Source | CalDAVSource | CardDAVSource | WebDAVSource;
+export type SourceConfig = ImapOAuth2Source | CalDAVSource | CardDAVSource | WebDAVSource | GraphCalendarSource | GraphContactsSource;
 export type TargetConfig = JmapTarget | ImapDavTarget | CalDAVTarget | CardDAVTarget | WebDAVTarget;
 
 export interface ScheduleConfig {
@@ -192,7 +211,21 @@ function parseSource(obj: Record<string, unknown>): SourceConfig {
       auth: parseSourceAuth(asRecord(obj.auth, 'source.auth')),
     };
   }
-  throw new ConfigError(`source.type: unsupported "${type}" (expected "imap-oauth2", "caldav", "carddav", or "webdav")`);
+  if (type === 'graph-calendar') {
+    return {
+      type: 'graph-calendar',
+      baseUrl: obj['baseUrl'] as string | undefined,
+      tenantId: reqString(obj, 'tenantId', 'source.tenantId'),
+    };
+  }
+  if (type === 'graph-contacts') {
+    return {
+      type: 'graph-contacts',
+      baseUrl: obj['baseUrl'] as string | undefined,
+      tenantId: reqString(obj, 'tenantId', 'source.tenantId'),
+    };
+  }
+  throw new ConfigError(`source.type: unsupported "${type}" (expected "imap-oauth2", "caldav", "carddav", "webdav", "graph-calendar", or "graph-contacts")`);
 }
 
 function parseJmapAuth(obj: Record<string, unknown>): JmapAuth {
@@ -285,6 +318,7 @@ function parseDomainsConfig(obj: Record<string, unknown>): DomainsConfig {
       source: parseSource(asRecord(mail.source, 'domains.mail.source')),
       target: parseTarget(asRecord(mail.target, 'domains.mail.target')),
       ...(mail.concurrency !== undefined ? { concurrency: reqInt(mail, 'concurrency', 'domains.mail.concurrency') } : {}),
+      ...(mail.throttleConfig !== undefined ? { throttleConfig: parseThrottleConfig(asRecord(mail.throttleConfig, 'domains.mail.throttleConfig')) } : {}),
     };
   }
 
@@ -296,6 +330,7 @@ function parseDomainsConfig(obj: Record<string, unknown>): DomainsConfig {
       source: parseSource(asRecord(calendar.source, 'domains.calendar.source')),
       target: parseTarget(asRecord(calendar.target, 'domains.calendar.target')),
       ...(calendar.concurrency !== undefined ? { concurrency: reqInt(calendar, 'concurrency', 'domains.calendar.concurrency') } : {}),
+      ...(calendar.throttleConfig !== undefined ? { throttleConfig: parseThrottleConfig(asRecord(calendar.throttleConfig, 'domains.calendar.throttleConfig')) } : {}),
     };
   }
 
@@ -307,6 +342,7 @@ function parseDomainsConfig(obj: Record<string, unknown>): DomainsConfig {
       source: parseSource(asRecord(contacts.source, 'domains.contacts.source')),
       target: parseTarget(asRecord(contacts.target, 'domains.contacts.target')),
       ...(contacts.concurrency !== undefined ? { concurrency: reqInt(contacts, 'concurrency', 'domains.contacts.concurrency') } : {}),
+      ...(contacts.throttleConfig !== undefined ? { throttleConfig: parseThrottleConfig(asRecord(contacts.throttleConfig, 'domains.contacts.throttleConfig')) } : {}),
     };
   }
 
@@ -318,10 +354,37 @@ function parseDomainsConfig(obj: Record<string, unknown>): DomainsConfig {
       source: parseSource(asRecord(files.source, 'domains.files.source')),
       target: parseTarget(asRecord(files.target, 'domains.files.target')),
       ...(files.concurrency !== undefined ? { concurrency: reqInt(files, 'concurrency', 'domains.files.concurrency') } : {}),
+      ...(files.throttleConfig !== undefined ? { throttleConfig: parseThrottleConfig(asRecord(files.throttleConfig, 'domains.files.throttleConfig')) } : {}),
     };
   }
 
   return domains;
+}
+
+/** Parse and validate throttle configuration */
+function parseThrottleConfig(obj: Record<string, unknown>): Partial<ThrottleConfig> {
+  const config: Partial<ThrottleConfig> = {};
+  
+  if (obj.maxConcurrent !== undefined) {
+    config.maxConcurrent = reqInt(obj, 'maxConcurrent', 'throttleConfig.maxConcurrent');
+  }
+  if (obj.requestsPerSecond !== undefined) {
+    config.requestsPerSecond = reqInt(obj, 'requestsPerSecond', 'throttleConfig.requestsPerSecond');
+  }
+  if (obj.maxRetries !== undefined) {
+    config.maxRetries = reqInt(obj, 'maxRetries', 'throttleConfig.maxRetries');
+  }
+  if (obj.baseBackoffMs !== undefined) {
+    config.baseBackoffMs = reqInt(obj, 'baseBackoffMs', 'throttleConfig.baseBackoffMs');
+  }
+  if (obj.maxBackoffMs !== undefined) {
+    config.maxBackoffMs = reqInt(obj, 'maxBackoffMs', 'throttleConfig.maxBackoffMs');
+  }
+  if (obj.jitterMs !== undefined) {
+    config.jitterMs = reqInt(obj, 'jitterMs', 'throttleConfig.jitterMs');
+  }
+  
+  return config;
 }
 
 function reqBoolean(obj: Record<string, unknown>, key: string, path: string): boolean {

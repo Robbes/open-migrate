@@ -19,6 +19,7 @@
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
+    "@azure/msal-node": "^5.4.0",
     "@trigger.dev/core": "^4.5.1",
     "@trigger.dev/sdk": "^4.5.1",
     "croner": "^10.0.1",

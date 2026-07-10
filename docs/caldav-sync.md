@@ -4,20 +4,29 @@
 
 This document describes the CalDAV (Calendar) synchronization implementation for OpenMigrate. The CalDAV sync engine enables one-way or bidirectional synchronization of calendar events between source systems (O365, Google Calendar, generic CalDAV) and target systems (JMAP servers like Stalwart, Nextcloud, Soverin, Proton via bridge).
 
+**Key Update**: OpenMigrate now includes a **native TypeScript CalDAV source connector** (`CalDAVSource`) that implements RFC 4791 and RFC 6578 directly, replacing any previous shell-out wrapper approaches.
+
 ## Architecture
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   CalDAV Source │────▶│   Source        │────▶│   CalDAV        │
-│   (O365/Graph)  │     │   Connector     │     │   Target Writer │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-                                │
-                                ▼
-                        ┌─────────────────┐
-                        │   Ledger        │
-                        │   (Idempotency) │
-                        └─────────────────┘
+│   CalDAV Source │────▶│   GenericSync   │────▶│   CalDAV        │
+│  (Native TS)    │     │     Engine      │     │   Target Writer │
+└─────────────────┘     └────────┬────────┘     └─────────────────┘
+                                 │
+                                 ▼
+                         ┌─────────────────┐
+                         │   Ledger        │
+                         │   (Idempotency) │
+                         └─────────────────┘
 ```
+
+**Native Implementation Features:**
+- **RFC 4791 Compliance**: Full CalDAV protocol support
+- **RFC 6578 Sync-Token**: Incremental sync using sync-collection REPORT
+- **CTag Fallback**: Graceful degradation when sync-token not supported
+- **Case-Insensitive UID**: UID normalization per RFC 5545 Section 3.3.11
+- **No Shell Dependencies**: Pure TypeScript, no vdirsyncer or external tools
 
 ## Components
 
@@ -89,36 +98,33 @@ interface CalendarTargetWriter {
 
 ### 4. Sync Engine
 
-Located in `packages/engines/src/caldav-sync.ts`:
+Located in `packages/connectors/src/caldav-source.ts`:
 
 **Features:**
-- Uses **vdirsyncer** as the sync engine (battle-tested, idempotent by design)
-- Automatic configuration generation for vdirsyncer
-- Output parsing for statistics (items synced, skipped, failed)
-- Error handling and reporting
-- Dry run support for preview
+- **Native TypeScript Implementation**: No shell-out to vdirsyncer or other external tools
+- **PROPFIND Discovery**: Automatic calendar home set and collection discovery
+- **sync-collection REPORT**: RFC 6578 compliant incremental synchronization
+- **Sync-Token Support**: Primary cursor mechanism for efficient delta sync
+- **CTag Fallback**: Falls back to CTag-based sync when server doesn't support sync-token
+- **Case-Insensitive UID**: Normalizes UIDs to lowercase per RFC 5545
 
 **Configuration:**
 ```typescript
-interface CalDAVSyncConfig {
-  source: {
-    type: 'caldav' | 'graph';
-    url: string;
-    credentials: Credentials;
-    calendars: string[];
-  };
-  target: {
-    type: 'caldav' | 'jmap';
-    url: string;
-    credentials: Credentials;
-    calendars: Map<string, string>; // source → target mapping
-  };
-  sync: {
-    direction: 'push' | 'pull' | 'bidirectional';
-    dryRun: boolean;
-  };
+interface CalDAVSourceConfig {
+  url: string;                    // CalDAV server base URL
+  username: string;               // Username for authentication
+  passwordEnv: string;            // Environment variable name for password
+  calendarHomeSet?: string;       // Optional: auto-discovered if omitted
 }
 ```
+
+**Sync Flow:**
+1. **Discovery**: PROPFIND to find calendar-home-set
+2. **List Collections**: PROPFIND Depth:1 to find calendar collections
+3. **Incremental Sync**: sync-collection REPORT with sync-token or CTag
+4. **Parse iCalendar**: Extract UID, summary, dates, etc.
+5. **Normalize UID**: Lowercase for case-insensitive comparison
+6. **Return Items**: Raw calendar events with full iCalendar data
 
 ## Idempotency Pattern
 
@@ -146,60 +152,104 @@ The CalDAV sync follows the established idempotency pattern:
 | Proton        | ⚠️ Snapshot    | Export only (vCalendar bundles)          |
 | Mosa.cloud    | ✅ Full        | Stalwart-based, full CalDAV support      |
 
-## Usage Example
+## Usage Examples
 
-### Basic CalDAV Sync
-
-```typescript
-import { runCalDAVSync, cleanupCalDAVConfig } from '@openmig/engines';
-
-const config: CalDAVSyncConfig = {
-  source: {
-    type: 'graph',
-    url: 'https://graph.microsoft.com/v1.0',
-    credentials: { /* OAuth2 tokens */ },
-    calendars: ['primary', 'work']
-  },
-  target: {
-    type: 'caldav',
-    url: 'https://nextcloud.example.com/remote.php/dav/calendars/user/',
-    credentials: { /* Basic auth or OAuth2 */ },
-    calendars: { 'primary': 'personal', 'work': 'work-events' }
-  },
-  sync: {
-    direction: 'push',
-    dryRun: false
-  }
-};
-
-try {
-  const result = await runCalDAVSync(config);
-  console.log(`Synced ${result.createdCount} events, skipped ${result.skippedCount}`);
-} finally {
-  await cleanupCalDAVConfig(config);
-}
-```
-
-### With Ledger Integration
+### Using CalDAVSource Directly
 
 ```typescript
-import { runUnifiedSync } from '@openmig/core';
+import { CalDAVSource } from '@openmig/connectors';
+import type { CalendarSource, SyncCursor } from '@openmig/shared';
 
-const result = await runUnifiedSync({
-  config: {
-    tenantId: 'tenant-123',
-    mappingId: 'mapping-456',
-    calendar: {
-      enabled: true,
-      source: caldavSource,
-      target: caldavTargetWriter
-    },
-    // ... other data types
-  },
-  ledger: myLedger,
-  cursors: myCursorStore
+// Create CalDAV source connector
+const source: CalendarSource = new CalDAVSource({
+  url: 'https://caldav.example.com/dav/',
+  username: 'user@example.com',
+  passwordEnv: 'CALDAV_PASSWORD',
+  // calendarHomeSet is optional - will be auto-discovered via PROPFIND
 });
+
+// Step 1: List calendar folders
+const folders = await source.listFolders();
+console.log(folders);
+// Output:
+// [
+//   {
+//     name: 'Personal',
+//     path: '/dav/calendars/user/personal/',
+//     displayName: 'Personal Calendar',
+//     description: 'My personal events',
+//     timezone: 'America/New_York'
+//   },
+//   {
+//     name: 'Work',
+//     path: '/dav/calendars/user/work/',
+//     displayName: 'Work Calendar',
+//     ...
+//   }
+// ]
+
+// Step 2: Incremental sync with cursor
+let cursor: SyncCursor | undefined;
+const allEvents: RawCalendarEvent[] = [];
+
+for (const folder of folders) {
+  do {
+    const { items, nextCursor } = await source.listSince(folder, cursor);
+    allEvents.push(...items);
+    cursor = nextCursor;
+  } while (cursor && cursor.value);
+}
+
+console.log(`Synced ${allEvents.length} events`);
 ```
+
+### Using with GenericSyncEngine
+
+```typescript
+import { CalDAVSource } from '@openmig/connectors';
+import { GenericSyncEngine } from '@openmig/core';
+
+const caldavSource = new CalDAVSource({
+  url: 'https://caldav.example.com/dav/',
+  username: 'user@example.com',
+  passwordEnv: 'CALDAV_PASSWORD',
+});
+
+const engine = new GenericSyncEngine({
+  tenantId: 'tenant-123',
+  mappingId: 'mapping-456',
+  source: caldavSource,
+  target: caldavTargetWriter,
+  ledger: myLedger,
+  cursors: myCursorStore,
+  concurrency: 4,
+  itemType: 'calendar',
+});
+
+const result = await engine.sync();
+console.log(`Created: ${result.created}, Skipped: ${result.skipped}`);
+```
+
+### Sync-Collection (RFC 6578) Behavior
+
+The CalDAV source uses the sync-collection REPORT for incremental synchronization:
+
+```typescript
+// First sync (no cursor) - full sync
+const { items: firstBatch, nextCursor } = await source.listSince(folder);
+// → Returns all events, cursor contains sync-token
+
+// Subsequent syncs - delta sync
+const { items: delta } = await source.listSince(folder, nextCursor);
+// → Returns only changed events since last sync-token
+```
+
+**Sync-Token vs CTag Fallback:**
+- **Primary**: Uses sync-token (RFC 6578) for efficient delta sync
+- **Fallback**: If server returns 403 or doesn't support sync-token, falls back to CTag
+- **Cursor Format**: 
+  - sync-token: `sync-token:abc123...`
+  - CTag: `ctag:/dav/calendars/user/:xyz789...`
 
 ## Recurring Events
 

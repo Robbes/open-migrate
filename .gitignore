@@ -39,3 +39,7 @@ test-logs/
 tmp/
 temp/
 *.tmp
+
+# npm lockfile (pnpm is used instead)
+package-lock.json
+yarn.lock

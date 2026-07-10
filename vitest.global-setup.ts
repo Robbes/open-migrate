@@ -65,13 +65,18 @@ export default async function () {
   // Detect which test project is running via environment variable
   // CI workflows should set SKIP_STALWART=true for unit tests
   const skipStalwart = process.env.SKIP_STALWART === 'true';
+  const skipNextcloud = process.env.SKIP_NEXTCLOUD === 'true';
   
   if (skipStalwart) {
     console.log('[Vitest Global Setup] Skipping Stalwart (unit test mode via SKIP_STALWART).');
   }
   
+  if (skipNextcloud) {
+    console.log('[Vitest Global Setup] Skipping Nextcloud (via SKIP_NEXTCLOUD).');
+  }
+  
   // Skip Stalwart for unit tests - they don't need it and it requires stalwart-cli
-  const testEnv = await startTestEnvironment(skipStalwart);
+  const testEnv = await startTestEnvironment(skipStalwart, skipNextcloud);
 
   process.env.TEST_DATABASE_URL = testEnv.postgres.connectionString;
 
@@ -85,6 +90,12 @@ export default async function () {
     process.env.STALWART_JMAP_PASSWORD = testEnv.stalwart.jmapPassword;
   }
 
+  if (testEnv.nextcloud) {
+    process.env.NEXTCLOUD_WEBDAV_URL = testEnv.nextcloud.webdavUrl;
+    process.env.NEXTCLOUD_USERNAME = testEnv.nextcloud.username;
+    process.env.NEXTCLOUD_PASSWORD = testEnv.nextcloud.password;
+  }
+
   console.log('[Vitest Global Setup] Testcontainers environment ready.');
   console.log(`  - DATABASE_URL: ${testEnv.postgres.connectionString}`);
 
@@ -93,6 +104,12 @@ export default async function () {
     console.log(`  - STALWART_IMAP: ${testEnv.stalwart.imapHost}:${testEnv.stalwart.imapPort}`);
   } else {
     console.log('  - Stalwart: Skipped');
+  }
+
+  if (testEnv.nextcloud) {
+    console.log(`  - NEXTCLOUD_WEBDAV: ${testEnv.nextcloud.webdavUrl}`);
+  } else {
+    console.log('  - Nextcloud: Skipped');
   }
 
   return async (error?: Error) => {

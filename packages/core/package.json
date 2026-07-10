@@ -7,5 +7,10 @@
   "exports": { ".": "./src/index.ts" },
   "dependencies": {
     "@openmig/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@openmig/ledger": "workspace:*",
+    "@openmig/connectors": "workspace:*",
+    "@openmig/engines": "workspace:*"
   }
 }
