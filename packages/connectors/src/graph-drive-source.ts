@@ -284,37 +284,41 @@ export class GraphDriveSource implements FileSource {
 
     // If throttling is enabled, use the throttle limiter
     if (this.throttleLimiter) {
+      const doRequest = async (): Promise<HttpResponse> => {
+        const response = await fetch(options.url, {
+          method: options.method,
+          headers: {
+            'Authorization': `Bearer ${token.accessToken}`,
+            ...options.headers,
+          },
+          body: typeof options.body === 'string' ? options.body : undefined,
+        });
+
+        const body = await response.text();
+        const headers: Record<string, string> = {};
+        response.headers.forEach((value, key) => {
+          headers[key] = value;
+        });
+
+        // Check for rate limited response and retry
+        if (response.status === 429 || response.status === 503) {
+          const retryAfter = response.headers.get('retry-after');
+          const waitTime = this.throttleLimiter.handleRateLimited(response.status, retryAfter || undefined);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          return doRequest(); // Retry
+        }
+
+        return {
+          status: response.status,
+          body,
+          headers,
+        };
+      };
+
       return this.throttleLimiter.executeWithThrottling(
         this.config.tenantId,
         this.provider,
-        async () => {
-          const response = await fetch(options.url, {
-            method: options.method,
-            headers: {
-              'Authorization': `Bearer ${token.accessToken}`,
-              ...options.headers,
-            },
-            body: typeof options.body === 'string' ? options.body : undefined,
-          });
-
-          const body = await response.text();
-          const headers: Record<string, string> = {};
-          response.headers.forEach((value, key) => {
-            headers[key] = value;
-          });
-
-          // Check for rate limited response
-          if (response.status === 429 || response.status === 503) {
-            const retryAfter = response.headers.get('retry-after');
-            this.throttleLimiter?.handleRateLimited(response.status, retryAfter || undefined);
-          }
-
-          return {
-            status: response.status,
-            body,
-            headers,
-          };
-        },
+        doRequest,
       );
     }
 
