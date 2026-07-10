@@ -281,7 +281,7 @@ export class CarddavSource implements ContactSource {
 
       // Extract color
       const colorMatch = responseContent.match(/<CR:color[^>]*>([^<]+)<\/CR:color>/i);
-      const color = colorMatch && colorMatch[1] ? colorMatch[1].trim() : undefined;
+      const _color = colorMatch && colorMatch[1] ? colorMatch[1].trim() : undefined;
 
       folders.push({
         path,

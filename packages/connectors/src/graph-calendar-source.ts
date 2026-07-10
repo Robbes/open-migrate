@@ -145,7 +145,7 @@ export class GraphCalendarSource implements CalendarSource {
       try {
         const icalData = await this.fetchEventAsIcal(event.id, calendarId);
         const parsed = this.parseIcal(icalData);
-        const naturalKey = this.extractNaturalKey(parsed);
+        const _naturalKey = this.extractNaturalKey(parsed);
         
         // Check if this is a cancelled occurrence
         const isCancelled = this.checkIfCancelled(parsed);
