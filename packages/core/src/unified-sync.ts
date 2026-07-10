@@ -15,7 +15,7 @@
  * This keeps the core stack-independent - no direct dependency on @openmig/connectors.
  */
 
-import type { TenantId, MappingId, Ledger, CursorStore, SyncCursor } from '@openmig/shared';
+import type { TenantId, MappingId, Ledger, CursorStore } from '@openmig/shared';
 import { runGenericSync, type GenericSyncResult, type GenericSource, type GenericTargetWriter, type GenericFolder, type GenericItem, type GenericRawItem } from './generic-sync';
 
 // Type-only imports for config interfaces (used in UnifiedSyncConfig)
