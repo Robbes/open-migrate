@@ -146,8 +146,9 @@ export async function verifyCutover(deps: CutoverCliDeps): Promise<boolean> {
   try {
     const state = await deps.cutoverPersistence.loadCutoverState(deps.tenantId, deps.mappingId);
     if (state) {
-      CutoverCliOutput.info(`Current state: ${state.currentState}`);
-      results.push({ check: 'Cutover State', status: 'PASS', message: state.currentState });
+      const stateStr = state.currentState || state.state;
+      CutoverCliOutput.info(`Current state: ${stateStr}`);
+      results.push({ check: 'Cutover State', status: 'PASS', message: stateStr });
     } else {
       CutoverCliOutput.warning('No cutover state found');
       results.push({ check: 'Cutover State', status: 'FAIL', message: 'Not initialized' });
@@ -161,7 +162,7 @@ export async function verifyCutover(deps: CutoverCliDeps): Promise<boolean> {
 
   // Print summary
   CutoverCliOutput.section('Verification Summary');
-  CutoverCliOutput.table(results);
+  CutoverCliOutput.table(results.map(r => ({ label: r.check, value: r.message })));
 
   if (allPassed) {
     CutoverCliOutput.success('All checks passed. Ready to approve cutover.');
@@ -333,7 +334,7 @@ export async function showStatus(deps: CutoverCliDeps): Promise<void> {
     }
 
     const rows: Array<{ label: string; value: string }> = [
-      { label: 'State', value: state.currentState },
+      { label: 'State', value: state.currentState || state.state },
       { label: 'Started', value: state.startedAt || 'N/A' },
       { label: 'Target Server', value: state.targetMailServer || 'N/A' },
       { label: 'Started By', value: state.startedBy || 'N/A' },

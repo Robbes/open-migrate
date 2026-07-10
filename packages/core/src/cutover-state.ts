@@ -79,6 +79,15 @@ export interface CutoverStatus {
   rolledBackAt?: string;
   failedAt?: string;
   failureReason?: string;
+  gracePeriodCompletedAt?: string;
+  metadata?: Record<string, unknown>;
+  
+  // Rollback-specific properties
+  dnsRecordsUpdated?: boolean;
+  dnsVerifiedAt?: string;
+  dnsRestored?: boolean;
+  rollbackNotes?: string;
+  itemsAddedDuringCutover?: number;
 }
 
 /** Cutover configuration */

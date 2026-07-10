@@ -15,6 +15,7 @@
  */
 
 import { CutoverPersistence } from '@openmig/core';
+import type { TenantId, MappingId } from '@openmig/shared';
 import * as cutoverCli from './cutover-commands';
 
 /** Parse cutover CLI arguments */
@@ -34,7 +35,7 @@ function parseArgs(): {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (!arg.startsWith('-') && !command) {
+    if (arg && !arg.startsWith('-') && !command) {
       command = arg;
     } else if (arg === '--tenant' || arg === '-t') {
       tenantId = args[++i];
@@ -135,7 +136,10 @@ async function main() {
   const { drizzle } = await import('drizzle-orm/node-postgres');
   const { Pool } = await import('pg');
   const pool = new Pool({ connectionString: dbUrl });
-  const db = drizzle(pool);
+  
+  // Import all schema tables individually and create schema object
+  const schemaPg = await import('@openmig/ledger/schema-pg');
+  const db = drizzle(pool, { schema: schemaPg });
 
   const cutoverPersistence = new CutoverPersistence(db);
 

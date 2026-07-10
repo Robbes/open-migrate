@@ -210,7 +210,7 @@ export class DesecProvider implements DnsProvider {
       if (matching.length === 0) {
         additions.push({ action: 'add', record: newRecord });
       } else {
-        const existing = matching[0];
+        const existing = matching[0]!;
         if (existing.value !== newRecord.value || existing.ttl !== newRecord.ttl) {
           updates.push({ action: 'update', record: newRecord });
         }
@@ -234,13 +234,15 @@ export class DesecProvider implements DnsProvider {
   // Helper methods
 
   private getFullDomain(name: string): string {
-    return name === '@' ? this.config.token.split('.')[0] : `${name}.`;
+    const parts = this.config.token.split('.');
+    const domain = parts[0] ?? '';
+    return name === '@' ? domain : `${name}.`;
   }
 
   private extractPriority(recordType: string, value: string): number | undefined {
     if (recordType === 'MX') {
       const match = value.match(/^(\d+)\s+/);
-      return match ? parseInt(match[1], 10) : undefined;
+      return match ? parseInt(match[1]!, 10) : undefined;
     }
     return undefined;
   }

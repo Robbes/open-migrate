@@ -64,7 +64,7 @@ async function getSourceCountFromLedger(
   deps: RealVerificationDeps,
   dataType: 'mail' | 'calendar' | 'contacts' | 'files'
 ): Promise<number> {
-  const domain = mapDataTypeToDomain(dataType);
+  const domain = mapDataTypeToDomain(dataType) as 'email' | 'calendar' | 'contact' | 'file';
   const db = deps.db;
   
   if (deps.dbKind === 'pg') {
@@ -125,7 +125,7 @@ async function getSourceSamplesFromLedger(
   dataType: 'mail' | 'calendar' | 'contacts' | 'files',
   count: number
 ): Promise<Array<{ id: string; content: Uint8Array | string }>> {
-  const domain = mapDataTypeToDomain(dataType);
+  const domain = mapDataTypeToDomain(dataType) as 'email' | 'calendar' | 'contact' | 'file';
   const db = deps.db;
   
   if (deps.dbKind === 'pg') {
@@ -235,7 +235,7 @@ async function getTotalBytesFromLedger(
   deps: RealVerificationDeps,
   dataType: 'mail' | 'calendar' | 'contacts' | 'files'
 ): Promise<number> {
-  const domain = mapDataTypeToDomain(dataType);
+  const domain = mapDataTypeToDomain(dataType) as 'email' | 'calendar' | 'contact' | 'file';
   const db = deps.db;
   
   if (deps.dbKind === 'pg') {

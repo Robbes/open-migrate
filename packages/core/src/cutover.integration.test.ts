@@ -287,9 +287,9 @@ describe('Cutover Lifecycle (integration)', () => {
 
     expect(events.length).toBe(3); // 1 init + 2 transitions
 
-    // Verify chronological order
+    // Verify chronological order (compare as Date objects since timestamps are ISO strings)
     for (let i = 1; i < events.length; i++) {
-      expect(events[i]!.timestamp).toBeGreaterThanOrEqual(events[i - 1]!.timestamp);
+      expect(new Date(events[i]!.timestamp).getTime()).toBeGreaterThanOrEqual(new Date(events[i - 1]!.timestamp).getTime());
     }
 
     // Verify event details

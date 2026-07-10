@@ -131,9 +131,7 @@ describe('Verification Engine (integration)', () => {
         itemType: 'mail' as const,
         naturalKeyHash: 'hash1',
         contentHash: 'content1',
-        targetRef: 'target1',
-        domain: 'email',
-        sizeBytes: 1024,
+        targetId: 'target1',
         createdAt: new Date().toISOString(),
       },
       {
@@ -142,9 +140,7 @@ describe('Verification Engine (integration)', () => {
         itemType: 'mail' as const,
         naturalKeyHash: 'hash2',
         contentHash: 'content2',
-        targetRef: 'target2',
-        domain: 'email',
-        sizeBytes: 2048,
+        targetId: 'target2',
         createdAt: new Date().toISOString(),
       },
       {
@@ -153,9 +149,7 @@ describe('Verification Engine (integration)', () => {
         itemType: 'mail' as const,
         naturalKeyHash: 'hash3',
         contentHash: 'content3',
-        targetRef: 'target3',
-        domain: 'email',
-        sizeBytes: 3072,
+        targetId: 'target3',
         createdAt: new Date().toISOString(),
       },
     ];
@@ -165,9 +159,9 @@ describe('Verification Engine (integration)', () => {
     }
 
     // Mock target with same 3 messages
-    targetReindexer.addEntry({ naturalKey: 'hash1', targetId: 'target1', contentHash: 'content1' });
-    targetReindexer.addEntry({ naturalKey: 'hash2', targetId: 'target2', contentHash: 'content2' });
-    targetReindexer.addEntry({ naturalKey: 'hash3', targetId: 'target3', contentHash: 'content3' });
+    targetReindexer.addEntry({ naturalKey: 'hash1', targetId: 'target1', mailboxId: 'inbox', contentHash: 'content1' });
+    targetReindexer.addEntry({ naturalKey: 'hash2', targetId: 'target2', mailboxId: 'inbox', contentHash: 'content2' });
+    targetReindexer.addEntry({ naturalKey: 'hash3', targetId: 'target3', mailboxId: 'inbox', contentHash: 'content3' });
 
     // Run verification
     const deps = createRealVerificationDeps({
@@ -212,9 +206,7 @@ describe('Verification Engine (integration)', () => {
         itemType: 'mail' as const,
         naturalKeyHash: 'hash1',
         contentHash: 'content1',
-        targetRef: 'target1',
-        domain: 'email',
-        sizeBytes: 1024,
+        targetId: 'target1',
         createdAt: new Date().toISOString(),
       },
       {
@@ -223,9 +215,7 @@ describe('Verification Engine (integration)', () => {
         itemType: 'mail' as const,
         naturalKeyHash: 'hash2',
         contentHash: 'content2',
-        targetRef: 'target2',
-        domain: 'email',
-        sizeBytes: 2048,
+        targetId: 'target2',
         createdAt: new Date().toISOString(),
       },
       {
@@ -234,9 +224,7 @@ describe('Verification Engine (integration)', () => {
         itemType: 'mail' as const,
         naturalKeyHash: 'hash3',
         contentHash: 'content3',
-        targetRef: 'target3',
-        domain: 'email',
-        sizeBytes: 3072,
+        targetId: 'target3',
         createdAt: new Date().toISOString(),
       },
     ];
@@ -246,8 +234,8 @@ describe('Verification Engine (integration)', () => {
     }
 
     // Mock target with only 2 messages (one deleted)
-    targetReindexer.addEntry({ naturalKey: 'hash1', targetId: 'target1', contentHash: 'content1' });
-    targetReindexer.addEntry({ naturalKey: 'hash2', targetId: 'target2', contentHash: 'content2' });
+    targetReindexer.addEntry({ naturalKey: 'hash1', targetId: 'target1', mailboxId: 'inbox', contentHash: 'content1' });
+    targetReindexer.addEntry({ naturalKey: 'hash2', targetId: 'target2', mailboxId: 'inbox', contentHash: 'content2' });
     // hash3 is missing
 
     const deps = createRealVerificationDeps({
@@ -297,9 +285,7 @@ describe('Verification Engine (integration)', () => {
         itemType: 'mail' as const,
         naturalKeyHash: 'hash1',
         contentHash: 'content1',
-        targetRef: 'target1',
-        domain: 'email',
-        sizeBytes: 1024,
+        targetId: 'target1',
         createdAt: new Date().toISOString(),
       },
       {
@@ -308,9 +294,7 @@ describe('Verification Engine (integration)', () => {
         itemType: 'mail' as const,
         naturalKeyHash: 'hash2',
         contentHash: 'content2',
-        targetRef: 'target2',
-        domain: 'email',
-        sizeBytes: 2048,
+        targetId: 'target2',
         createdAt: new Date().toISOString(),
       },
       {
@@ -319,9 +303,7 @@ describe('Verification Engine (integration)', () => {
         itemType: 'mail' as const,
         naturalKeyHash: 'hash3',
         contentHash: 'content3',
-        targetRef: 'target3',
-        domain: 'email',
-        sizeBytes: 3072,
+        targetId: 'target3',
         createdAt: new Date().toISOString(),
       },
     ];
@@ -331,10 +313,10 @@ describe('Verification Engine (integration)', () => {
     }
 
     // Mock target with 4 messages (one extra)
-    targetReindexer.addEntry({ naturalKey: 'hash1', targetId: 'target1', contentHash: 'content1' });
-    targetReindexer.addEntry({ naturalKey: 'hash2', targetId: 'target2', contentHash: 'content2' });
-    targetReindexer.addEntry({ naturalKey: 'hash3', targetId: 'target3', contentHash: 'content3' });
-    targetReindexer.addEntry({ naturalKey: 'hash4', targetId: 'target4', contentHash: 'content4' });
+    targetReindexer.addEntry({ naturalKey: 'hash1', targetId: 'target1', mailboxId: 'inbox', contentHash: 'content1' });
+    targetReindexer.addEntry({ naturalKey: 'hash2', targetId: 'target2', mailboxId: 'inbox', contentHash: 'content2' });
+    targetReindexer.addEntry({ naturalKey: 'hash3', targetId: 'target3', mailboxId: 'inbox', contentHash: 'content3' });
+    targetReindexer.addEntry({ naturalKey: 'hash4', targetId: 'target4', mailboxId: 'inbox', contentHash: 'content4' });
 
     const deps = createRealVerificationDeps({
       tenantId: TEST_TENANT_ID,
@@ -374,9 +356,7 @@ describe('Verification Engine (integration)', () => {
       itemType: 'mail' as const,
       naturalKeyHash: 'hash1',
       contentHash: 'content1',
-      targetRef: 'target1',
-      domain: 'email',
-      sizeBytes: 1024,
+      targetId: 'target1',
       createdAt: new Date().toISOString(),
     });
 
@@ -422,9 +402,7 @@ describe('Verification Engine (integration)', () => {
       itemType: 'mail' as const,
       naturalKeyHash: 'hash1',
       contentHash: 'content1-original',
-      targetRef: 'target1',
-      domain: 'email',
-      sizeBytes: 1024,
+      targetId: 'target1',
       createdAt: new Date().toISOString(),
     });
 
@@ -434,15 +412,13 @@ describe('Verification Engine (integration)', () => {
       itemType: 'mail' as const,
       naturalKeyHash: 'hash2',
       contentHash: 'content2-original',
-      targetRef: 'target2',
-      domain: 'email',
-      sizeBytes: 2048,
+      targetId: 'target2',
       createdAt: new Date().toISOString(),
     });
 
     // Mock target with modified content
-    targetReindexer.addEntry({ naturalKey: 'hash1', targetId: 'target1', contentHash: 'content1-modified' });
-    targetReindexer.addEntry({ naturalKey: 'hash2', targetId: 'target2', contentHash: 'content2-modified' });
+    targetReindexer.addEntry({ naturalKey: 'hash1', targetId: 'target1', mailboxId: 'inbox', contentHash: 'content1-modified' });
+    targetReindexer.addEntry({ naturalKey: 'hash2', targetId: 'target2', mailboxId: 'inbox', contentHash: 'content2-modified' });
 
     const deps = createRealVerificationDeps({
       tenantId: TEST_TENANT_ID,

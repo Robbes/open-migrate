@@ -73,8 +73,8 @@ export async function verifySPF(domain: string, expectedSender?: string): Promis
     
     // Find SPF records (start with "v=spf1")
     const spfRecords = txtRecords
-      .filter((r) => r.length > 0 && r[0].startsWith('v=spf1'))
-      .map((r) => r[0]);
+      .filter((r) => r.length > 0 && r[0]!.startsWith('v=spf1'))
+      .map((r) => r[0]!);
     
     const _found = spfRecords;
     const hasSpf = spfRecords.length > 0;
@@ -116,8 +116,8 @@ export async function verifyDKIM(domain: string, selector: string): Promise<DnsV
     const txtRecords = await dns.resolveTxt(dkimDomain);
     
     const dkimRecords = txtRecords
-      .filter((r) => r.length > 0 && r[0].startsWith('v=DKIM1'))
-      .map((r) => r[0]);
+      .filter((r) => r.length > 0 && r[0]!.startsWith('v=DKIM1'))
+      .map((r) => r[0]!);
     
     const _found = dkimRecords;
     const hasDkim = dkimRecords.length > 0;
@@ -152,8 +152,8 @@ export async function verifyDMARC(domain: string): Promise<DnsVerificationResult
     const txtRecords = await dns.resolveTxt(dmarcDomain);
     
     const dmarcRecords = txtRecords
-      .filter((r) => r.length > 0 && r[0].startsWith('v=DMARC1'))
-      .map((r) => r[0]);
+      .filter((r) => r.length > 0 && r[0]!.startsWith('v=DMARC1'))
+      .map((r) => r[0]!);
     
     const _found = dmarcRecords;
     const hasDmarc = dmarcRecords.length > 0;
@@ -268,7 +268,7 @@ export async function checkPropagation(
           const txtRecords = await dns.resolveTxt(domain);
           const found = txtRecords
             .filter((r) => r.length > 0)
-            .map((r) => r[0]);
+            .map((r) => r[0]!);
           if (!found.some((f: string) => f.includes(expected.value))) {
             allFound = false;
           }

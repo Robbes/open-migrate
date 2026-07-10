@@ -12,10 +12,12 @@
  */
 
 import { z } from 'zod';
+import { asTenantId, asMappingId } from '@openmig/shared';
 import { schemaTask } from '@trigger.dev/sdk/v3';
 import { CutoverPersistence } from '@openmig/core';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
+import * as schemaPg from '@openmig/ledger/schema-pg';
 
 // Job input schema
 const CutoverJobSchema = z.object({
@@ -37,8 +39,11 @@ export const runCutover = schemaTask({
   id: 'run-cutover',
   description: 'Cutover',
   schema: CutoverJobSchema,
-  run: async (payload: CutoverJobPayload, { ctx }) => {
-    const { tenantId, mappingId, options } = payload;
+  run: async (payload: unknown, { ctx }) => {
+    const typedPayload = payload as CutoverJobPayload;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ctxTyped = ctx as any;
+    const { tenantId, mappingId, options } = typedPayload;
     
     console.log('Starting cutover process', {
       tenantId,
@@ -52,16 +57,16 @@ export const runCutover = schemaTask({
       throw new Error('DATABASE_URL environment variable required');
     }
     const pool = new Pool({ connectionString: dbUrl });
-    const db = drizzle(pool);
+    const db = drizzle(pool, { schema: schemaPg });
     const cutoverPersistence = new CutoverPersistence(db);
 
     try {
       // Step 0: Initialize cutover state
       console.log('Initializing cutover state');
-      await ctx.logger.log('Initializing cutover...');
+      await ctxTyped.logger.log('Initializing cutover...');
       await cutoverPersistence.initializeCutover({
-        tenantId,
-        mappingId,
+        tenantId: asTenantId(tenantId),
+        mappingId: asMappingId(mappingId),
         targetMailServer: options.targetMailServer || `mail.${options.dnsDomain || 'domain.com'}`,
         startedBy: 'trigger-job',
       });
@@ -69,7 +74,7 @@ export const runCutover = schemaTask({
       // Step 1: Final delta sync (if not skipped)
       if (!options.skipFinalSync) {
         console.log('Running final delta sync');
-        await ctx.logger.log('Running final delta sync...');
+        await ctxTyped.logger.log('Running final delta sync...');
         // TODO: Implement delta sync
         // await executeDeltaSync({ tenantId, mappingId });
       }
@@ -77,7 +82,7 @@ export const runCutover = schemaTask({
       // Step 2: Verification (if not skipped)
       if (!options.skipVerification) {
         console.log('Running verification checks');
-        await ctx.logger.log('Running verification checks...');
+        await ctxTyped.logger.log('Running verification checks...');
         
         // Placeholder for real verification - would need actual ledger and target access
         // TODO: Implement real verification with createRealVerificationDeps()
@@ -94,31 +99,31 @@ export const runCutover = schemaTask({
           verifyFiles: true,
         };
         
-        await ctx.logger.log('Verification checks passed');
+        await ctxTyped.logger.log('Verification checks passed');
       }
 
       // Step 3: Update cutover state to READY_FOR_CUTOVER
       console.log('Marking cutover as ready');
-      await cutoverPersistence.transitionState(tenantId, mappingId, 'READY_FOR_CUTOVER', {
+      await cutoverPersistence.transitionState(asTenantId(tenantId), asMappingId(mappingId), 'READY_FOR_CUTOVER', {
         readyAt: new Date().toISOString(),
       });
-      await ctx.logger.log('Cutover ready for approval');
+      await ctxTyped.logger.log('Cutover ready for approval');
 
       // Step 4: Wait for approval (in real implementation, this would be a manual step)
       console.log('Waiting for approval...');
-      await ctx.logger.log('Cutover ready for manual approval');
+      await ctxTyped.logger.log('Cutover ready for manual approval');
 
       // Step 5: Execute cutover (would be triggered separately after approval)
       console.log('Executing cutover...');
-      await cutoverPersistence.transitionState(tenantId, mappingId, 'CUTOVER_IN_PROGRESS', {
+      await cutoverPersistence.transitionState(asTenantId(tenantId), asMappingId(mappingId), 'CUTOVER_IN_PROGRESS', {
         startedAt: new Date().toISOString(),
       });
-      await ctx.logger.log('Cutover in progress');
+      await ctxTyped.logger.log('Cutover in progress');
 
       // Step 6: Update DNS records (if domain provided)
       if (options.dnsDomain && options.targetMailServer) {
         console.log(`Updating DNS records for ${options.dnsDomain}`);
-        await ctx.logger.log(`Updating DNS MX records for ${options.dnsDomain}...`);
+        await ctxTyped.logger.log(`Updating DNS MX records for ${options.dnsDomain}...`);
         // TODO: Implement DNS update using DesecProvider or other provider
         // const dnsProvider = new DesecProvider({ token: process.env.DESEC_TOKEN! });
         // await dnsProvider.updateRecords([...]);
@@ -126,22 +131,22 @@ export const runCutover = schemaTask({
 
       // Step 7: Mark as completed
       console.log('Marking cutover as completed');
-      await cutoverPersistence.transitionState(tenantId, mappingId, 'COMPLETED', {
+      await cutoverPersistence.transitionState(asTenantId(tenantId), asMappingId(mappingId), 'COMPLETED', {
         completedAt: new Date().toISOString(),
       });
-      await ctx.logger.log('Cutover completed successfully');
+      await ctxTyped.logger.log('Cutover completed successfully');
 
       // Step 8: Start grace period monitoring
       const gracePeriodEnd = new Date(Date.now() + options.gracePeriodHours * 3600000);
       console.log(`Starting ${options.gracePeriodHours}h grace period (ends ${gracePeriodEnd})`);
-      await ctx.logger.log(`Grace period started - ends at ${gracePeriodEnd.toISOString()}`);
+      await ctxTyped.logger.log(`Grace period started - ends at ${gracePeriodEnd.toISOString()}`);
       
       // Schedule grace period end
-      await ctx.schedule({
+      await ctxTyped.schedule({
         id: `grace-period-${mappingId}`,
         at: gracePeriodEnd,
         job: 'run-grace-period-end',
-        payload: { tenantId, mappingId },
+        payload: { tenantId: asTenantId(tenantId), mappingId: asMappingId(mappingId) },
       });
 
       return {
@@ -153,10 +158,10 @@ export const runCutover = schemaTask({
     } catch (error) {
       const err = error as Error;
       console.error('Cutover failed', { error: err.message });
-      await ctx.logger.log(`Cutover failed: ${err.message}`);
+      await ctxTyped.logger.log(`Cutover failed: ${err.message}`);
 
       // Rollback cutover status
-      await cutoverPersistence.transitionState(tenantId, mappingId, 'FAILED', {
+      await cutoverPersistence.transitionState(asTenantId(tenantId), asMappingId(mappingId), 'FAILED', {
         failedAt: new Date().toISOString(),
         failureReason: err.message,
       });
