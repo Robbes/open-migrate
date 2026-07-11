@@ -2,11 +2,10 @@
 // Integration tests for CalDAV source connector against a real Stalwart CalDAV server.
 // Uses Testcontainers for containerized Stalwart instance.
 //
-// IMPORTANT: Stalwart v0.16.10 does NOT support CalDAV/CardDAV protocols.
-// These tests are skipped because Stalwart only supports JMAP and IMAP.
-// For CalDAV testing, use a DAV-capable server (e.g., Nextcloud, Xandikos).
+// Stalwart v0.16+ supports CalDAV/CardDAV/WebDAV on its HTTP port (same as JMAP).
+// Tests use RFC 6764 well-known discovery for proper endpoint resolution.
 //
-// TEST SCENARIOS (when run against a DAV-capable server):
+// TEST SCENARIOS:
 // - listFolders() discovers seeded calendars
 // - listSince() returns seeded events with correct iCalendar payload
 // - Cursor round-trip (second call returns only changes)
@@ -18,41 +17,44 @@ import type { CalDAVSourceConfig } from './caldav-source.types';
 import type { RawCalendarEvent as _RawCalendarEvent } from '@openmig/shared';
 
 // Stalwart CalDAV configuration from Testcontainers
-const STALWART_CALENDAR_URL = process.env.STALWART_JMAP_URL;
+// Use the base HTTP URL (not the JMAP-specific path) - CalDAV is served on the same port
+const STALWART_HTTP_URL = process.env.STALWART_JMAP_URL?.replace(/\/jmap$/, '') || '';
 const CALDAV_USERNAME = process.env.STALWART_JMAP_USERNAME || 'source@dev.local';
 const CALDAV_PASSWORD = process.env.STALWART_JMAP_PASSWORD || 'source_password';
 
-// Check if Stalwart supports CalDAV (it doesn't in v0.16.10)
+// Check if Stalwart CalDAV is available via RFC 6764 discovery
 let caldavSupported = false;
 let skipReason = 'Stalwart CalDAV URL not configured';
 
-if (STALWART_CALENDAR_URL) {
+if (STALWART_HTTP_URL) {
   try {
-    // Check if Stalwart supports CalDAV by probing the well-known URI
-    const response = await fetch(`${STALWART_CALENDAR_URL.replace(/\/$/, '')}/.well-known/caldav`, {
+    // Check if Stalwart supports CalDAV by probing the well-known URI with auth
+    const response = await fetch(`${STALWART_HTTP_URL.replace(/\/$/, '')}/.well-known/caldav`, {
       method: 'GET',
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${CALDAV_USERNAME}:${CALDAV_PASSWORD}`).toString('base64')}`,
+      },
       signal: AbortSignal.timeout(5000),
     });
     
-    // Check content-type to detect HTML responses (Stalwart portal)
     const contentType = response.headers.get('content-type') || '';
     console.log(`[Probe] .well-known/caldav: status=${response.status}, content-type=${contentType}`);
-    
-    // Stalwart v0.16.10 does not support DAV - returns HTML for all DAV endpoints
-    const isHtml = contentType.includes('text/html') || contentType.includes('application/xhtml+xml');
 
-    if (response.status === 404 || isHtml) {
-      skipReason = 'Stalwart v0.16.10 does not support CalDAV protocol (only JMAP/IMAP)';
-    } else if ((response.status === 401 || response.status === 200) && (contentType.includes('xml') || contentType.includes('calendar'))) {
-      // 401 means the endpoint exists but requires auth - DAV might be supported
-      // 200 means the endpoint is accessible - DAV is supported
+    // 401 means the endpoint exists but requires auth - DAV is available
+    // 200/204 means the endpoint is accessible - DAV is supported
+    // 3xx means redirect (will be followed by the CalDAV client)
+    if (response.status === 401 || response.status === 200 || response.status === 204 || response.status === 301 || response.status === 302 || response.status === 307 || response.status === 308) {
       caldavSupported = true;
+    } else if (response.status === 404) {
+      skipReason = 'Stalwart .well-known/caldav not found - DAV may not be enabled';
+    } else {
+      skipReason = `Unexpected response: ${response.status}`;
     }
   } catch (err) {
     skipReason = `Could not probe Stalwart CalDAV: ${err instanceof Error ? err.message : String(err)}`;
   }
 } else {
-  skipReason = 'Stalwart CalDAV URL not configured (STALWART_JMAP_URL not set)';
+  skipReason = 'Stalwart HTTP URL not configured (STALWART_JMAP_URL not set)';
 }
 
 // Skip all tests if CalDAV is not supported
@@ -72,7 +74,7 @@ const TEST_EVENT_UID_3 = 'test-event-3@dev.local';
 async function waitForCaldav(maxRetries = 30, delayMs = 2000): Promise<void> {
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const response = await fetch(`${STALWART_CALENDAR_URL}/.well-known/caldav`, {
+      const response = await fetch(`${STALWART_HTTP_URL}/.well-known/caldav`, {
         method: 'GET',
       });
       if (response.status === 200 || response.status === 401 || response.status === 404) {
@@ -92,7 +94,7 @@ async function waitForCaldav(maxRetries = 30, delayMs = 2000): Promise<void> {
  * Uses RFC 6764 discovery to get the correct calendar-home-set URL.
  */
 async function seedCalendarEvents(caldavSource: CalDAVSource): Promise<void> {
-  const caldavUrl = STALWART_CALENDAR_URL!.replace(/\/$/, '');
+  const caldavUrl = STALWART_HTTP_URL!.replace(/\/$/, '');
   
   // Trigger discovery to get the calendar-home-set
   const folders = await caldavSource.listFolders();
@@ -237,7 +239,7 @@ async function cleanCalendar(caldavSource?: CalDAVSource): Promise<void> {
   }
   
   // Fallback to environment variable if not discovered
-  const caldavUrl = STALWART_CALENDAR_URL || 'http://localhost:8080';
+  const caldavUrl = STALWART_HTTP_URL || 'http://localhost:8080';
   
   try {
     // If we have the calendar home-set, use it for cleanup
@@ -327,7 +329,7 @@ testSuite('CalDAV Source Integration Tests', () => {
     
     // Create the CalDAV source for seeding
     caldavSource = new CalDAVSource({
-      url: `${STALWART_CALENDAR_URL}/`,
+      url: `${STALWART_HTTP_URL}/`,
       username: CALDAV_USERNAME,
       passwordEnv: 'CALDAV_PASSWORD',
     } as CalDAVSourceConfig);
@@ -367,7 +369,7 @@ testSuite('CalDAV Source Integration Tests', () => {
   describe('listSince()', () => {
     it('should return seeded events with correct iCalendar payload', async () => {
       caldavSource = new CalDAVSource({
-        url: `${STALWART_CALENDAR_URL}/`,
+        url: `${STALWART_HTTP_URL}/`,
         username: CALDAV_USERNAME,
         passwordEnv: 'CALDAV_PASSWORD',
       } as CalDAVSourceConfig);
@@ -419,7 +421,7 @@ testSuite('CalDAV Source Integration Tests', () => {
 
     it('should support cursor round-trip (second call returns only changes)', async () => {
       caldavSource = new CalDAVSource({
-        url: `${STALWART_CALENDAR_URL}/`,
+        url: `${STALWART_HTTP_URL}/`,
         username: CALDAV_USERNAME,
         passwordEnv: 'CALDAV_PASSWORD',
       } as CalDAVSourceConfig);
@@ -449,7 +451,7 @@ testSuite('CalDAV Source Integration Tests', () => {
   describe('Idempotency', () => {
     it('should be idempotent (run twice, second run creates 0 new items)', async () => {
       caldavSource = new CalDAVSource({
-        url: `${STALWART_CALENDAR_URL}/`,
+        url: `${STALWART_HTTP_URL}/`,
         username: CALDAV_USERNAME,
         passwordEnv: 'CALDAV_PASSWORD',
       } as CalDAVSourceConfig);
@@ -478,7 +480,7 @@ testSuite('CalDAV Source Integration Tests', () => {
   describe('Event parsing', () => {
     it('should correctly parse iCalendar event properties', async () => {
       caldavSource = new CalDAVSource({
-        url: `${STALWART_CALENDAR_URL}/`,
+        url: `${STALWART_HTTP_URL}/`,
         username: CALDAV_USERNAME,
         passwordEnv: 'CALDAV_PASSWORD',
       } as CalDAVSourceConfig);

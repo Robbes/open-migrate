@@ -14,7 +14,7 @@
  *   status         Show cutover status
  */
 
-import { CutoverPersistence } from '@openmig/core';
+import { CutoverStore } from '@openmig/ledger';
 import type { TenantId, MappingId } from '@openmig/shared';
 import * as cutoverCli from './cutover-commands';
 
@@ -141,7 +141,7 @@ async function main() {
   const schemaPg = await import('@openmig/ledger/schema-pg');
   const db = drizzle(pool, { schema: schemaPg });
 
-  const cutoverPersistence = new CutoverPersistence(db);
+  const cutoverPersistence = new CutoverStore(db);
 
   const deps: cutoverCli.CutoverCliDeps = {
     tenantId: tenantId as TenantId,

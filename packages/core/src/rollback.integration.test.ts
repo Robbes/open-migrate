@@ -12,7 +12,7 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { createPgDb } from '@openmig/ledger';
-import { CutoverPersistence } from '@openmig/core';
+import { CutoverStore } from '@openmig/ledger';
 import { asTenantId, asMappingId } from '@openmig/shared';
 
 // Connection string from Testcontainers
@@ -30,11 +30,11 @@ const TEST_MAPPING_ID = asMappingId('550e8400-e29b-41d4-a716-446655440302' as ne
 
 describe('Rollback Paths (integration)', () => {
   let db: ReturnType<typeof createPgDb>;
-  let cutoverPersistence: CutoverPersistence;
+  let cutoverPersistence: CutoverStore;
 
   beforeAll(async () => {
     db = createPgDb(PG_CONNECTION_STRING);
-    cutoverPersistence = new CutoverPersistence(db);
+    cutoverPersistence = new CutoverStore(db);
 
     // Setup test tenant and mapping
     await db.execute(sql`

@@ -12,7 +12,7 @@
 
 import { z } from 'zod';
 import { schemaTask } from '@trigger.dev/sdk/v3';
-import { CutoverPersistence } from '@openmig/core';
+import { CutoverStore } from '@openmig/ledger';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import * as schemaPg from '@openmig/ledger/schema-pg';
@@ -57,7 +57,7 @@ export const runRollback = schemaTask({
     }
     const pool = new Pool({ connectionString: dbUrl });
     const db = drizzle(pool, { schema: schemaPg });
-    const cutoverPersistence = new CutoverPersistence(db);
+    const cutoverPersistence = new CutoverStore(db);
 
     try {
       // Step 0: Load current cutover state

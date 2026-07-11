@@ -2,7 +2,7 @@
 export const packageName = '@openmig/ledger';
 
 export * from './ledger';
-export * from './sqlite-ledger';
 export * from './cursor-store';
 export * from './db';
 export * from './schema-pg';
+export * from './cutover-store';

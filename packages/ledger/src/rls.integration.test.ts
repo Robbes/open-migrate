@@ -12,7 +12,17 @@ import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import * as schema from './schema-pg';
 
-describe.skip('RLS Policies', () => {
+// Connection string from Testcontainers (set by vitest.global-setup.ts)
+// Fails loudly if TEST_DATABASE_URL is not set, rather than silently using wrong defaults.
+const PG_CONNECTION_STRING = process.env.TEST_DATABASE_URL;
+if (!PG_CONNECTION_STRING) {
+  throw new Error(
+    'TEST_DATABASE_URL is not set. Integration tests require Testcontainers to be running. ' +
+    'Run: pnpm test:integration'
+  );
+}
+
+describe('RLS Policies', () => {
   let pool: Pool;
   let _db: ReturnType<typeof drizzle<typeof schema>>;
   
@@ -22,7 +32,7 @@ describe.skip('RLS Policies', () => {
   
   beforeAll(async () => {
     pool = new Pool({
-      connectionString: process.env.DATABASE_URL || 'postgresql://localhost/openmigrate_test',
+      connectionString: PG_CONNECTION_STRING,
     });
     _db = drizzle(pool, { schema });
     
@@ -45,12 +55,12 @@ describe.skip('RLS Policies', () => {
     // Create connections for each tenant
     await pool.query(`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config)
-      VALUES ($1, $2, 'source', 'o365, 'Tenant A Source', '{}')
+      VALUES ($1, $2, 'source', 'o365', 'Tenant A Source', '{}')
     `, ['c1', tenantA]);
     
     await pool.query(`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config)
-      VALUES ($1, $2, 'source', 'o365, 'Tenant B Source', '{}')
+      VALUES ($1, $2, 'source', 'o365', 'Tenant B Source', '{}')
     `, ['c2', tenantB]);
   }
   
@@ -81,7 +91,7 @@ describe.skip('RLS Policies', () => {
     const newId = 'c3';
     await pool.query(`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config)
-      VALUES ($1, $2, 'target', 'imap, 'Tenant A Target', '{}')
+      VALUES ($1, $2, 'target', 'imap', 'Tenant A Target', '{}')
     `, [newId, tenantA]);
     
     // Verify it was created

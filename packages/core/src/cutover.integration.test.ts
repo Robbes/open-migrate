@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { createPgDb } from '@openmig/ledger';
-import { CutoverPersistence } from '@openmig/core';
+import { CutoverStore } from '@openmig/ledger';
 import { asTenantId, asMappingId } from '@openmig/shared';
 
 // Connection string from Testcontainers
@@ -29,11 +29,11 @@ const TEST_MAPPING_ID = asMappingId('550e8400-e29b-41d4-a716-446655440202' as ne
 
 describe('Cutover Lifecycle (integration)', () => {
   let db: ReturnType<typeof createPgDb>;
-  let cutoverPersistence: CutoverPersistence;
+  let cutoverPersistence: CutoverStore;
 
   beforeAll(async () => {
     db = createPgDb(PG_CONNECTION_STRING);
-    cutoverPersistence = new CutoverPersistence(db);
+    cutoverPersistence = new CutoverStore(db);
 
     // Setup test tenant and mapping
     await db.execute(sql`
@@ -193,10 +193,10 @@ describe('Cutover Lifecycle (integration)', () => {
     );
 
     // Simulate worker restart - create new persistence instance
-    const newCutoverPersistence = new CutoverPersistence(db);
+    const newCutoverStore = new CutoverStore(db);
 
     // Rehydrate state
-    const rehydratedState = await newCutoverPersistence.loadCutoverState(
+    const rehydratedState = await newCutoverStore.loadCutoverState(
       TEST_TENANT_ID,
       TEST_MAPPING_ID
     );
@@ -206,7 +206,7 @@ describe('Cutover Lifecycle (integration)', () => {
     expect(rehydratedState?.targetMailServer).toBe('mail.example.com');
 
     // Continue from APPROVED state
-    const inProgressState = await newCutoverPersistence.transitionState(
+    const inProgressState = await newCutoverStore.transitionState(
       TEST_TENANT_ID,
       TEST_MAPPING_ID,
       'CUTOVER_IN_PROGRESS',
@@ -216,7 +216,7 @@ describe('Cutover Lifecycle (integration)', () => {
     expect(inProgressState.currentState).toBe('CUTOVER_IN_PROGRESS');
 
     // Complete the cutover
-    const completedState = await newCutoverPersistence.transitionState(
+    const completedState = await newCutoverStore.transitionState(
       TEST_TENANT_ID,
       TEST_MAPPING_ID,
       'COMPLETED',

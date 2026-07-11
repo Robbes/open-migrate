@@ -4,7 +4,6 @@ export const packageName = '@openmig/core';
 export * from './reconcile';
 export * from './reindex';
 export * from './cutover-state';
-export * from './cutover-persistence';
 export * from './verification';
 export * from './verification-implementations';
 export * from './cutover';

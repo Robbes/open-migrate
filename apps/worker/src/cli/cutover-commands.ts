@@ -13,14 +13,14 @@
  */
 
 import type { TenantId, MappingId } from '@openmig/shared';
-import { CutoverPersistence } from '@openmig/core';
+import { CutoverStore } from '@openmig/ledger';
 import { verifyAllDns, checkPropagation } from '@openmig/core';
 
 /** CLI dependencies */
 export interface CutoverCliDeps {
   tenantId: TenantId;
   mappingId: MappingId;
-  cutoverPersistence: CutoverPersistence;
+  cutoverPersistence: CutoverStore;
   dnsDomain: string;
   targetMailServer: string;
 }
