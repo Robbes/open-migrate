@@ -15,6 +15,10 @@ allowBuilds:
   libxmljs2: true
   protobufjs: true
   ssh2: true
+catalog:
+  drizzle-orm: ^0.45.2
+  pg: ^8
+  "@types/pg": ^8
 overrides:
   semver: ^7.5.2
   ws: ">=8.21.0"

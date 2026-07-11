@@ -9,8 +9,9 @@
   },
   "dependencies": {
     "@openmig/shared": "workspace:*",
-    "drizzle-orm": "^0.45.2",
-    "postgres": "^3.4.9"
+    "drizzle-orm": "catalog:",
+    "pg": "catalog:",
+    "@types/pg": "catalog:"
   },
   "devDependencies": {
     "@types/imap-simple": "^4.2.10",
