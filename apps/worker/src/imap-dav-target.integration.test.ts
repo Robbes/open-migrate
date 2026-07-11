@@ -68,14 +68,13 @@ async function waitForSchema(maxRetries = 30, delayMs = 1000): Promise<void> {
   
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const result = await client.execute(sql`
+      const result = await client.execute<{ exists: boolean }>(sql`
         SELECT EXISTS (
           SELECT 1 FROM information_schema.tables 
           WHERE table_schema = 'public' AND table_name = 'mailbox'
         ) as exists
       `);
-      const rows = Array.from(result);
-      if (rows[0]?.exists) {
+      if (result.rows[0]?.exists) {
         return;
       }
     } catch {
