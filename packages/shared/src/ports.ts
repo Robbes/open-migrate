@@ -386,3 +386,24 @@ export interface TokenProvider {
    */
   getTokenStatus(): TokenStatus;
 }
+
+/**
+ * Port for reading verification data from the ledger.
+ * Used by the verification orchestrator to compare source vs target state.
+ * All queries are Postgres-only (ADR-0016).
+ */
+export interface LedgerVerificationReader {
+  /** Count items of a given type in the ledger for a mapping */
+  countItems(tenantId: TenantId, mappingId: MappingId, domain: 'email' | 'calendar' | 'contact' | 'file'): Promise<number>;
+  
+  /** Get total bytes for items of a given type in the ledger */
+  totalSizeBytes(tenantId: TenantId, mappingId: MappingId, domain: 'email' | 'calendar' | 'contact' | 'file'): Promise<number>;
+  
+  /** Get sample items for verification (ids + content hashes) */
+  getSamples(
+    tenantId: TenantId,
+    mappingId: MappingId,
+    domain: 'email' | 'calendar' | 'contact' | 'file',
+    count: number
+  ): Promise<Array<{ id: string; contentHash: string }>>;
+}

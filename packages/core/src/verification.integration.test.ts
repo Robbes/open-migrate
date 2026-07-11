@@ -13,6 +13,7 @@ import { sql } from 'drizzle-orm';
 import { createPgDb } from '@openmig/ledger';
 import { PgLedger } from '@openmig/ledger';
 import { runVerification, createRealVerificationDeps } from '@openmig/core';
+import { createLedgerVerificationReader } from '@openmig/ledger';
 import type { TargetReindexer, TargetEntry } from '@openmig/shared';
 import { asTenantId, asMappingId } from '@openmig/shared';
 
@@ -180,8 +181,7 @@ describe('Verification Engine (integration)', () => {
       },
       ledger,
       targetReindexer,
-      db,
-      dbKind: 'pg',
+      verificationReader: createLedgerVerificationReader({ connectionString: PG_CONNECTION_STRING }),
     });
 
     const result = await runVerification(deps);
@@ -254,8 +254,7 @@ describe('Verification Engine (integration)', () => {
       },
       ledger,
       targetReindexer,
-      db,
-      dbKind: 'pg',
+      verificationReader: createLedgerVerificationReader({ connectionString: PG_CONNECTION_STRING }),
     });
 
     const result = await runVerification(deps);
@@ -334,8 +333,7 @@ describe('Verification Engine (integration)', () => {
       },
       ledger,
       targetReindexer,
-      db,
-      dbKind: 'pg',
+      verificationReader: createLedgerVerificationReader({ connectionString: PG_CONNECTION_STRING }),
     });
 
     const result = await runVerification(deps);
@@ -376,8 +374,7 @@ describe('Verification Engine (integration)', () => {
       },
       ledger,
       targetReindexer: new MockTargetReindexer(),
-      db,
-      dbKind: 'pg',
+      verificationReader: createLedgerVerificationReader({ connectionString: PG_CONNECTION_STRING }),
     });
 
     const result = await runVerification(deps);
@@ -436,8 +433,7 @@ describe('Verification Engine (integration)', () => {
       },
       ledger,
       targetReindexer,
-      db,
-      dbKind: 'pg',
+      verificationReader: createLedgerVerificationReader({ connectionString: PG_CONNECTION_STRING }),
     });
 
     const result = await runVerification(deps);

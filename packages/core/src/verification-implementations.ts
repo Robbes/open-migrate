@@ -1,31 +1,26 @@
 /**
  * Real Verification Implementations
  * 
- * Provides real implementations of VerificationDeps that query the ledger
- * and target system for verification data.
+ * Provides real verification dependencies that use the LedgerVerificationReader port
+ * to query the ledger for verification data.
  * 
  * See docs/architecture/solution-architecture.md §20 (verification & rollback)
  */
 
-import type { TenantId, MappingId, Ledger } from '@openmig/shared';
+import type { TenantId, MappingId, LedgerVerificationReader } from '@openmig/shared';
 import type { TargetReindexer } from '@openmig/shared';
-import type { PgDatabase, SqliteDatabase } from '@openmig/ledger';
-import { eq, and, sql } from 'drizzle-orm';
-import * as schemaPg from '@openmig/ledger/schema-pg';
-import * as schemaSqlite from '@openmig/ledger/schema-sqlite';
 import type { VerificationDeps } from './verification';
 
 /**
- * Verification dependencies backed by real ledger and target
+ * Verification dependencies backed by ledger reader and target
  */
 export interface RealVerificationDeps {
   tenantId: TenantId;
   mappingId: MappingId;
   config: import('./verification').VerificationConfig;
-  ledger: Ledger;
+  ledger: import('@openmig/shared').Ledger;
   targetReindexer?: TargetReindexer;
-  db: PgDatabase | SqliteDatabase;
-  dbKind: 'pg' | 'sqlite';
+  verificationReader: LedgerVerificationReader;
 }
 
 /**
@@ -34,26 +29,28 @@ export interface RealVerificationDeps {
 export function createRealVerificationDeps(
   deps: RealVerificationDeps
 ): VerificationDeps {
+  const { tenantId, mappingId, verificationReader, targetReindexer } = deps;
+  
   return {
-    tenantId: deps.tenantId,
-    mappingId: deps.mappingId,
+    tenantId,
+    mappingId,
     config: deps.config,
     getSourceCount: (dataType) =>
-      getSourceCountFromLedger(deps, dataType),
+      getSourceCountFromLedger(verificationReader, tenantId, mappingId, dataType),
     getTargetCount: (dataType) =>
-      getTargetCountFromReindexer(deps, dataType),
+      getTargetCountFromReindexer(targetReindexer, verificationReader, tenantId, mappingId, dataType),
     getSourceSamples: (dataType, count) =>
-      getSourceSamplesFromLedger(deps, dataType, count),
+      getSourceSamplesFromLedger(verificationReader, tenantId, mappingId, dataType, count),
     getTargetSamples: (dataType, count) =>
-      getTargetSamplesFromReindexer(deps, dataType, count),
+      getTargetSamplesFromReindexer(targetReindexer, verificationReader, tenantId, mappingId, dataType, count),
     findMissingOnTarget: (dataType) =>
-      findMissingOnTarget(deps, dataType),
+      findMissingOnTarget(dataType),
     findExtraOnTarget: (dataType) =>
-      findExtraOnTarget(deps, dataType),
+      findExtraOnTarget(dataType),
     getTotalBytesSource: (dataType) =>
-      getTotalBytesFromLedger(deps, dataType),
+      getTotalBytesFromLedger(verificationReader, tenantId, mappingId, dataType),
     getTotalBytesTarget: (dataType) =>
-      getTotalBytesFromTarget(deps, dataType),
+      getTotalBytesFromTarget(verificationReader, tenantId, mappingId, dataType),
   };
 }
 
@@ -61,54 +58,33 @@ export function createRealVerificationDeps(
  * Get count of items from the ledger (source)
  */
 async function getSourceCountFromLedger(
-  deps: RealVerificationDeps,
+  reader: LedgerVerificationReader,
+  tenantId: TenantId,
+  mappingId: MappingId,
   dataType: 'mail' | 'calendar' | 'contacts' | 'files'
 ): Promise<number> {
   const domain = mapDataTypeToDomain(dataType) as 'email' | 'calendar' | 'contact' | 'file';
-  const db = deps.db;
-  
-  if (deps.dbKind === 'pg') {
-    const result = await (db as PgDatabase)
-      .select({ count: sql<number>`count(*)` })
-      .from(schemaPg.item)
-      .where(
-        and(
-          eq(schemaPg.item.tenantId, deps.tenantId),
-          eq(schemaPg.item.mappingId, deps.mappingId),
-          eq(schemaPg.item.domain, domain)
-        )
-      );
-    return (result[0]?.count ?? 0) as number;
-  } else {
-    const result = await (db as SqliteDatabase)
-      .select({ count: sql<number>`count(*)` })
-      .from(schemaSqlite.item)
-      .where(
-        and(
-          eq(schemaSqlite.item.tenantId, deps.tenantId),
-          eq(schemaSqlite.item.mappingId, deps.mappingId),
-          eq(schemaSqlite.item.domain, domain)
-        )
-      );
-    return (result[0]?.count ?? 0) as number;
-  }
+  return reader.countItems(tenantId, mappingId, domain);
 }
 
 /**
  * Get count of items from the target via reindexer
  */
 async function getTargetCountFromReindexer(
-  deps: RealVerificationDeps,
+  targetReindexer: TargetReindexer | undefined,
+  reader: LedgerVerificationReader,
+  tenantId: TenantId,
+  mappingId: MappingId,
   _dataType: 'mail' | 'calendar' | 'contacts' | 'files'
 ): Promise<number> {
-  if (!deps.targetReindexer) {
+  if (!targetReindexer) {
     // If no reindexer, fall back to ledger count
-    return getSourceCountFromLedger(deps, _dataType);
+    return getSourceCountFromLedger(reader, tenantId, mappingId, _dataType);
   }
 
   let count = 0;
   
-  for await (const _entry of deps.targetReindexer.listEntries()) {
+  for await (const _entry of targetReindexer.listEntries()) {
     // Filter by domain if possible (implementation dependent)
     // For now, count all entries - the reindexer should handle filtering
     count++;
@@ -121,75 +97,40 @@ async function getTargetCountFromReindexer(
  * Get sample items from the ledger for checksum verification
  */
 async function getSourceSamplesFromLedger(
-  deps: RealVerificationDeps,
+  reader: LedgerVerificationReader,
+  tenantId: TenantId,
+  mappingId: MappingId,
   dataType: 'mail' | 'calendar' | 'contacts' | 'files',
   count: number
 ): Promise<Array<{ id: string; content: Uint8Array | string }>> {
   const domain = mapDataTypeToDomain(dataType) as 'email' | 'calendar' | 'contact' | 'file';
-  const db = deps.db;
+  const samples = await reader.getSamples(tenantId, mappingId, domain, count);
   
-  if (deps.dbKind === 'pg') {
-    const result = await (db as PgDatabase)
-      .select({
-        id: schemaPg.item.id,
-        contentHash: schemaPg.item.contentHash,
-        targetRef: schemaPg.item.targetRef,
-      })
-      .from(schemaPg.item)
-      .where(
-        and(
-          eq(schemaPg.item.tenantId, deps.tenantId),
-          eq(schemaPg.item.mappingId, deps.mappingId),
-          eq(schemaPg.item.domain, domain)
-        )
-      )
-      .orderBy(sql`random()`)
-      .limit(count);
-    
-    return result.map((row) => ({
-      id: row.id,
-      content: row.contentHash ?? '',
-    }));
-  } else {
-    const result = await (db as SqliteDatabase)
-      .select({
-        id: schemaSqlite.item.id,
-        contentHash: schemaSqlite.item.contentHash,
-        targetRef: schemaSqlite.item.targetRef,
-      })
-      .from(schemaSqlite.item)
-      .where(
-        and(
-          eq(schemaSqlite.item.tenantId, deps.tenantId),
-          eq(schemaSqlite.item.mappingId, deps.mappingId),
-          eq(schemaSqlite.item.domain, domain)
-        )
-      )
-      .limit(count);
-    
-    return result.map((row) => ({
-      id: row.id,
-      content: row.contentHash ?? '',
-    }));
-  }
+  return samples.map((s) => ({
+    id: s.id,
+    content: s.contentHash ?? '',
+  }));
 }
 
 /**
  * Get sample items from the target
  */
 async function getTargetSamplesFromReindexer(
-  deps: RealVerificationDeps,
-  dataType: 'mail' | 'calendar' | 'contacts' | 'files',
+  targetReindexer: TargetReindexer | undefined,
+  reader: LedgerVerificationReader,
+  tenantId: TenantId,
+  mappingId: MappingId,
+  _dataType: 'mail' | 'calendar' | 'contacts' | 'files',
   count: number
 ): Promise<Array<{ id: string; content: Uint8Array | string }>> {
-  if (!deps.targetReindexer) {
-    return getSourceSamplesFromLedger(deps, dataType, count);
+  if (!targetReindexer) {
+    return getSourceSamplesFromLedger(reader, tenantId, mappingId, _dataType, count);
   }
 
   const samples: Array<{ id: string; content: Uint8Array | string }> = [];
   let i = 0;
   
-  for await (const entry of deps.targetReindexer.listEntries()) {
+  for await (const entry of targetReindexer.listEntries()) {
     if (i >= count) break;
     samples.push({
       id: entry.targetId,
@@ -205,7 +146,6 @@ async function getTargetSamplesFromReindexer(
  * Find items that exist in the ledger but are missing on the target
  */
 async function findMissingOnTarget(
-  _deps: RealVerificationDeps,
   _dataType: 'mail' | 'calendar' | 'contacts' | 'files'
 ): Promise<Array<{ id: string; sourceRef: string }>> {
   // For now, return empty - this would require comparing ledger entries
@@ -221,7 +161,6 @@ async function findMissingOnTarget(
  * Find items that exist on the target but not in the ledger
  */
 async function findExtraOnTarget(
-  _deps: RealVerificationDeps,
   _dataType: 'mail' | 'calendar' | 'contacts' | 'files'
 ): Promise<Array<{ id: string; targetRef: string }>> {
   // Similar to findMissingOnTarget, requires comparison
@@ -232,49 +171,27 @@ async function findExtraOnTarget(
  * Get total bytes from the ledger
  */
 async function getTotalBytesFromLedger(
-  deps: RealVerificationDeps,
+  reader: LedgerVerificationReader,
+  tenantId: TenantId,
+  mappingId: MappingId,
   dataType: 'mail' | 'calendar' | 'contacts' | 'files'
 ): Promise<number> {
   const domain = mapDataTypeToDomain(dataType) as 'email' | 'calendar' | 'contact' | 'file';
-  const db = deps.db;
-  
-  if (deps.dbKind === 'pg') {
-    const result = await (db as PgDatabase)
-      .select({ total: sql<number>`coalesce(sum(size_bytes), 0)` })
-      .from(schemaPg.item)
-      .where(
-        and(
-          eq(schemaPg.item.tenantId, deps.tenantId),
-          eq(schemaPg.item.mappingId, deps.mappingId),
-          eq(schemaPg.item.domain, domain)
-        )
-      );
-    return (result[0]?.total ?? 0) as number;
-  } else {
-    const result = await (db as SqliteDatabase)
-      .select({ total: sql<number>`coalesce(sum(size_bytes), 0)` })
-      .from(schemaSqlite.item)
-      .where(
-        and(
-          eq(schemaSqlite.item.tenantId, deps.tenantId),
-          eq(schemaSqlite.item.mappingId, deps.mappingId),
-          eq(schemaSqlite.item.domain, domain)
-        )
-      );
-    return (result[0]?.total ?? 0) as number;
-  }
+  return reader.totalSizeBytes(tenantId, mappingId, domain);
 }
 
 /**
  * Get total bytes from the target
  */
 async function getTotalBytesFromTarget(
-  deps: RealVerificationDeps,
+  reader: LedgerVerificationReader,
+  tenantId: TenantId,
+  mappingId: MappingId,
   dataType: 'mail' | 'calendar' | 'contacts' | 'files'
 ): Promise<number> {
   // For now, return the same as source - target bytes would need to be
   // queried from the target system directly
-  return getTotalBytesFromLedger(deps, dataType);
+  return getTotalBytesFromLedger(reader, tenantId, mappingId, dataType);
 }
 
 /**
