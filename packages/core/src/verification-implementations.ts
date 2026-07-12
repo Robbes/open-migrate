@@ -7,8 +7,7 @@
  * See docs/architecture/solution-architecture.md §20 (verification & rollback)
  */
 
-import type { TenantId, MappingId, LedgerVerificationReader } from '@openmig/shared';
-import type { TargetReindexer } from '@openmig/shared';
+import type { TenantId, MappingId, LedgerVerificationReader, TargetReindexer } from '@openmig/shared';
 import type { VerificationDeps } from './verification';
 
 /**
@@ -44,9 +43,9 @@ export function createRealVerificationDeps(
     getTargetSamples: (dataType, count) =>
       getTargetSamplesFromReindexer(targetReindexer, verificationReader, tenantId, mappingId, dataType, count),
     findMissingOnTarget: (dataType) =>
-      findMissingOnTarget(dataType),
+      findMissingOnTarget(verificationReader, tenantId, mappingId, dataType, targetReindexer),
     findExtraOnTarget: (dataType) =>
-      findExtraOnTarget(dataType),
+      findExtraOnTarget(verificationReader, tenantId, mappingId, dataType, targetReindexer),
     getTotalBytesSource: (dataType) =>
       getTotalBytesFromLedger(verificationReader, tenantId, mappingId, dataType),
     getTotalBytesTarget: (dataType) =>
@@ -146,25 +145,68 @@ async function getTargetSamplesFromReindexer(
  * Find items that exist in the ledger but are missing on the target
  */
 async function findMissingOnTarget(
-  _dataType: 'mail' | 'calendar' | 'contacts' | 'files'
+  reader: LedgerVerificationReader,
+  tenantId: TenantId,
+  mappingId: MappingId,
+  dataType: 'mail' | 'calendar' | 'contacts' | 'files',
+  targetReindexer?: TargetReindexer
 ): Promise<Array<{ id: string; sourceRef: string }>> {
-  // For now, return empty - this would require comparing ledger entries
-  // against target enumeration, which is complex
-  // Implementation would need to:
-  // 1. Get all naturalKeyHashes from ledger for this type
-  // 2. Get all naturalKeyHashes from target
-  // 3. Find differences
-  return [];
+  const domain = mapDataTypeToDomain(dataType) as 'email' | 'calendar' | 'contact' | 'file';
+  
+  // Get all natural key hashes from the ledger
+  const ledgerHashes = await reader.getAllNaturalKeyHashes(tenantId, mappingId, domain);
+  
+  // If no target reindexer, all ledger items are "missing" (can't verify)
+  if (!targetReindexer) {
+    return ledgerHashes.map((hash) => ({ id: hash, sourceRef: hash }));
+  }
+  
+  // Get all natural keys from the target
+  const targetKeys = new Set<string>();
+  for await (const entry of targetReindexer.listEntries()) {
+    targetKeys.add(entry.naturalKey);
+  }
+  
+  // Find ledger items that are missing on target
+  const missing: Array<{ id: string; sourceRef: string }> = [];
+  for (const hash of ledgerHashes) {
+    if (!targetKeys.has(hash)) {
+      missing.push({ id: hash, sourceRef: hash });
+    }
+  }
+  
+  return missing;
 }
 
 /**
  * Find items that exist on the target but not in the ledger
  */
 async function findExtraOnTarget(
-  _dataType: 'mail' | 'calendar' | 'contacts' | 'files'
+  reader: LedgerVerificationReader,
+  tenantId: TenantId,
+  mappingId: MappingId,
+  dataType: 'mail' | 'calendar' | 'contacts' | 'files',
+  targetReindexer?: TargetReindexer
 ): Promise<Array<{ id: string; targetRef: string }>> {
-  // Similar to findMissingOnTarget, requires comparison
-  return [];
+  const domain = mapDataTypeToDomain(dataType) as 'email' | 'calendar' | 'contact' | 'file';
+  
+  // Get all natural key hashes from the ledger
+  const ledgerHashes = new Set(await reader.getAllNaturalKeyHashes(tenantId, mappingId, domain));
+  
+  // If no target reindexer, no extra items can be detected
+  if (!targetReindexer) {
+    return [];
+  }
+  
+  // Get all natural keys from the target and find extras
+  const extra: Array<{ id: string; targetRef: string }> = [];
+  for await (const entry of targetReindexer.listEntries()) {
+    if (!ledgerHashes.has(entry.naturalKey)) {
+      extra.push({ id: entry.targetId, targetRef: entry.naturalKey });
+    }
+  }
+  
+  return extra;
 }
 
 /**

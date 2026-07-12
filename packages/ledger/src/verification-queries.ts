@@ -28,6 +28,13 @@ export interface LedgerVerificationReader {
     domain: 'email' | 'calendar' | 'contact' | 'file',
     count: number
   ): Promise<Array<{ id: string; contentHash: string }>>;
+
+  /** Get all natural key hashes for a given domain (used for discrepancy detection) */
+  getAllNaturalKeyHashes(
+    tenantId: TenantId,
+    mappingId: MappingId,
+    domain: 'email' | 'calendar' | 'contact' | 'file'
+  ): Promise<string[]>;
 }
 
 /**
@@ -48,7 +55,9 @@ export function createLedgerVerificationReader(config: LedgerVerificationReaderC
   return {
     async countItems(tenantId, mappingId, domain): Promise<number> {
       const result = await db
-        .select({ count: sql<number>`count(*)` })
+        .select({ 
+          count: sql`count(*)`.mapWith(Number) 
+        })
         .from(schema.item)
         .where(
           and(
@@ -62,7 +71,9 @@ export function createLedgerVerificationReader(config: LedgerVerificationReaderC
     
     async totalSizeBytes(tenantId, mappingId, domain): Promise<number> {
       const result = await db
-        .select({ total: sql<number>`coalesce(sum(size_bytes), 0)` })
+        .select({ 
+          total: sql`coalesce(sum(size_bytes), 0)`.mapWith(Number) 
+        })
         .from(schema.item)
         .where(
           and(
@@ -95,6 +106,23 @@ export function createLedgerVerificationReader(config: LedgerVerificationReaderC
         id: row.id,
         contentHash: row.contentHash ?? '',
       }));
+    },
+
+    async getAllNaturalKeyHashes(tenantId, mappingId, domain): Promise<string[]> {
+      const result = await db
+        .select({
+          naturalKeyHash: schema.item.naturalKeyHash,
+        })
+        .from(schema.item)
+        .where(
+          and(
+            eq(schema.item.tenantId, tenantId),
+            eq(schema.item.mappingId, mappingId),
+            eq(schema.item.domain, domain)
+          )
+        );
+      
+      return result.map((row) => row.naturalKeyHash);
     },
   };
 }
