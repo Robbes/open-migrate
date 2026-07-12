@@ -214,7 +214,7 @@ export class CalDAVSource implements CalendarSource {
 
     const response = await this.httpClient.request({
       method: 'PROPFIND',
-      url: this.buildUrl(homeSet),
+      url: this.resolveHref(homeSet),
       body: propfind,
       headers: {
         'Content-Type': 'application/xml',
@@ -259,7 +259,7 @@ export class CalDAVSource implements CalendarSource {
 
     const response = await this.httpClient.request({
       method: 'REPORT',
-      url: this.buildUrl(collectionPath),
+      url: this.resolveHref(collectionPath),
       body: report,
       headers: {
         'Content-Type': 'application/xml',
@@ -667,30 +667,35 @@ export class CalDAVSource implements CalendarSource {
 
   /**
    * Build URL from path.
-   * For root-relative paths (starting with /), we use the origin only to avoid
-   * path duplication. For relative paths, we append to the base URL.
+   * Used for config-derived paths (e.g., .well-known/caldav).
+   * Rule B: APPEND the path to the base, preserving any subpath prefix.
    */
   private buildUrl(path: string): string {
-    const baseUrl = this.config.url.replace(/\/$/, '');
-    const origin = new URL(baseUrl).origin;
-    
     // Handle empty path case
     if (path === '') {
-      return baseUrl;
+      return this.config.url.replace(/\/$/, '');
     }
     
-    // If path is root-relative (starts with /), resolve it against the origin
-    // This prevents path duplication when the base URL already contains /remote.php/dav
-    // and the href is also /remote.php/dav/...
-    let result: string;
-    if (path.startsWith('/')) {
-      result = new URL(path, origin).toString();
-    } else {
-      result = baseUrl + '/' + path;
-    }
+    const baseUrl = this.config.url.endsWith('/') 
+      ? this.config.url.slice(0, -1)
+      : this.config.url;
     
-    // Ensure trailing slash for DAV collections (non-empty paths)
-    return result.endsWith('/') ? result : result + '/';
+    // Remove leading slash from relative path to avoid double slash
+    const normalizedPath = path.startsWith('/') ? path.slice(1) : path;
+    
+    return baseUrl + '/' + normalizedPath;
+  }
+
+  /**
+   * Resolve a server-returned href against the base URL's origin.
+   * Used for hrefs returned by the server in PROPFIND multistatus responses.
+   * Rule A: REPLACE the base path with the server-returned path.
+   */
+  private resolveHref(href: string): string {
+    const origin = new URL(this.config.url).origin;
+    // Normalize href to ensure it starts with /
+    const normalizedHref = href.startsWith('/') ? href : '/' + href;
+    return new URL(normalizedHref, origin).toString();
   }
 
   /**

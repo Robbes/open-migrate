@@ -592,7 +592,7 @@ describe('WebdavFileSource', () => {
   });
 
   describe('URL resolution', () => {
-    it('should resolve root-relative paths against origin to avoid path duplication', () => {
+    it('should resolve server-returned hrefs using resolveHref (Rule A)', () => {
       // Test case: Nextcloud returns /remote.php/dav/files/... but config.url is http://host:port/remote.php/dav
       const nextcloudConfig: WebDAVSourceConfig = {
         url: 'http://localhost:32774/remote.php/dav',
@@ -602,28 +602,26 @@ describe('WebdavFileSource', () => {
       const source = new WebdavFileSource(nextcloudConfig);
       
       // Access private method via any for testing
-      const buildUrl = (source as any).buildUrl.bind(source);
+      const resolveHref = (source as any).resolveHref.bind(source);
       
-      // Root-relative href from Nextcloud should resolve to origin + path, NOT base + path
-      expect(buildUrl('/remote.php/dav/files/testuser/Documents/')).toBe(
+      // Server-returned href should resolve to origin + path, NOT base + path
+      expect(resolveHref('/remote.php/dav/files/testuser/Documents/')).toBe(
         'http://localhost:32774/remote.php/dav/files/testuser/Documents/'
       );
       
       // Should NOT produce doubled path
-      expect(buildUrl('/remote.php/dav/files/testuser/Documents/')).not.toContain(
+      expect(resolveHref('/remote.php/dav/files/testuser/Documents/')).not.toContain(
         '/remote.php/dav/remote.php/dav/'
       );
-      
-      // Relative paths should still append to base
-      expect(buildUrl('files/test.txt')).toBe('http://localhost:32774/remote.php/dav/files/test.txt');
     });
     
-    it('should handle standard WebDAV paths correctly', () => {
+    it('should build config-derived URLs using buildUrl (Rule B)', () => {
       const source = new WebdavFileSource(testConfig);
       const buildUrl = (source as any).buildUrl.bind(source);
       
-      expect(buildUrl('/documents/')).toBe('https://example.com/documents/');
-      expect(buildUrl('/documents/report.pdf')).toBe('https://example.com/documents/report.pdf');
+      // Config-derived paths should append to base, preserving subpath prefix
+      expect(buildUrl('/documents/')).toBe('https://example.com/webdav/documents/');
+      expect(buildUrl('/documents/report.pdf')).toBe('https://example.com/webdav/documents/report.pdf');
       expect(buildUrl('files/test.txt')).toBe('https://example.com/webdav/files/test.txt');
     });
   });
