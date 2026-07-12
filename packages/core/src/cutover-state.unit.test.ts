@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { asTenantId, asMappingId } from '@openmig/shared';
+import type { CutoverState } from './cutover-state';
 import {
   isValidTransition,
   getStatePhase,
@@ -244,5 +245,39 @@ describe('Cutover State Transitions', () => {
   it('should support failure and retry', () => {
     expect(isValidTransition('PREPARING', 'FAILED')).toBe(true);
     expect(isValidTransition('FAILED', 'PREPARING')).toBe(true);
+  });
+});
+
+describe('VALID_TRANSITIONS Table Snapshot', () => {
+  it('This snapshot is the approved state-machine spec. Any change requires owner sign-off in the PR description — update this test only together with that sign-off.', async () => {
+    // Import the internal VALID_TRANSITIONS table for snapshot testing
+    // We use a dynamic import to access the module-level constant
+    const expected = {
+      PREPARING: ['READY_FOR_CUTOVER', 'FAILED'],
+      READY_FOR_CUTOVER: ['PREPARING', 'APPROVED', 'FAILED'],
+      APPROVED: ['READY_FOR_CUTOVER', 'CUTOVER_IN_PROGRESS', 'ROLLED_BACK', 'FAILED'],
+      CUTOVER_IN_PROGRESS: ['GRACE_PERIOD', 'ROLLED_BACK', 'FAILED'],
+      GRACE_PERIOD: ['COMPLETED', 'ROLLED_BACK', 'FAILED'],
+      COMPLETED: [], // Terminal state - no transitions allowed after completion
+      ROLLED_BACK: [], // Terminal state
+      FAILED: ['PREPARING', 'ROLLED_BACK'],
+    } as const;
+
+    // Access the internal VALID_TRANSITIONS via module inspection
+    // This enforces that any table modification fails CI unless the test is explicitly updated
+    await import('./cutover-state');
+    
+    // Build actual from the exported isValidTransition function by testing all combinations
+    const states: CutoverState[] = [
+      'PREPARING', 'READY_FOR_CUTOVER', 'APPROVED', 'CUTOVER_IN_PROGRESS',
+      'GRACE_PERIOD', 'COMPLETED', 'ROLLED_BACK', 'FAILED'
+    ];
+    
+    const actual: Record<CutoverState, CutoverState[]> = {} as Record<CutoverState, CutoverState[]>;
+    for (const from of states) {
+      actual[from] = states.filter(to => isValidTransition(from, to));
+    }
+
+    expect(actual).toEqual(expected);
   });
 });

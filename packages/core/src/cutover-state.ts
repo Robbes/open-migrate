@@ -169,9 +169,9 @@ const VALID_TRANSITIONS: Record<CutoverState, CutoverState[]> = {
   PREPARING: ['READY_FOR_CUTOVER', 'FAILED'],
   READY_FOR_CUTOVER: ['APPROVED', 'PREPARING', 'FAILED'],
   APPROVED: ['CUTOVER_IN_PROGRESS', 'READY_FOR_CUTOVER', 'FAILED', 'ROLLED_BACK'],
-  CUTOVER_IN_PROGRESS: ['GRACE_PERIOD', 'COMPLETED', 'FAILED', 'ROLLED_BACK'],
+  CUTOVER_IN_PROGRESS: ['GRACE_PERIOD', 'FAILED', 'ROLLED_BACK'],
   GRACE_PERIOD: ['COMPLETED', 'ROLLED_BACK', 'FAILED'],
-  COMPLETED: ['ROLLED_BACK'], // Allow rollback even after completion
+  COMPLETED: [], // Terminal state - no transitions allowed after completion
   ROLLED_BACK: [], // Terminal state
   FAILED: ['PREPARING', 'ROLLED_BACK'], // Can retry or rollback
 };
