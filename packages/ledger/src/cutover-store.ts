@@ -443,7 +443,7 @@ export class CutoverStore implements CutoverStateStore {
       discrepanciesFound: 0,
       rollbackAvailable: false,
       currentState: row.state,
-      targetMailServer: row.targetMailServer,
+      targetMailServer: row.targetMailServer ?? undefined,
       metadata: metadata as Record<string, unknown>,
     };
   }
