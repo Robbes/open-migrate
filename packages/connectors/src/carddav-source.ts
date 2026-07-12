@@ -796,6 +796,7 @@ export class CarddavSource implements ContactSource {
    * Build URL from path.
    * Used for config-derived paths (e.g., .well-known/carddav).
    * Rule B: APPEND the path to the base, preserving any subpath prefix.
+   * For CardDAV collections, always add trailing slash (RFC 4918).
    */
   private buildUrl(path: string): string {
     // Handle empty path case
@@ -810,7 +811,18 @@ export class CarddavSource implements ContactSource {
     // Remove leading slash from relative path to avoid double slash
     const normalizedPath = path.startsWith('/') ? path.slice(1) : path;
     
-    return baseUrl + '/' + normalizedPath;
+    // Remove trailing slash from path for now - we'll add it back for collections
+    const pathWithoutTrailingSlash = normalizedPath.replace(/\/$/, '');
+    
+    const result = baseUrl + '/' + pathWithoutTrailingSlash;
+    
+    // For CardDAV collections (non-.well-known paths), add trailing slash
+    // .well-known paths should NOT have trailing slash
+    if (!pathWithoutTrailingSlash.includes('.well-known')) {
+      return result + '/';
+    }
+    
+    return result;
   }
 
   /**
