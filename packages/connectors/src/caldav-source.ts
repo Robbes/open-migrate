@@ -667,13 +667,30 @@ export class CalDAVSource implements CalendarSource {
 
   /**
    * Build URL from path.
+   * For root-relative paths (starting with /), we use the origin only to avoid
+   * path duplication. For relative paths, we append to the base URL.
    */
   private buildUrl(path: string): string {
     const baseUrl = this.config.url.replace(/\/$/, '');
-    // Manually join paths to avoid URL constructor replacing base path
-    const result = baseUrl + (path.startsWith('/') ? path : '/' + path);
+    const origin = new URL(baseUrl).origin;
+    
+    // Handle empty path case
+    if (path === '') {
+      return baseUrl;
+    }
+    
+    // If path is root-relative (starts with /), resolve it against the origin
+    // This prevents path duplication when the base URL already contains /remote.php/dav
+    // and the href is also /remote.php/dav/...
+    let result: string;
+    if (path.startsWith('/')) {
+      result = new URL(path, origin).toString();
+    } else {
+      result = baseUrl + '/' + path;
+    }
+    
     // Ensure trailing slash for DAV collections (non-empty paths)
-    return result.endsWith('/') || path === '' ? result : result + '/';
+    return result.endsWith('/') ? result : result + '/';
   }
 
   /**

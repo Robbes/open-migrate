@@ -517,16 +517,27 @@ export class WebdavFileSource implements FileSource {
 
   /**
    * Build a full URL from a path.
+   * For root-relative paths (starting with /), we use the origin only to avoid
+   * path duplication. For relative paths, we append to the base URL.
    */
   private buildUrl(path: string): string {
     const baseUrl = this.config.url.replace(/\/$/, '');
+    const origin = new URL(baseUrl).origin;
+    
     // Handle empty path case
     if (path === '') {
       return baseUrl;
     }
-    // Manually join paths to avoid URL constructor replacing base path
-    const result = baseUrl + (path.startsWith('/') ? path : '/' + path);
-    return result;
+    
+    // If path is root-relative (starts with /), resolve it against the origin
+    // This prevents path duplication when the base URL already contains /remote.php/dav
+    // and the href is also /remote.php/dav/...
+    if (path.startsWith('/')) {
+      return new URL(path, origin).toString();
+    }
+    
+    // For relative paths, append to base URL
+    return baseUrl + '/' + path;
   }
 
   /**

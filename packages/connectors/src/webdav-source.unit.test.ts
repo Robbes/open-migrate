@@ -590,4 +590,41 @@ describe('WebdavFileSource', () => {
       expect(extractNameFromPath('/documents/subfolder/')).toBe('subfolder');
     });
   });
+
+  describe('URL resolution', () => {
+    it('should resolve root-relative paths against origin to avoid path duplication', () => {
+      // Test case: Nextcloud returns /remote.php/dav/files/... but config.url is http://host:port/remote.php/dav
+      const nextcloudConfig: WebDAVSourceConfig = {
+        url: 'http://localhost:32774/remote.php/dav',
+        username: 'testuser',
+        passwordEnv: 'WEBDAV_PASSWORD',
+      };
+      const source = new WebdavFileSource(nextcloudConfig);
+      
+      // Access private method via any for testing
+      const buildUrl = (source as any).buildUrl.bind(source);
+      
+      // Root-relative href from Nextcloud should resolve to origin + path, NOT base + path
+      expect(buildUrl('/remote.php/dav/files/testuser/Documents/')).toBe(
+        'http://localhost:32774/remote.php/dav/files/testuser/Documents/'
+      );
+      
+      // Should NOT produce doubled path
+      expect(buildUrl('/remote.php/dav/files/testuser/Documents/')).not.toContain(
+        '/remote.php/dav/remote.php/dav/'
+      );
+      
+      // Relative paths should still append to base
+      expect(buildUrl('files/test.txt')).toBe('http://localhost:32774/remote.php/dav/files/test.txt');
+    });
+    
+    it('should handle standard WebDAV paths correctly', () => {
+      const source = new WebdavFileSource(testConfig);
+      const buildUrl = (source as any).buildUrl.bind(source);
+      
+      expect(buildUrl('/documents/')).toBe('https://example.com/documents/');
+      expect(buildUrl('/documents/report.pdf')).toBe('https://example.com/documents/report.pdf');
+      expect(buildUrl('files/test.txt')).toBe('https://example.com/webdav/files/test.txt');
+    });
+  });
 });
