@@ -101,12 +101,13 @@ async function getSourceSamplesFromLedger(
   mappingId: MappingId,
   dataType: 'mail' | 'calendar' | 'contacts' | 'files',
   count: number
-): Promise<Array<{ id: string; content: Uint8Array | string }>> {
+): Promise<Array<{ id: string; naturalKeyHash: string; content: Uint8Array | string }>> {
   const domain = mapDataTypeToDomain(dataType) as 'email' | 'calendar' | 'contact' | 'file';
   const samples = await reader.getSamples(tenantId, mappingId, domain, count);
   
   return samples.map((s) => ({
     id: s.id,
+    naturalKeyHash: s.naturalKeyHash,
     content: s.contentHash ?? '',
   }));
 }
@@ -121,18 +122,20 @@ async function getTargetSamplesFromReindexer(
   mappingId: MappingId,
   _dataType: 'mail' | 'calendar' | 'contacts' | 'files',
   count: number
-): Promise<Array<{ id: string; content: Uint8Array | string }>> {
+): Promise<Array<{ id: string; naturalKeyHash: string; content: Uint8Array | string }>> {
   if (!targetReindexer) {
+    // If no reindexer, fall back to ledger samples
     return getSourceSamplesFromLedger(reader, tenantId, mappingId, _dataType, count);
   }
 
-  const samples: Array<{ id: string; content: Uint8Array | string }> = [];
+  const samples: Array<{ id: string; naturalKeyHash: string; content: Uint8Array | string }> = [];
   let i = 0;
   
   for await (const entry of targetReindexer.listEntries()) {
     if (i >= count) break;
     samples.push({
       id: entry.targetId,
+      naturalKeyHash: entry.naturalKey,
       content: entry.contentHash ?? '',
     });
     i++;

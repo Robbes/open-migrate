@@ -387,6 +387,9 @@ describe('Verification Engine (integration)', () => {
       createdAt: new Date().toISOString(),
     });
 
+    // Add matching entry to target reindexer
+    targetReindexer.addEntry({ naturalKey: 'hash1', targetId: 'target1', mailboxId: 'inbox', contentHash: 'content1' });
+
     const deps = createRealVerificationDeps({
       tenantId: TEST_TENANT_ID,
       mappingId: TEST_MAPPING_ID,
@@ -402,19 +405,19 @@ describe('Verification Engine (integration)', () => {
         verifyFiles: true,
       },
       ledger,
-      targetReindexer: new MockTargetReindexer(),
+      targetReindexer,
       verificationReader: createLedgerVerificationReader({ connectionString: PG_CONNECTION_STRING }),
     });
 
     const result = await runVerification(deps);
 
-    // Mail should pass (has data)
+    // Mail should pass (has data and matches target)
     expect(result.mail.status).toBe('PASS');
     
-    // Calendar should be handled gracefully (no data)
-    // Note: Current implementation returns PASS for empty domains
-    // This should be changed to SKIPPED in a future enhancement
+    // Calendar should be handled gracefully (no data - returns 0 count)
     expect(result.calendar.sourceCount).toBe(0);
+    // Empty domain should PASS (nothing to verify)
+    expect(result.calendar.status).toBe('PASS');
   });
 
   /**

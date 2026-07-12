@@ -126,7 +126,7 @@ describe('Cutover Lifecycle (integration)', () => {
   });
 
   /**
-   * T1: Full lifecycle - PREPARING → READY_FOR_CUTOVER → APPROVED → CUTOVER_IN_PROGRESS → COMPLETED
+   * T1: Full lifecycle - PREPARING → READY_FOR_CUTOVER → APPROVED → CUTOVER_IN_PROGRESS → GRACE_PERIOD → COMPLETED
    */
   it('should complete full cutover lifecycle', async () => {
     // Step 1: Initialize cutover (PREPARING)
@@ -147,7 +147,7 @@ describe('Cutover Lifecycle (integration)', () => {
       TEST_TENANT_ID,
       TEST_MAPPING_ID,
       'READY_FOR_CUTOVER',
-      { readyAt: new Date().toISOString() }
+      { readyAt: new Date().toISOString(), reason: 'Verification passed' }
     );
 
     expect(readyState.currentState).toBe('READY_FOR_CUTOVER');
@@ -157,7 +157,7 @@ describe('Cutover Lifecycle (integration)', () => {
       TEST_TENANT_ID,
       TEST_MAPPING_ID,
       'APPROVED',
-      { approvedBy: 'test-user', timestamp: new Date().toISOString() }
+      { approvedBy: 'test-user', timestamp: new Date().toISOString(), reason: 'Approved for cutover' }
     );
 
     expect(approvedState.currentState).toBe('APPROVED');
@@ -167,17 +167,27 @@ describe('Cutover Lifecycle (integration)', () => {
       TEST_TENANT_ID,
       TEST_MAPPING_ID,
       'CUTOVER_IN_PROGRESS',
-      { startedAt: new Date().toISOString() }
+      { startedAt: new Date().toISOString(), reason: 'Cutover started' }
     );
 
     expect(inProgressState.currentState).toBe('CUTOVER_IN_PROGRESS');
 
-    // Step 5: Complete cutover
+    // Step 5: Enter grace period (mandatory after cutover)
+    const graceState = await cutoverPersistence.transitionState(
+      TEST_TENANT_ID,
+      TEST_MAPPING_ID,
+      'GRACE_PERIOD',
+      { gracePeriodStartedAt: new Date().toISOString(), reason: 'Grace period started' }
+    );
+
+    expect(graceState.currentState).toBe('GRACE_PERIOD');
+
+    // Step 6: Complete cutover (after grace period)
     const completedState = await cutoverPersistence.transitionState(
       TEST_TENANT_ID,
       TEST_MAPPING_ID,
       'COMPLETED',
-      { completedAt: new Date().toISOString() }
+      { completedAt: new Date().toISOString(), reason: 'Grace period completed successfully' }
     );
 
     expect(completedState.currentState).toBe('COMPLETED');
@@ -185,7 +195,7 @@ describe('Cutover Lifecycle (integration)', () => {
 
     // Verify event history
     const events = await cutoverPersistence.getEventHistory(TEST_TENANT_ID, TEST_MAPPING_ID, 10);
-    expect(events.length).toBe(5); // 1 init + 4 transitions
+    expect(events.length).toBe(6); // 1 init + 5 transitions
 
     // Verify events are in order
     expect(events[0]?.eventType).toBe('CUTOVER_INITIALIZED');
@@ -193,6 +203,7 @@ describe('Cutover Lifecycle (integration)', () => {
     expect(events[2]?.eventType).toBe('STATE_TRANSITION');
     expect(events[3]?.eventType).toBe('STATE_TRANSITION');
     expect(events[4]?.eventType).toBe('STATE_TRANSITION');
+    expect(events[5]?.eventType).toBe('STATE_TRANSITION');
   });
 
   /**
@@ -211,14 +222,21 @@ describe('Cutover Lifecycle (integration)', () => {
       TEST_TENANT_ID,
       TEST_MAPPING_ID,
       'READY_FOR_CUTOVER',
-      { readyAt: new Date().toISOString() }
+      { readyAt: new Date().toISOString(), reason: 'Verification passed' }
     );
 
     await cutoverPersistence.transitionState(
       TEST_TENANT_ID,
       TEST_MAPPING_ID,
       'APPROVED',
-      { approvedBy: 'test-user', timestamp: new Date().toISOString() }
+      { approvedBy: 'test-user', timestamp: new Date().toISOString(), reason: 'Approved for cutover' }
+    );
+
+    await cutoverPersistence.transitionState(
+      TEST_TENANT_ID,
+      TEST_MAPPING_ID,
+      'CUTOVER_IN_PROGRESS',
+      { startedAt: new Date().toISOString(), reason: 'Cutover started' }
     );
 
     // Simulate worker restart - create new persistence instance
@@ -231,25 +249,25 @@ describe('Cutover Lifecycle (integration)', () => {
     );
 
     expect(rehydratedState).toBeDefined();
-    expect(rehydratedState?.currentState).toBe('APPROVED');
+    expect(rehydratedState?.currentState).toBe('CUTOVER_IN_PROGRESS');
     expect(rehydratedState?.targetMailServer).toBe('mail.example.com');
 
-    // Continue from APPROVED state
-    const inProgressState = await newCutoverStore.transitionState(
+    // Continue from CUTOVER_IN_PROGRESS state - enter grace period
+    const graceState = await newCutoverStore.transitionState(
       TEST_TENANT_ID,
       TEST_MAPPING_ID,
-      'CUTOVER_IN_PROGRESS',
-      { startedAt: new Date().toISOString() }
+      'GRACE_PERIOD',
+      { gracePeriodStartedAt: new Date().toISOString(), reason: 'Grace period started' }
     );
 
-    expect(inProgressState.currentState).toBe('CUTOVER_IN_PROGRESS');
+    expect(graceState.currentState).toBe('GRACE_PERIOD');
 
-    // Complete the cutover
+    // Complete the cutover (after grace period)
     const completedState = await newCutoverStore.transitionState(
       TEST_TENANT_ID,
       TEST_MAPPING_ID,
       'COMPLETED',
-      { completedAt: new Date().toISOString() }
+      { completedAt: new Date().toISOString(), reason: 'Grace period completed successfully' }
     );
 
     expect(completedState.currentState).toBe('COMPLETED');

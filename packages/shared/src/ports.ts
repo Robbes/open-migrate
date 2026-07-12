@@ -399,13 +399,13 @@ export interface LedgerVerificationReader {
   /** Get total bytes for items of a given type in the ledger */
   totalSizeBytes(tenantId: TenantId, mappingId: MappingId, domain: 'email' | 'calendar' | 'contact' | 'file'): Promise<number>;
   
-  /** Get sample items for verification (ids + content hashes) */
+  /** Get sample items for verification (ids + natural key hashes + content hashes) */
   getSamples(
     tenantId: TenantId,
     mappingId: MappingId,
     domain: 'email' | 'calendar' | 'contact' | 'file',
     count: number
-  ): Promise<Array<{ id: string; contentHash: string }>>;
+  ): Promise<Array<{ id: string; naturalKeyHash: string; contentHash: string }>>;
   
   /** Get all natural key hashes for a given domain (used for discrepancy detection) */
   getAllNaturalKeyHashes(
