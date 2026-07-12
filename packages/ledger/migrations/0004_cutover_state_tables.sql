@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS cutover_state (
   tenant_id             uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   mapping_id            uuid NOT NULL REFERENCES mailbox_mapping(id) ON DELETE CASCADE,
   state                 text NOT NULL DEFAULT 'PREPARING'
-                          CHECK (state IN ('PREPARING', 'READY_FOR_CUTOVER', 'CUTOVER_IN_PROGRESS', 'GRACE_PERIOD', 'COMPLETED', 'FAILED', 'ROLLED_BACK')),
+                          CHECK (state IN ('PREPARING', 'READY_FOR_CUTOVER', 'APPROVED', 'CUTOVER_IN_PROGRESS', 'GRACE_PERIOD', 'COMPLETED', 'FAILED', 'ROLLED_BACK')),
   phase                 text NOT NULL DEFAULT 'verification'
                           CHECK (phase IN ('verification', 'approval', 'cutover', 'grace', 'completion', 'rollback')),
   verification_status   text NOT NULL DEFAULT 'pending'
@@ -28,8 +28,8 @@ CREATE TABLE IF NOT EXISTS cutover_event (
   tenant_id       uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   mapping_id      uuid NOT NULL REFERENCES mailbox_mapping(id) ON DELETE CASCADE,
   timestamp       timestamptz NOT NULL DEFAULT now(),
-  from_state      text NOT NULL CHECK (from_state IN ('PREPARING', 'READY_FOR_CUTOVER', 'CUTOVER_IN_PROGRESS', 'GRACE_PERIOD', 'COMPLETED', 'FAILED', 'ROLLED_BACK')),
-  to_state        text NOT NULL CHECK (to_state IN ('PREPARING', 'READY_FOR_CUTOVER', 'CUTOVER_IN_PROGRESS', 'GRACE_PERIOD', 'COMPLETED', 'FAILED', 'ROLLED_BACK')),
+  from_state      text NOT NULL CHECK (from_state IN ('PREPARING', 'READY_FOR_CUTOVER', 'APPROVED', 'CUTOVER_IN_PROGRESS', 'GRACE_PERIOD', 'COMPLETED', 'FAILED', 'ROLLED_BACK')),
+  to_state        text NOT NULL CHECK (to_state IN ('PREPARING', 'READY_FOR_CUTOVER', 'APPROVED', 'CUTOVER_IN_PROGRESS', 'GRACE_PERIOD', 'COMPLETED', 'FAILED', 'ROLLED_BACK')),
   triggered_by    text NOT NULL,
   reason          text,
   metadata        jsonb NOT NULL DEFAULT '{}'

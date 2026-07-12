@@ -56,12 +56,12 @@ describe('RLS Policies', () => {
     await pool.query(`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config)
       VALUES ($1, $2, 'source', 'o365', 'Tenant A Source', '{}')
-    `, ['c1', tenantA]);
+    `, ['650e8400-e29b-41d4-a716-446655440003', tenantA]);
     
     await pool.query(`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config)
       VALUES ($1, $2, 'source', 'o365', 'Tenant B Source', '{}')
-    `, ['c2', tenantB]);
+    `, ['650e8400-e29b-41d4-a716-446655440004', tenantB]);
   }
   
   async function cleanupTestData() {
@@ -122,7 +122,7 @@ describe('RLS Policies', () => {
     expect(result.rowCount).toBe(0);
     
     // Verify Tenant B's connection still exists
-    const check = await pool.query('SELECT * FROM connection WHERE id = $1', ['c2']);
+    const check = await pool.query('SELECT * FROM connection WHERE id = $1', ['650e8400-e29b-41d4-a716-446655440004']);
     expect(check.rows).toHaveLength(1);
   });
   

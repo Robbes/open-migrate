@@ -311,6 +311,9 @@ importers:
 
   packages/ledger:
     dependencies:
+      '@openmig/core':
+        specifier: workspace:*
+        version: link:../core
       '@openmig/shared':
         specifier: workspace:*
         version: link:../shared

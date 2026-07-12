@@ -8,7 +8,7 @@
  */
 
 import type { TenantId, MappingId } from '@openmig/shared';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, asc } from 'drizzle-orm';
 import * as schema from './schema-pg';
 
 // Generic database type that works with both pg and postgres-js drivers
@@ -104,6 +104,20 @@ export class CutoverStore implements CutoverStateStore {
     };
 
     await this.saveCutoverState(status);
+
+    // Log initialization event
+    const initEvent: CutoverEvent = {
+      tenantId: params.tenantId,
+      mappingId: params.mappingId,
+      timestamp: now,
+      fromState: null,
+      toState: 'PREPARING',
+      triggeredBy: params.startedBy || 'system',
+      eventType: 'CUTOVER_INITIALIZED',
+      description: 'Cutover initialized',
+    };
+    await this.logCutoverEvent(initEvent);
+
     return status;
   }
 
@@ -124,6 +138,7 @@ export class CutoverStore implements CutoverStateStore {
       gracePeriodHours: this.extractGracePeriodHours(status),
       gracePeriodStartedAt: status.gracePeriodStartedAt ? new Date(status.gracePeriodStartedAt) : null,
       gracePeriodCompletedAt: status.gracePeriodCompletedAt ? new Date(status.gracePeriodCompletedAt) : null,
+      targetMailServer: status.targetMailServer ?? null,
       metadata: this.buildMetadata(status),
       createdAt: new Date(now),
       updatedAt: new Date(now),
@@ -137,6 +152,7 @@ export class CutoverStore implements CutoverStateStore {
         gracePeriodHours: this.extractGracePeriodHours(status),
         gracePeriodStartedAt: status.gracePeriodStartedAt ? new Date(status.gracePeriodStartedAt) : null,
         gracePeriodCompletedAt: status.gracePeriodCompletedAt ? new Date(status.gracePeriodCompletedAt) : null,
+        targetMailServer: status.targetMailServer ?? null,
         metadata: this.buildMetadata(status),
         updatedAt: new Date(now),
       },
@@ -173,19 +189,19 @@ export class CutoverStore implements CutoverStateStore {
    * Log a cutover event to the database
    */
   async logCutoverEvent(event: CutoverEvent): Promise<void> {
-    await this.getDb().insert(schema.cutoverEvent).values({
-      id: crypto.randomUUID(),
+    const insertData = {
       tenantId: event.tenantId,
       mappingId: event.mappingId,
       timestamp: new Date(event.timestamp),
-      fromState: this.mapStateToDb(event.fromState),
+      fromState: event.fromState ? this.mapStateToDb(event.fromState) : null,
       toState: this.mapStateToDb(event.toState),
       triggeredBy: event.triggeredBy,
       reason: event.reason || null,
+      eventType: event.eventType || 'STATE_TRANSITION',
       metadata: event.metadata ? JSON.parse(JSON.stringify(event.metadata)) : {},
-    });
+    };
+    await this.getDb().insert(schema.cutoverEvent).values(insertData);
   }
-
   /**
    * Load cutover events from the database
    */
@@ -204,22 +220,36 @@ export class CutoverStore implements CutoverStateStore {
         )
       );
     
-    const orderedQuery = query.orderBy(desc(schema.cutoverEvent.timestamp));
+    const orderedQuery = query.orderBy(asc(schema.cutoverEvent.timestamp));
     
     const rows = limit ? await orderedQuery.limit(limit) : await orderedQuery;
 
-    return rows.map((row: typeof schema.cutoverEvent.$inferSelect) => ({
-      tenantId: row.tenantId as TenantId,
-      mappingId: row.mappingId as MappingId,
-      timestamp: row.timestamp.toISOString(),
-      fromState: row.fromState,
-      toState: row.toState,
-      triggeredBy: row.triggeredBy,
-      reason: row.reason ?? undefined,
-      metadata: row.metadata as Record<string, unknown>,
-      eventType: row.fromState ? `${row.fromState}_to_${row.toState}` : undefined,
-      description: `Transitioned from ${row.fromState} to ${row.toState}`,
-    }));
+    return rows.map((row: typeof schema.cutoverEvent.$inferSelect) => {
+      const baseDescription = row.eventType === 'CUTOVER_INITIALIZED'
+        ? 'Cutover initialized'
+        : row.toState === 'ROLLED_BACK'
+          ? row.fromState
+            ? `${row.fromState} rolled back to ${row.toState}`
+            : `Rolled back to ${row.toState}`
+          : row.fromState
+            ? `Transitioned from ${row.fromState} to ${row.toState}`
+            : `Transitioned to ${row.toState}`;
+      // Include reason in description if available
+      const description = row.reason ? `${baseDescription}: ${row.reason}` : baseDescription;
+      
+      return {
+        tenantId: row.tenantId as TenantId,
+        mappingId: row.mappingId as MappingId,
+        timestamp: row.timestamp.toISOString(),
+        fromState: row.fromState,
+        toState: row.toState,
+        triggeredBy: row.triggeredBy,
+        reason: row.reason ?? undefined,
+        metadata: row.metadata as Record<string, unknown>,
+        eventType: row.eventType ?? 'STATE_TRANSITION',
+        description,
+      };
+    });
   }
 
   /**
@@ -253,7 +283,7 @@ export class CutoverStore implements CutoverStateStore {
     if (!isValidTransition(current.state, toState)) {
       const reason = typeof metadataOrReason === 'string' ? metadataOrReason : 'No reason provided';
       throw new Error(
-        `Invalid state transition from ${current.state} to ${toState}. Reason: ${reason}`
+        `Invalid transition from ${current.state} to ${toState}. Reason: ${reason}`
       );
     }
 
@@ -265,7 +295,8 @@ export class CutoverStore implements CutoverStateStore {
       reason = metadataOrReason;
     } else if (metadataOrReason && typeof metadataOrReason === 'object') {
       metadata = metadataOrReason;
-      reason = (metadata.reason as string) || (metadata.failureReason as string);
+      // Extract reason from various possible fields depending on the transition
+      reason = (metadata.reason as string) || (metadata.failureReason as string) || (metadata.rollbackReason as string);
     }
 
     // Create event
@@ -278,8 +309,8 @@ export class CutoverStore implements CutoverStateStore {
       triggeredBy: typeof metadataOrReason === 'string' ? 'system' : 'cli',
       reason,
       metadata,
-      eventType: `${current.state}_to_${toState}`,
-      description: `Transitioned from ${current.state} to ${toState}`,
+      eventType: 'STATE_TRANSITION',
+      description: reason ? `Transitioned from ${current.state} to ${toState}: ${reason}` : `Transitioned from ${current.state} to ${toState}`,
     };
 
     // Log event
@@ -288,6 +319,11 @@ export class CutoverStore implements CutoverStateStore {
     // Update state
     const { updateCutoverStatus } = await import('@openmig/core/cutover-state');
     const updated = updateCutoverStatus(current, toState, reason);
+    
+    // Debug logging
+    console.log('[transitionState] toState:', toState);
+    console.log('[transitionState] updated.state:', updated.state);
+    console.log('[transitionState] updated:', JSON.stringify(updated, null, 2));
 
     // Merge metadata into the status if provided
     if (metadata) {
@@ -301,11 +337,11 @@ export class CutoverStore implements CutoverStateStore {
 
   // Helper methods
 
-  private mapStateToDb(state: CutoverState): 'PREPARING' | 'READY_FOR_CUTOVER' | 'CUTOVER_IN_PROGRESS' | 'GRACE_PERIOD' | 'COMPLETED' | 'FAILED' | 'ROLLED_BACK' {
-    const stateMap: Record<CutoverState, 'PREPARING' | 'READY_FOR_CUTOVER' | 'CUTOVER_IN_PROGRESS' | 'GRACE_PERIOD' | 'COMPLETED' | 'FAILED' | 'ROLLED_BACK'> = {
+  private mapStateToDb(state: CutoverState): 'PREPARING' | 'READY_FOR_CUTOVER' | 'APPROVED' | 'CUTOVER_IN_PROGRESS' | 'GRACE_PERIOD' | 'COMPLETED' | 'FAILED' | 'ROLLED_BACK' {
+    const stateMap: Record<CutoverState, 'PREPARING' | 'READY_FOR_CUTOVER' | 'APPROVED' | 'CUTOVER_IN_PROGRESS' | 'GRACE_PERIOD' | 'COMPLETED' | 'FAILED' | 'ROLLED_BACK'> = {
       'PREPARING': 'PREPARING',
       'READY_FOR_CUTOVER': 'READY_FOR_CUTOVER',
-      'APPROVED': 'READY_FOR_CUTOVER',
+      'APPROVED': 'APPROVED',
       'CUTOVER_IN_PROGRESS': 'CUTOVER_IN_PROGRESS',
       'GRACE_PERIOD': 'GRACE_PERIOD',
       'COMPLETED': 'COMPLETED',
@@ -407,6 +443,7 @@ export class CutoverStore implements CutoverStateStore {
       discrepanciesFound: 0,
       rollbackAvailable: false,
       currentState: row.state,
+      targetMailServer: row.targetMailServer,
       metadata: metadata as Record<string, unknown>,
     };
   }

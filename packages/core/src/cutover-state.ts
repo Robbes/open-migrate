@@ -125,14 +125,14 @@ export interface CutoverEvent {
   tenantId: TenantId;
   mappingId: MappingId;
   timestamp: string;
-  fromState: CutoverState;
+  fromState: CutoverState | null; // null for initialization events
   toState: CutoverState;
   triggeredBy: string; // 'system' or user ID
   reason?: string;
   metadata?: Record<string, unknown>;
   
   // Extended properties for CLI compatibility
-  eventType?: string; // Alias for state transition type
+  eventType?: 'CUTOVER_INITIALIZED' | 'STATE_TRANSITION'; // Type of event
   description?: string; // Human-readable description
 }
 
@@ -168,10 +168,10 @@ export interface CutoverManager {
 const VALID_TRANSITIONS: Record<CutoverState, CutoverState[]> = {
   PREPARING: ['READY_FOR_CUTOVER', 'FAILED'],
   READY_FOR_CUTOVER: ['APPROVED', 'PREPARING', 'FAILED'],
-  APPROVED: ['CUTOVER_IN_PROGRESS', 'READY_FOR_CUTOVER', 'FAILED'],
-  CUTOVER_IN_PROGRESS: ['GRACE_PERIOD', 'FAILED', 'ROLLED_BACK'],
+  APPROVED: ['CUTOVER_IN_PROGRESS', 'READY_FOR_CUTOVER', 'FAILED', 'ROLLED_BACK'],
+  CUTOVER_IN_PROGRESS: ['GRACE_PERIOD', 'COMPLETED', 'FAILED', 'ROLLED_BACK'],
   GRACE_PERIOD: ['COMPLETED', 'ROLLED_BACK', 'FAILED'],
-  COMPLETED: [], // Terminal state
+  COMPLETED: ['ROLLED_BACK'], // Allow rollback even after completion
   ROLLED_BACK: [], // Terminal state
   FAILED: ['PREPARING', 'ROLLED_BACK'], // Can retry or rollback
 };
@@ -229,6 +229,7 @@ export function createInitialCutoverStatus(
     tenantId,
     mappingId,
     state: 'PREPARING',
+    currentState: 'PREPARING', // Alias for state
     phase: 'PREPARATION',
     startedAt: now,
     updatedAt: now,
@@ -251,18 +252,35 @@ export function updateCutoverStatus(
 ): CutoverStatus {
   if (!isValidTransition(status.state, newState)) {
     throw new Error(
-      `Invalid state transition from ${status.state} to ${newState}. Reason: ${reason || 'No reason provided'}`
+      `Invalid state transition from ${status.state} to ${newState}`
     );
   }
 
-  return {
-    ...status,
+  const baseUpdate: Partial<CutoverStatus> = {
     state: newState,
+    currentState: newState, // Alias for state, for CLI compatibility
     phase: getStatePhase(newState),
     updatedAt: new Date().toISOString(),
     rollbackAvailable: canRollback(newState),
     ...(newState === 'COMPLETED' ? { completedAt: new Date().toISOString() } : {}),
     ...(reason ? { errorMessage: undefined, errorDetails: undefined } : {}),
+  };
+
+  // Handle FAILED state - preserve failure info
+  if (newState === 'FAILED') {
+    baseUpdate.failedAt = new Date().toISOString();
+    baseUpdate.failureReason = reason;
+  }
+
+  // Handle ROLLED_BACK state - preserve rollback info
+  if (newState === 'ROLLED_BACK') {
+    baseUpdate.rolledBackAt = new Date().toISOString();
+    baseUpdate.rollbackReason = reason;
+  }
+
+  return {
+    ...status,
+    ...baseUpdate,
   };
 }
 
@@ -272,11 +290,13 @@ export function updateCutoverStatus(
 export function createCutoverEvent(
   tenantId: TenantId,
   mappingId: MappingId,
-  fromState: CutoverState,
+  fromState: CutoverState | null,
   toState: CutoverState,
   triggeredBy: string,
   reason?: string,
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, unknown>,
+  eventType?: 'CUTOVER_INITIALIZED' | 'STATE_TRANSITION',
+  description?: string
 ): CutoverEvent {
   return {
     tenantId,
@@ -287,5 +307,7 @@ export function createCutoverEvent(
     triggeredBy,
     reason,
     metadata,
+    eventType: eventType ?? 'STATE_TRANSITION',
+    description: description ?? (fromState ? `Transitioned from ${fromState} to ${toState}` : `Cutover initialized to ${toState}`),
   };
 }

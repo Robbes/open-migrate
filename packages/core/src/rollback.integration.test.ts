@@ -63,7 +63,7 @@ describe('Rollback Paths (integration)', () => {
         '650e8400-e29b-41d4-a716-446655440302',
         ${TEST_TENANT_ID},
         'target',
-        'stalwart',
+        'selfhosted_mail',
         'Stalwart Target',
         '{}',
         'connected'
@@ -72,13 +72,42 @@ describe('Rollback Paths (integration)', () => {
     `);
 
     await db.execute(sql`
-      INSERT INTO mapping (id, tenant_id, source_connection_id, target_connection_id, status)
+      INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, display_name, status)
+      VALUES (
+        '750e8400-e29b-41d4-a716-446655440301',
+        ${TEST_TENANT_ID},
+        '650e8400-e29b-41d4-a716-446655440301',
+        'inbox-source',
+        'user',
+        'Inbox',
+        'active'
+      )
+      ON CONFLICT (id) DO NOTHING
+    `);
+
+    await db.execute(sql`
+      INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, display_name, status)
+      VALUES (
+        '750e8400-e29b-41d4-a716-446655440302',
+        ${TEST_TENANT_ID},
+        '650e8400-e29b-41d4-a716-446655440302',
+        'inbox-target',
+        'user',
+        'Inbox',
+        'active'
+      )
+      ON CONFLICT (id) DO NOTHING
+    `);
+
+    await db.execute(sql`
+      INSERT INTO mailbox_mapping (id, tenant_id, source_mailbox_id, target_mailbox_id, status, mode)
       VALUES (
         ${TEST_MAPPING_ID},
         ${TEST_TENANT_ID},
-        '650e8400-e29b-41d4-a716-446655440301',
-        '650e8400-e29b-41d4-a716-446655440302',
-        'active'
+        '750e8400-e29b-41d4-a716-446655440301',
+        '750e8400-e29b-41d4-a716-446655440302',
+        'active',
+        'mirror'
       )
       ON CONFLICT (id) DO NOTHING
     `);

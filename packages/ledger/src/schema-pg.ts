@@ -407,6 +407,7 @@ export const cutoverState = pgTable(
       enum: [
         'PREPARING',
         'READY_FOR_CUTOVER',
+        'APPROVED',
         'CUTOVER_IN_PROGRESS',
         'GRACE_PERIOD',
         'COMPLETED',
@@ -430,6 +431,7 @@ export const cutoverState = pgTable(
     gracePeriodHours: integer('grace_period_hours').notNull().default(72),
     gracePeriodStartedAt: timestamp('grace_period_started_at', { withTimezone: true }),
     gracePeriodCompletedAt: timestamp('grace_period_completed_at', { withTimezone: true }),
+    targetMailServer: text('target_mail_server'),
     metadata: jsonb('metadata').notNull().default({}),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -454,17 +456,19 @@ export const cutoverEvent = pgTable(
       enum: [
         'PREPARING',
         'READY_FOR_CUTOVER',
+        'APPROVED',
         'CUTOVER_IN_PROGRESS',
         'GRACE_PERIOD',
         'COMPLETED',
         'FAILED',
         'ROLLED_BACK',
       ],
-    }).notNull(),
+    }), // nullable - null for initialization events
     toState: text('to_state', {
       enum: [
         'PREPARING',
         'READY_FOR_CUTOVER',
+        'APPROVED',
         'CUTOVER_IN_PROGRESS',
         'GRACE_PERIOD',
         'COMPLETED',
@@ -474,6 +478,7 @@ export const cutoverEvent = pgTable(
     }).notNull(),
     triggeredBy: text('triggered_by').notNull(),
     reason: text('reason'),
+    eventType: text('event_type', { enum: ['CUTOVER_INITIALIZED', 'STATE_TRANSITION'] }).notNull().default('STATE_TRANSITION'),
     metadata: jsonb('metadata').notNull().default({}),
   },
   (t) => [

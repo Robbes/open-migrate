@@ -118,9 +118,7 @@ ALTER TABLE payment_method ENABLE ROW LEVEL SECURITY;
 -- Application must SET app.current_tenant = 'uuid' before queries
 
 -- Generic policy for SELECT (allow if tenant_id matches current setting)
-CREATE POLICY tenant_isolation_select ON tenant
-  FOR SELECT
-  USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
+-- Note: No policy on 'tenant' table itself - it's the root entity
 
 CREATE POLICY tenant_isolation_select ON connection
   FOR SELECT
@@ -207,9 +205,7 @@ CREATE POLICY tenant_isolation_select ON payment_method
   USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
 
 -- INSERT policies (allow if tenant_id matches current setting)
-CREATE POLICY tenant_isolation_insert ON tenant
-  FOR INSERT
-  WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);
+-- Note: No INSERT policy on 'tenant' - tenants are provisioned via admin/API
 
 CREATE POLICY tenant_isolation_insert ON connection
   FOR INSERT
@@ -296,10 +292,7 @@ CREATE POLICY tenant_isolation_insert ON payment_method
   WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);
 
 -- UPDATE policies (allow if tenant_id matches current setting)
-CREATE POLICY tenant_isolation_update ON tenant
-  FOR UPDATE
-  USING (tenant_id = current_setting('app.current_tenant', true)::uuid)
-  WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);
+-- Note: No UPDATE policy on 'tenant' - managed via admin/API
 
 CREATE POLICY tenant_isolation_update ON connection
   FOR UPDATE
@@ -407,9 +400,7 @@ CREATE POLICY tenant_isolation_update ON payment_method
   WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);
 
 -- DELETE policies (allow if tenant_id matches current setting)
-CREATE POLICY tenant_isolation_delete ON tenant
-  FOR DELETE
-  USING (tenant_id = current_setting('app.current_tenant', true)::uuid);
+-- Note: No DELETE policy on 'tenant' - cascade deletes from child tables
 
 CREATE POLICY tenant_isolation_delete ON connection
   FOR DELETE

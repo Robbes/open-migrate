@@ -8,6 +8,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@openmig/core": "workspace:*",
     "@openmig/shared": "workspace:*",
     "drizzle-orm": "catalog:",
     "pg": "catalog:",

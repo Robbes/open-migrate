@@ -8,6 +8,7 @@ const __dirname = dirname(__filename);
 
 async function runMigration(postgresUrl: string): Promise<void> {
   const { Pool } = await import('pg');
+  const { readdirSync } = await import('node:fs');
 
   // Retry logic for connection stability
   const maxRetries = 5;
@@ -21,22 +22,43 @@ async function runMigration(postgresUrl: string): Promise<void> {
       try {
         await client.query(`SELECT pg_advisory_lock(727001)`);
         try {
+          // Check if full schema exists by looking for cutover_state table (created in 0004)
           const result = await client.query<{ exists: boolean }>(`SELECT EXISTS (
             SELECT 1 FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_name = 'tenant'
+            WHERE table_schema = 'public' AND table_name = 'cutover_state'
           ) as exists`);
 
           if (result.rows[0].exists) {
-            console.log('[Migration] Schema already exists, skipping.');
+            console.log('[Migration] Full schema already exists, skipping.');
             return;
           }
 
-          const migrationPath = join(__dirname, 'packages/ledger/migrations/0001_init.sql');
-          const migrationSql = readFileSync(migrationPath, 'utf-8');
+          // Drop all tables if partial schema exists (for clean test runs)
+          const tablesResult = await client.query<{ tablename: string }>(`
+            SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+          `);
+          
+          if (tablesResult.rows.length > 0) {
+            console.log('[Migration] Partial schema detected, dropping all tables for clean state...');
+            const tableNames = tablesResult.rows.map((r: { tablename: string }) => r.tablename).join(', ');
+            console.log(`[Migration] Dropping tables: ${tableNames}`);
+            await client.query(`DROP TABLE IF EXISTS ${tablesResult.rows.map((r: { tablename: string }) => `"${r.tablename}"`).join(', ')} CASCADE`);
+          }
 
-          console.log('[Migration] Running ledger schema migration...');
-          await client.query(migrationSql);
-          console.log('[Migration] Schema migration complete.');
+          // Run all migrations in order
+          const migrationsDir = join(__dirname, 'packages/ledger/migrations');
+          const migrationFiles = readdirSync(migrationsDir)
+            .filter(f => f.endsWith('.sql'))
+            .sort();
+
+          console.log('[Migration] Running ledger schema migrations...');
+          for (const migrationFile of migrationFiles) {
+            const migrationPath = join(migrationsDir, migrationFile);
+            const migrationSql = readFileSync(migrationPath, 'utf-8');
+            console.log(`[Migration] Running ${migrationFile}...`);
+            await client.query(migrationSql);
+          }
+          console.log('[Migration] All schema migrations complete.');
           return; // Success
         } finally {
           await client.query(`SELECT pg_advisory_unlock(727001)`);
