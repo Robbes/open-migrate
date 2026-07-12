@@ -90,14 +90,15 @@ export default async function () {
   // Detect which test project is running via environment variable
   // CI workflows should set SKIP_STALWART=true for unit tests
   const skipStalwart = process.env.SKIP_STALWART === 'true';
-  const skipNextcloud = process.env.SKIP_NEXTCLOUD === 'true';
+  // Skip Nextcloud by default unless explicitly configured - DAV tests will skip themselves if not available
+  const skipNextcloud = process.env.SKIP_NEXTCLOUD === 'true' || !process.env.NEXTCLOUD_WEBDAV_URL;
   
   if (skipStalwart) {
     console.log('[Vitest Global Setup] Skipping Stalwart (unit test mode via SKIP_STALWART).');
   }
   
   if (skipNextcloud) {
-    console.log('[Vitest Global Setup] Skipping Nextcloud (via SKIP_NEXTCLOUD).');
+    console.log('[Vitest Global Setup] Skipping Nextcloud (via SKIP_NEXTCLOUD or NEXTCLOUD_WEBDAV_URL not set).');
   }
   
   // Skip Stalwart for unit tests - they don't need it and it requires stalwart-cli

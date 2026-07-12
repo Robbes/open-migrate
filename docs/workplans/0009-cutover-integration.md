@@ -1,15 +1,15 @@
 # Workplan 0009 — Cutover made real: verification gate, DNS, rollback — integrated & tested
 
-## Status — 2026-07-09 (update this block at the end of every session)
+## Status — 2026-07-12 (update this block at the end of every session)
 
 | Task | Status | Evidence |
 |---|---|---|
-| T1 verification engine on real ledger/targets | ⬜ Pending | — |
-| T2 cutover state machine persisted + driven by worker | ⬜ Pending | — |
-| T3 DNS: verify-only resolver checks + guided runbook | ⬜ Pending | — |
-| T4 DNS provider adapter (one real provider) | ⬜ Pending | — |
-| T5 rollback path integration test | ⬜ Pending | — |
-| T6 cutover runbook + user comms templates | ⬜ Pending | — |
+| T1 verification engine on real ledger/targets | ✅ Done | PR #31 merged (56f4a50); commits: 7d15237 (verification logic + RLS), 60a9337 (force RLS + verification fix), 321b2f0 (verification + state machine), 04ba8ab (LedgerVerificationReader interface), eopba8ab (discrepancy detection), c340a65 (ledger queries), 6d9ecd4 (persistence to ledger); integration test: `packages/core/src/verification.integration.test.ts` |
+| T2 cutover state machine persisted + driven by worker | ✅ Done | PR #31 merged (56f4a50); commits: ffde0c9, 8672893, 37f500c (state machine fixes), 96c6249 (state-machine tests), 34dbb0a (complete cutover), 765abc7 (foundation), 35956b0 (integration tests Steps 8-10); persistence via `packages/ledger/src/cutover-store.ts`; CLI via `apps/worker/src/cli/cutover-commands.ts` |
+| T3 DNS: verify-only resolver checks + guided runbook | ⚠️ Partial | `packages/core/src/dns-verify-only.ts` implements verifyMX/SPF/DKIM/DMARC/autodiscover + checkPropagation; wired into cutover CLI (line 245 of cutover-commands.ts); **ISSUE**: uses Node built-in `dns` module (system resolver), NOT public DoH resolvers (1.1.1.1/8.8.8.8/9.9.9.9) as required by PropagationChecker split principle; no dedicated tests for verify-only functions (dns-manager.unit.test.ts uses mock provider only) |
+| T4 DNS provider adapter (one real provider) | ⚠️ Implemented without approval | `packages/core/src/dns-provider-desec.ts` implements deSEC adapter (expects `DESEC_TOKEN` env); **NOT wired** into production (commented out in `run-cutover.ts:128`, `run-rollback.ts:77`); per ADR-0002/review finding C2, first provider choice is owner decision — this was implemented unilaterally |
+| T5 rollback path integration test | ✅ Done | PR #31 merged (56f4a50); commit 35956b0 "Add cutover integration tests (Steps 8-10)"; `packages/core/src/rollback.integration.test.ts` tests gate-fail and grace-window rollback paths |
+| T6 cutover runbook + user comms templates | ✅ Done | PR #31 merged (56f4a50); commit c96ae51 "Add cutover runbook and communication templates (Steps 11-12)"; `docs/cutover-runbook.md` (7138 bytes) contains runbook + comms templates |
 
 > Read `AGENTS.md`, the arch doc (§11 shadow & cutover, §20 verification & rollback) and
 > workplan 0004 first. **Depends on:** 0007 (verification should count all domains, but a
