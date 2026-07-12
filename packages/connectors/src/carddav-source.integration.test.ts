@@ -2,11 +2,11 @@
 // Integration tests for CardDAV source connector against a real Stalwart CardDAV server.
 // Uses Testcontainers for containerized Stalwart instance.
 //
-// IMPORTANT: Stalwart v0.16.10 does NOT support CalDAV/CardDAV protocols.
-// These tests are skipped because Stalwart only supports JMAP and IMAP.
-// For CardDAV testing, use a DAV-capable server (e.g., Nextcloud, Xandikos).
+// Stalwart v0.16+ supports CalDAV/CardDAV/WebDAV on its HTTP port (same as JMAP).
+// Tests use RFC 6764 well-known discovery for proper endpoint resolution.
+// 
 //
-// TEST SCENARIOS (when run against a DAV-capable server):
+// TEST SCENARIOS:
 // - listFolders() discovers seeded address books
 // - listSince() returns seeded contacts with correct vCard payload
 // - Cursor round-trip (second call returns only changes)
@@ -18,7 +18,7 @@ import type { CardDAVSourceConfig } from './carddav-source.types';
 import type { RawContact as _RawContact } from '@openmig/shared';
 
 // Stalwart CardDAV configuration from Testcontainers
-const STALWART_CALENDAR_URL = process.env.STALWART_JMAP_URL;
+const STALWART_HTTP_URL = process.env.STALWART_JMAP_URL?.replace(/\/jmap$/, "") || "";
 const CARDDAV_USERNAME = process.env.STALWART_JMAP_USERNAME || 'source@dev.local';
 const CARDDAV_PASSWORD = process.env.STALWART_JMAP_PASSWORD || 'source_password';
 
@@ -26,32 +26,34 @@ const CARDDAV_PASSWORD = process.env.STALWART_JMAP_PASSWORD || 'source_password'
 let carddavSupported = false;
 let skipReason = 'Stalwart CardDAV URL not configured';
 
-if (STALWART_CALENDAR_URL) {
+if (STALWART_HTTP_URL) {
   try {
     // Check if Stalwart supports CardDAV by probing the well-known URI
-    const response = await fetch(`${STALWART_CALENDAR_URL.replace(/\/$/, '')}/.well-known/carddav`, {
+    const response = await fetch(`${STALWART_HTTP_URL.replace(/\/$/, '')}/.well-known/carddav`, {
       method: 'GET',
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${CARDDAV_USERNAME}:${CARDDAV_PASSWORD}`).toString('base64')}`,
+      },
       signal: AbortSignal.timeout(5000),
     });
     
     // Check content-type to detect HTML responses (Stalwart portal)
-    const contentType = response.headers.get('content-type') || '';
+    const _contentType = response.headers.get('content-type') || '';
     
     // Stalwart v0.16.10 does not support DAV - returns HTML for all DAV endpoints
-    const isHtml = contentType.includes('text/html') || contentType.includes('application/xhtml+xml');
 
-    if (response.status === 404 || isHtml) {
-      skipReason = 'Stalwart v0.16.10 does not support CardDAV protocol (only JMAP/IMAP)';
-    } else if ((response.status === 401 || response.status === 200) && (contentType.includes('xml') || contentType.includes('calendar'))) {
-      // 401 means the endpoint exists but requires auth - DAV might be supported
-      // 200 means the endpoint is accessible - DAV is supported
+    if (response.status === 401 || response.status === 200 || response.status === 204 || response.status === 301 || response.status === 302 || response.status === 307 || response.status === 308) {
       carddavSupported = true;
+    } else if (response.status === 404) {
+      skipReason = 'Stalwart .well-known/carddav not found - DAV may not be enabled';
+    } else {
+      skipReason = `Unexpected response: ${response.status}`;
     }
   } catch (err) {
     skipReason = `Could not probe Stalwart CardDAV: ${err instanceof Error ? err.message : String(err)}`;
   }
 } else {
-  skipReason = 'Stalwart CardDAV URL not configured (STALWART_CALENDAR_URL not set)';
+  skipReason = 'Stalwart CardDAV URL not configured (STALWART_HTTP_URL not set)';
 }
 
 // Skip all tests if CardDAV is not supported
@@ -71,7 +73,7 @@ const TEST_CONTACT_UID_3 = 'contact-charlie@dev.local';
 async function waitForCarddav(maxRetries = 30, delayMs = 2000): Promise<void> {
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const response = await fetch(`${STALWART_CALENDAR_URL}/.well-known/carddav`, {
+      const response = await fetch(`${STALWART_HTTP_URL}/.well-known/carddav`, {
         method: 'GET',
       });
       if (response.status === 200 || response.status === 401 || response.status === 404) {
@@ -91,7 +93,7 @@ async function waitForCarddav(maxRetries = 30, delayMs = 2000): Promise<void> {
  * Uses RFC 6764 discovery to get the correct addressbook-home-set URL.
  */
 async function seedContacts(carddavSource: CarddavSource): Promise<void> {
-  const carddavUrl = STALWART_CALENDAR_URL!.replace(/\/$/, '');
+  const carddavUrl = STALWART_HTTP_URL!.replace(/\/$/, '');
   
   // Trigger discovery to get the addressbook-home-set
   const folders = await carddavSource.listFolders();
@@ -259,7 +261,7 @@ async function cleanAddressBook(carddavSource?: CarddavSource): Promise<void> {
   }
   
   // Fallback to environment variable if not discovered
-  const carddavUrl = STALWART_CALENDAR_URL || 'http://localhost:8080';
+  const carddavUrl = STALWART_HTTP_URL || 'http://localhost:8080';
   
   try {
     // If we have the address book home-set, use it for cleanup
@@ -337,6 +339,8 @@ async function cleanAddressBook(carddavSource?: CarddavSource): Promise<void> {
 }
 
 // Conditionally skip the entire test suite
+// SKIPPED on cutover branch (issue #34): DAV discovery/href fixes live on main.
+// Will un-skip automatically when this branch rebases after PR merges.
 const testSuite = carddavSupported ? describe : describe.skip;
 
 testSuite('CardDAV Source Integration Tests', () => {
@@ -349,7 +353,7 @@ testSuite('CardDAV Source Integration Tests', () => {
     
     // Create the CardDAV source for seeding
     carddavSource = new CarddavSource({
-      url: `${STALWART_CALENDAR_URL}/`,
+      url: `${STALWART_HTTP_URL}/`,
       username: CARDDAV_USERNAME,
       passwordEnv: 'CARDDAV_PASSWORD',
     } as CardDAVSourceConfig);
@@ -390,7 +394,7 @@ testSuite('CardDAV Source Integration Tests', () => {
   describe('listSince()', () => {
     it('should return seeded contacts with correct vCard payload', async () => {
       carddavSource = new CarddavSource({
-        url: `${STALWART_CALENDAR_URL}/`,
+        url: `${STALWART_HTTP_URL}/`,
         username: CARDDAV_USERNAME,
         passwordEnv: 'CARDDAV_PASSWORD',
       } as CardDAVSourceConfig);
@@ -439,7 +443,7 @@ testSuite('CardDAV Source Integration Tests', () => {
 
     it('should support cursor round-trip (second call returns only changes)', async () => {
       carddavSource = new CarddavSource({
-        url: `${STALWART_CALENDAR_URL}/`,
+        url: `${STALWART_HTTP_URL}/`,
         username: CARDDAV_USERNAME,
         passwordEnv: 'CARDDAV_PASSWORD',
       } as CardDAVSourceConfig);
@@ -469,7 +473,7 @@ testSuite('CardDAV Source Integration Tests', () => {
   describe('Idempotency', () => {
     it('should be idempotent (run twice, second run creates 0 new items)', async () => {
       carddavSource = new CarddavSource({
-        url: `${STALWART_CALENDAR_URL}/`,
+        url: `${STALWART_HTTP_URL}/`,
         username: CARDDAV_USERNAME,
         passwordEnv: 'CARDDAV_PASSWORD',
       } as CardDAVSourceConfig);
@@ -498,7 +502,7 @@ testSuite('CardDAV Source Integration Tests', () => {
   describe('Contact parsing', () => {
     it('should correctly parse vCard contact properties', async () => {
       carddavSource = new CarddavSource({
-        url: `${STALWART_CALENDAR_URL}/`,
+        url: `${STALWART_HTTP_URL}/`,
         username: CARDDAV_USERNAME,
         passwordEnv: 'CARDDAV_PASSWORD',
       } as CardDAVSourceConfig);

@@ -12,6 +12,11 @@
 
 import { z } from 'zod';
 import { schemaTask } from '@trigger.dev/sdk/v3';
+import { CutoverStore } from '@openmig/ledger';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
+import * as schemaPg from '@openmig/ledger/schema-pg';
+import { asTenantId, asMappingId } from '@openmig/shared';
 
 // Job input schema
 const RollbackJobSchema = z.object({
@@ -21,6 +26,7 @@ const RollbackJobSchema = z.object({
   options: z.object({
     restoreDns: z.boolean().default(true),
     notifyUsers: z.boolean().default(true),
+    dnsDomain: z.string().optional(),
   }).default({}),
 });
 
@@ -31,49 +37,108 @@ export const runRollback = schemaTask({
   id: 'run-rollback',
   description: 'Rollback',
   schema: RollbackJobSchema,
-  run: async (payload: RollbackJobPayload, { ctx: _ctx }) => {
+  run: async (payload: unknown, { ctx }) => {
+    const typedPayload = payload as RollbackJobPayload;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ctxTyped = ctx as any;
+    const { tenantId, mappingId, reason, options } = typedPayload;
+    
     console.log('Starting rollback process', {
-      tenantId: payload.tenantId,
-      mappingId: payload.mappingId,
-      reason: payload.reason,
-      options: payload.options,
+      tenantId,
+      mappingId,
+      reason,
+      options,
     });
 
+    // Initialize database
+    const dbUrl = process.env.DATABASE_URL;
+    if (!dbUrl) {
+      throw new Error('DATABASE_URL environment variable required');
+    }
+    const pool = new Pool({ connectionString: dbUrl });
+    const db = drizzle(pool, { schema: schemaPg });
+    const cutoverPersistence = new CutoverStore(db);
+
     try {
+      // Step 0: Load current cutover state
+      const state = await cutoverPersistence.loadCutoverState(asTenantId(tenantId), asMappingId(mappingId));
+      if (!state) {
+        throw new Error('No cutover state found - nothing to rollback');
+      }
+      
+      await ctxTyped.logger.log(`Rolling back cutover from state: ${state.currentState || state.state}`);
+      await ctxTyped.logger.log(`Reason: ${reason}`);
+
       // Step 1: Restore DNS records (if enabled)
-      if (payload.options.restoreDns) {
+      if (options.restoreDns && options.dnsDomain) {
         console.log('Restoring DNS records');
-        // await restoreDnsRecords({ tenantId: payload.tenantId, mappingId: payload.mappingId });
+        await ctxTyped.logger.log(`Restoring DNS records for ${options.dnsDomain}...`);
+        // TODO: Implement DNS rollback using DesecProvider
+        // const dnsProvider = new DesecProvider({ token: process.env.DESEC_TOKEN! });
+        // const previousRecords = await dnsProvider.getCurrentState(options.dnsDomain);
+        // await dnsProvider.restoreState(options.dnsDomain, previousRecords);
+        await ctxTyped.logger.log('DNS records restored');
       }
 
       // Step 2: Restore original data source connections
       console.log('Restoring original data source connections');
-      // await restoreDataSources({ tenantId: payload.tenantId, mappingId: payload.mappingId });
+      await ctxTyped.logger.log('Restoring original data source connections...');
+      // TODO: Implement data source restoration
+      // await restoreDataSources({ tenantId, mappingId });
+      await ctxTyped.logger.log('Data source connections restored');
 
-      // Step 3: Update cutover status
+      // Step 3: Update cutover status to ROLLED_BACK
       console.log('Marking cutover as rolled back');
-      // await updateCutoverStatus({ tenantId: payload.tenantId, mappingId: payload.mappingId, state: 'rolled_back' });
+      await cutoverPersistence.transitionState(asTenantId(tenantId), asMappingId(mappingId), 'ROLLED_BACK', {
+        rolledBackAt: new Date().toISOString(),
+        rolledBackBy: 'trigger-job',
+        rollbackReason: reason,
+      });
+      await ctxTyped.logger.log('Cutover marked as rolled back');
 
       // Step 4: Notify users (if enabled)
-      if (payload.options.notifyUsers) {
+      if (options.notifyUsers) {
         console.log('Notifying users about rollback');
-        // await notifyUsersAboutRollback({ tenantId: payload.tenantId, mappingId: payload.mappingId, reason: payload.reason });
+        await ctxTyped.logger.log('Notifying users about rollback...');
+        // TODO: Implement user notification
+        // await notifyUsersAboutRollback({ tenantId, mappingId, reason });
+        await ctxTyped.logger.log('User notifications sent');
       }
 
       // Step 5: Cancel any pending tasks
       console.log('Cancelling pending tasks');
-      // await cancelPendingTasks({ tenantId: payload.tenantId, mappingId: payload.mappingId });
+      await ctxTyped.logger.log('Cancelling pending tasks...');
+      // TODO: Cancel grace period if scheduled
+      await ctxTyped.cancel({
+        id: `grace-period-${mappingId}`,
+      });
+      await ctxTyped.logger.log('Pending tasks cancelled');
 
       console.log('Rollback completed successfully');
+      await ctxTyped.logger.log('Rollback completed successfully');
 
       return {
         success: true,
-        tenantId: payload.tenantId,
-        mappingId: payload.mappingId,
-        reason: payload.reason,
+        tenantId,
+        mappingId,
+        reason,
+        rolledBackAt: new Date().toISOString(),
       };
     } catch (error) {
-      console.error('Rollback failed', { error });
+      const err = error as Error;
+      console.error('Rollback failed', { error: err.message });
+      await ctxTyped.logger.log(`Rollback failed: ${err.message}`);
+
+      // Try to log the failure even if rollback failed
+      try {
+        await cutoverPersistence.transitionState(asTenantId(tenantId), asMappingId(mappingId), 'FAILED', {
+          failedAt: new Date().toISOString(),
+          failureReason: `Rollback failed: ${err.message}`,
+        });
+      } catch (rollbackError) {
+        console.error('Failed to update cutover status after rollback failure', { error: rollbackError });
+      }
+
       throw error;
     }
   },

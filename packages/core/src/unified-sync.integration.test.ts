@@ -20,7 +20,8 @@ import { runUnifiedSync, type UnifiedSyncConfig } from './unified-sync';
 import { asTenantId, asMappingId } from '@openmig/shared';
 
 // Stalwart configuration from Testcontainers
-const STALWART_URL = process.env.STALWART_JMAP_URL;
+// Use base HTTP URL for DAV protocols (CalDAV/CardDAV/WebDAV share the same port as JMAP)
+const STALWART_HTTP_URL = process.env.STALWART_JMAP_URL?.replace(/\/jmap$/, "") || "";
 const STALWART_USERNAME = process.env.STALWART_JMAP_USERNAME || 'source@dev.local';
 const STALWART_PASSWORD = process.env.STALWART_JMAP_PASSWORD || 'source_password';
 
@@ -29,39 +30,45 @@ const NEXTCLOUD_WEBDAV_URL = process.env.NEXTCLOUD_WEBDAV_URL;
 const NEXTCLOUD_USERNAME = process.env.NEXTCLOUD_USERNAME || 'testadmin';
 const NEXTCLOUD_PASSWORD = process.env.NEXTCLOUD_PASSWORD || 'testadmin_password';
 
-// Probe Stalwart for CalDAV/CardDAV support (v0.16.10 only supports JMAP/IMAP)
+// Probe Stalwart for CalDAV/CardDAV support via RFC 6764 well-known discovery
 let caldavSupported = false;
 let carddavSupported = false;
 
-if (STALWART_URL) {
+if (STALWART_HTTP_URL) {
   try {
     // Check CalDAV support
-    const caldavResponse = await fetch(`${STALWART_URL.replace(/\/$/, '')}/.well-known/caldav`, {
+    const caldavResponse = await fetch(`${STALWART_HTTP_URL.replace(/\/$/, '')}/.well-known/caldav`, {
       method: 'GET',
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${STALWART_USERNAME}:${STALWART_PASSWORD}`).toString('base64')}`,
+      },
       signal: AbortSignal.timeout(5000),
     });
     const caldavContentType = caldavResponse.headers.get('content-type') || '';
-    const caldavIsHtml = caldavContentType.includes('text/html') || caldavContentType.includes('application/xhtml+xml');
+    const _caldavIsHtml = caldavContentType.includes('text/html') || caldavContentType.includes('application/xhtml+xml');
 
-    // Only consider DAV supported if response is XML/calendar (not HTML or JSON error)
-    if (caldavResponse.status === 404 || caldavIsHtml || (!caldavContentType.includes('xml') && !caldavContentType.includes('calendar'))) {
-      // DAV not supported
-    } else {
+    // 401 means the endpoint exists but requires auth - DAV is available
+    // 200/204 means the endpoint is accessible - DAV is supported
+    // 3xx means redirect (will be followed by the DAV client)
+    if (caldavResponse.status === 401 || caldavResponse.status === 200 || caldavResponse.status === 204 || caldavResponse.status === 301 || caldavResponse.status === 302 || caldavResponse.status === 307 || caldavResponse.status === 308) {
       caldavSupported = true;
     }
 
     // Check CardDAV support
-    const carddavResponse = await fetch(`${STALWART_URL.replace(/\/$/, '')}/.well-known/carddav`, {
+    const carddavResponse = await fetch(`${STALWART_HTTP_URL.replace(/\/$/, '')}/.well-known/carddav`, {
       method: 'GET',
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${STALWART_USERNAME}:${STALWART_PASSWORD}`).toString('base64')}`,
+      },
       signal: AbortSignal.timeout(5000),
     });
     const carddavContentType = carddavResponse.headers.get('content-type') || '';
-    const carddavIsHtml = carddavContentType.includes('text/html') || carddavContentType.includes('application/xhtml+xml');
+    const _carddavIsHtml = carddavContentType.includes('text/html') || carddavContentType.includes('application/xhtml+xml');
 
-    // Only consider DAV supported if response is XML/calendar (not HTML or JSON error)
-    if (carddavResponse.status === 404 || carddavIsHtml || (!carddavContentType.includes('xml') && !carddavContentType.includes('calendar'))) {
-      // DAV not supported
-    } else {
+    // 401 means the endpoint exists but requires auth - DAV is available
+    // 200/204 means the endpoint is accessible - DAV is supported
+    // 3xx means redirect (will be followed by the DAV client)
+    if (carddavResponse.status === 401 || carddavResponse.status === 200 || carddavResponse.status === 204 || carddavResponse.status === 301 || carddavResponse.status === 302 || carddavResponse.status === 307 || carddavResponse.status === 308) {
       carddavSupported = true;
     }
   } catch {
@@ -74,6 +81,8 @@ if (!caldavSupported || !carddavSupported) {
 }
 
 // Conditionally skip the entire test suite if CalDAV/CardDAV not supported
+// SKIPPED on cutover branch (issue #34): DAV discovery/href fixes live on main.
+// Will un-skip automatically when this branch rebases after PR merges.
 const describeSuite = (!caldavSupported || !carddavSupported) ? describe.skip : describe;
 // Database connection
 const PG_CONNECTION_STRING = process.env.TEST_DATABASE_URL;
@@ -95,7 +104,7 @@ async function waitForServers(maxRetries = 30, delayMs = 2000): Promise<void> {
   // Wait for Stalwart
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const response = await fetch(`${STALWART_URL}/.well-known/jmap`);
+      const response = await fetch(`${STALWART_HTTP_URL}/.well-known/jmap`);
       if (response.ok) {
         console.log('[WaitForServers] Stalwart is ready');
         break;
@@ -166,7 +175,7 @@ async function cleanDatabaseState(): Promise<void> {
  * Seed test data for CalDAV.
  */
 async function seedCalDAVData(): Promise<void> {
-  const caldavUrl = STALWART_URL!.replace(/\/$/, '');
+  const caldavUrl = STALWART_HTTP_URL!.replace(/\/$/, '');
   const calendarPath = `/calendars/${STALWART_USERNAME.split('@')[0]}/unified-test-calendar/`;
   const fullCalendarUrl = `${caldavUrl}${calendarPath}`;
 
@@ -228,7 +237,7 @@ END:VCALENDAR`;
  * Seed test data for CardDAV.
  */
 async function seedCardDAVData(): Promise<void> {
-  const carddavUrl = STALWART_URL!.replace(/\/$/, '');
+  const carddavUrl = STALWART_HTTP_URL!.replace(/\/$/, '');
   const addressbookPath = `/addressbooks/${STALWART_USERNAME.split('@')[0]}/unified-test-addressbook/`;
   const fullAddressbookUrl = `${carddavUrl}${addressbookPath}`;
 
@@ -340,7 +349,7 @@ async function seedWebDAVData(): Promise<void> {
 async function cleanTestData(): Promise<void> {
   // Clean CalDAV
   try {
-    const caldavUrl = STALWART_URL!.replace(/\/$/, '');
+    const caldavUrl = STALWART_HTTP_URL!.replace(/\/$/, '');
     const calendarPath = `/calendars/${STALWART_USERNAME.split('@')[0]}/unified-test-calendar/`;
     await fetch(`${caldavUrl}${calendarPath}`, {
       method: 'DELETE',
@@ -354,7 +363,7 @@ async function cleanTestData(): Promise<void> {
 
   // Clean CardDAV
   try {
-    const carddavUrl = STALWART_URL!.replace(/\/$/, '');
+    const carddavUrl = STALWART_HTTP_URL!.replace(/\/$/, '');
     const addressbookPath = `/addressbooks/${STALWART_USERNAME.split('@')[0]}/unified-test-addressbook/`;
     await fetch(`${carddavUrl}${addressbookPath}`, {
       method: 'DELETE',
@@ -416,14 +425,14 @@ describeSuite('Unified Sync Integration Tests', () => {
     it('should sync all domains idempotently (first run creates all, second run creates 0)', async () => {
       // Set up source connectors
       const _caldavSource = new CalDAVSource({
-        url: `${STALWART_URL}/`,
+        url: `${STALWART_HTTP_URL}/`,
         username: STALWART_USERNAME,
         passwordEnv: 'STALWART_JMAP_PASSWORD',
       });
       process.env.STALWART_JMAP_PASSWORD = STALWART_PASSWORD;
 
       const _carddavSource = new CarddavSource({
-        url: `${STALWART_URL}/`,
+        url: `${STALWART_HTTP_URL}/`,
         username: STALWART_USERNAME,
         passwordEnv: 'STALWART_JMAP_PASSWORD',
       });
@@ -446,22 +455,22 @@ describeSuite('Unified Sync Integration Tests', () => {
         contacts: { enabled: true },
         files: { enabled: !!webdavSource },
         caldavSource: {
-          url: `${STALWART_URL}/`,
+          url: `${STALWART_HTTP_URL}/`,
           username: STALWART_USERNAME,
           passwordEnv: 'STALWART_JMAP_PASSWORD',
         },
         caldavTarget: {
-          url: `${STALWART_URL}/`,
+          url: `${STALWART_HTTP_URL}/`,
           username: STALWART_USERNAME,
           password: STALWART_PASSWORD,
         },
         carddavSource: {
-          url: `${STALWART_URL}/`,
+          url: `${STALWART_HTTP_URL}/`,
           username: STALWART_USERNAME,
           passwordEnv: 'STALWART_JMAP_PASSWORD',
         },
         carddavTarget: {
-          url: `${STALWART_URL}/`,
+          url: `${STALWART_HTTP_URL}/`,
           username: STALWART_USERNAME,
           password: STALWART_PASSWORD,
         },
@@ -516,14 +525,14 @@ describeSuite('Unified Sync Integration Tests', () => {
     it('should handle delta correctly (adding one item creates exactly 1)', async () => {
       // Set up sources for delta test
       const _caldavSource = new CalDAVSource({
-        url: `${STALWART_URL}/`,
+        url: `${STALWART_HTTP_URL}/`,
         username: STALWART_USERNAME,
         passwordEnv: 'STALWART_JMAP_PASSWORD',
       });
       process.env.STALWART_JMAP_PASSWORD = STALWART_PASSWORD;
 
       const _carddavSource = new CarddavSource({
-        url: `${STALWART_URL}/`,
+        url: `${STALWART_HTTP_URL}/`,
         username: STALWART_USERNAME,
         passwordEnv: 'STALWART_JMAP_PASSWORD',
       });
@@ -546,22 +555,22 @@ describeSuite('Unified Sync Integration Tests', () => {
         contacts: { enabled: true },
         files: { enabled: !!webdavSource },
         caldavSource: {
-          url: `${STALWART_URL}/`,
+          url: `${STALWART_HTTP_URL}/`,
           username: STALWART_USERNAME,
           passwordEnv: 'STALWART_JMAP_PASSWORD',
         },
         caldavTarget: {
-          url: `${STALWART_URL}/`,
+          url: `${STALWART_HTTP_URL}/`,
           username: STALWART_USERNAME,
           password: STALWART_PASSWORD,
         },
         carddavSource: {
-          url: `${STALWART_URL}/`,
+          url: `${STALWART_HTTP_URL}/`,
           username: STALWART_USERNAME,
           passwordEnv: 'STALWART_JMAP_PASSWORD',
         },
         carddavTarget: {
-          url: `${STALWART_URL}/`,
+          url: `${STALWART_HTTP_URL}/`,
           username: STALWART_USERNAME,
           password: STALWART_PASSWORD,
         },
@@ -592,7 +601,7 @@ describeSuite('Unified Sync Integration Tests', () => {
       expect(initialCalendarCount).toBeGreaterThan(0);
 
       // Add one more calendar event
-      const caldavUrl = STALWART_URL!.replace(/\/$/, '');
+      const caldavUrl = STALWART_HTTP_URL!.replace(/\/$/, '');
       const calendarPath = `/calendars/${STALWART_USERNAME.split('@')[0]}/unified-test-calendar/`;
       const icalendar = `BEGIN:VCALENDAR
 VERSION:2.0
@@ -640,14 +649,14 @@ END:VCALENDAR`;
     it('should handle reindex correctly (wipe ledger → re-run creates 0)', async () => {
       // Set up sources for reindex test
       const _caldavSource = new CalDAVSource({
-        url: `${STALWART_URL}/`,
+        url: `${STALWART_HTTP_URL}/`,
         username: STALWART_USERNAME,
         passwordEnv: 'STALWART_JMAP_PASSWORD',
       });
       process.env.STALWART_JMAP_PASSWORD = STALWART_PASSWORD;
 
       const _carddavSource = new CarddavSource({
-        url: `${STALWART_URL}/`,
+        url: `${STALWART_HTTP_URL}/`,
         username: STALWART_USERNAME,
         passwordEnv: 'STALWART_JMAP_PASSWORD',
       });
@@ -669,22 +678,22 @@ END:VCALENDAR`;
         contacts: { enabled: true },
         files: { enabled: !!webdavSource },
         caldavSource: {
-          url: `${STALWART_URL}/`,
+          url: `${STALWART_HTTP_URL}/`,
           username: STALWART_USERNAME,
           passwordEnv: 'STALWART_JMAP_PASSWORD',
         },
         caldavTarget: {
-          url: `${STALWART_URL}/`,
+          url: `${STALWART_HTTP_URL}/`,
           username: STALWART_USERNAME,
           password: STALWART_PASSWORD,
         },
         carddavSource: {
-          url: `${STALWART_URL}/`,
+          url: `${STALWART_HTTP_URL}/`,
           username: STALWART_USERNAME,
           passwordEnv: 'STALWART_JMAP_PASSWORD',
         },
         carddavTarget: {
-          url: `${STALWART_URL}/`,
+          url: `${STALWART_HTTP_URL}/`,
           username: STALWART_USERNAME,
           password: STALWART_PASSWORD,
         },
@@ -739,14 +748,14 @@ END:VCALENDAR`;
     it('should aggregate stats across all domains correctly', async () => {
       // Set up sources for multi-domain test
       const _caldavSource = new CalDAVSource({
-        url: `${STALWART_URL}/`,
+        url: `${STALWART_HTTP_URL}/`,
         username: STALWART_USERNAME,
         passwordEnv: 'STALWART_JMAP_PASSWORD',
       });
       process.env.STALWART_JMAP_PASSWORD = STALWART_PASSWORD;
 
       const _carddavSource = new CarddavSource({
-        url: `${STALWART_URL}/`,
+        url: `${STALWART_HTTP_URL}/`,
         username: STALWART_USERNAME,
         passwordEnv: 'STALWART_JMAP_PASSWORD',
       });
@@ -768,22 +777,22 @@ END:VCALENDAR`;
         contacts: { enabled: true },
         files: { enabled: !!webdavSource },
         caldavSource: {
-          url: `${STALWART_URL}/`,
+          url: `${STALWART_HTTP_URL}/`,
           username: STALWART_USERNAME,
           passwordEnv: 'STALWART_JMAP_PASSWORD',
         },
         caldavTarget: {
-          url: `${STALWART_URL}/`,
+          url: `${STALWART_HTTP_URL}/`,
           username: STALWART_USERNAME,
           password: STALWART_PASSWORD,
         },
         carddavSource: {
-          url: `${STALWART_URL}/`,
+          url: `${STALWART_HTTP_URL}/`,
           username: STALWART_USERNAME,
           passwordEnv: 'STALWART_JMAP_PASSWORD',
         },
         carddavTarget: {
-          url: `${STALWART_URL}/`,
+          url: `${STALWART_HTTP_URL}/`,
           username: STALWART_USERNAME,
           password: STALWART_PASSWORD,
         },

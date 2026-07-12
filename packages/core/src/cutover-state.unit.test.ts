@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { asTenantId, asMappingId } from '@openmig/shared';
+import type { CutoverState } from './cutover-state';
 import {
   isValidTransition,
   getStatePhase,
@@ -24,9 +25,12 @@ describe('Cutover State Machine', () => {
     });
 
     it('should allow valid transitions from READY_FOR_CUTOVER', () => {
-      expect(isValidTransition('READY_FOR_CUTOVER', 'CUTOVER_IN_PROGRESS')).toBe(true);
+      // APPROVED is the required gate before cutover can begin
+      expect(isValidTransition('READY_FOR_CUTOVER', 'APPROVED')).toBe(true);
       expect(isValidTransition('READY_FOR_CUTOVER', 'PREPARING')).toBe(true);
       expect(isValidTransition('READY_FOR_CUTOVER', 'FAILED')).toBe(true);
+      // Direct transition to CUTOVER_IN_PROGRESS is BLOCKED (approval gate enforced)
+      expect(isValidTransition('READY_FOR_CUTOVER', 'CUTOVER_IN_PROGRESS')).toBe(false);
     });
 
     it('should allow valid transitions from CUTOVER_IN_PROGRESS', () => {
@@ -141,7 +145,9 @@ describe('Cutover State Machine', () => {
     it('should set rollback available for CUTOVER_IN_PROGRESS', () => {
       const initial = createInitialCutoverStatus(asTenantId('tenant-1'), asMappingId('mapping-1'));
       const ready = updateCutoverStatus(initial, 'READY_FOR_CUTOVER', 'Ready for cutover');
-      const inProgress = updateCutoverStatus(ready, 'CUTOVER_IN_PROGRESS', 'Starting cutover');
+      // Must go through APPROVED gate before cutover can start
+      const approved = updateCutoverStatus(ready, 'APPROVED', 'Approved by operator');
+      const inProgress = updateCutoverStatus(approved, 'CUTOVER_IN_PROGRESS', 'Starting cutover');
       const updated = updateCutoverStatus(inProgress, 'GRACE_PERIOD', 'Cutover complete');
       
       expect(updated.rollbackAvailable).toBe(true);
@@ -158,7 +164,9 @@ describe('Cutover State Machine', () => {
     it('should set completedAt for COMPLETED state', () => {
       const initial = createInitialCutoverStatus(asTenantId('tenant-1'), asMappingId('mapping-1'));
       const ready = updateCutoverStatus(initial, 'READY_FOR_CUTOVER', 'Ready');
-      const inProgress = updateCutoverStatus(ready, 'CUTOVER_IN_PROGRESS', 'Starting');
+      // Must go through APPROVED gate
+      const approved = updateCutoverStatus(ready, 'APPROVED', 'Approved by operator');
+      const inProgress = updateCutoverStatus(approved, 'CUTOVER_IN_PROGRESS', 'Starting');
       const grace = updateCutoverStatus(inProgress, 'GRACE_PERIOD', 'Grace started');
       const completed = updateCutoverStatus(grace, 'COMPLETED', 'Done');
       
@@ -204,12 +212,24 @@ describe('Cutover State Machine', () => {
 });
 
 describe('Cutover State Transitions', () => {
-  it('should support complete cutover flow', () => {
-    // Valid flow
+  it('should support complete cutover flow with approval gate', () => {
+    // Valid flow must include APPROVED state as a gate before cutover begins
     expect(isValidTransition('PREPARING', 'READY_FOR_CUTOVER')).toBe(true);
-    expect(isValidTransition('READY_FOR_CUTOVER', 'CUTOVER_IN_PROGRESS')).toBe(true);
+    expect(isValidTransition('READY_FOR_CUTOVER', 'APPROVED')).toBe(true);
+    expect(isValidTransition('APPROVED', 'CUTOVER_IN_PROGRESS')).toBe(true);
     expect(isValidTransition('CUTOVER_IN_PROGRESS', 'GRACE_PERIOD')).toBe(true);
     expect(isValidTransition('GRACE_PERIOD', 'COMPLETED')).toBe(true);
+  });
+
+  it('should enforce the approval gate (READY_FOR_CUTOVER → CUTOVER_IN_PROGRESS is blocked)', () => {
+    // The approval gate must be enforced - direct transition is NOT allowed
+    expect(isValidTransition('READY_FOR_CUTOVER', 'CUTOVER_IN_PROGRESS')).toBe(false);
+  });
+
+  it('should allow APPROVED state transitions', () => {
+    expect(isValidTransition('APPROVED', 'CUTOVER_IN_PROGRESS')).toBe(true);
+    expect(isValidTransition('APPROVED', 'READY_FOR_CUTOVER')).toBe(true);   // approval can be revoked
+    expect(isValidTransition('APPROVED', 'FAILED')).toBe(true);
   });
 
   it('should support rollback flow', () => {
@@ -225,5 +245,39 @@ describe('Cutover State Transitions', () => {
   it('should support failure and retry', () => {
     expect(isValidTransition('PREPARING', 'FAILED')).toBe(true);
     expect(isValidTransition('FAILED', 'PREPARING')).toBe(true);
+  });
+});
+
+describe('VALID_TRANSITIONS Table Snapshot', () => {
+  it('This snapshot is the approved state-machine spec. Any change requires owner sign-off in the PR description — update this test only together with that sign-off.', async () => {
+    // Import the internal VALID_TRANSITIONS table for snapshot testing
+    // We use a dynamic import to access the module-level constant
+    const expected = {
+      PREPARING: ['READY_FOR_CUTOVER', 'FAILED'],
+      READY_FOR_CUTOVER: ['PREPARING', 'APPROVED', 'FAILED'],
+      APPROVED: ['READY_FOR_CUTOVER', 'CUTOVER_IN_PROGRESS', 'ROLLED_BACK', 'FAILED'],
+      CUTOVER_IN_PROGRESS: ['GRACE_PERIOD', 'ROLLED_BACK', 'FAILED'],
+      GRACE_PERIOD: ['COMPLETED', 'ROLLED_BACK', 'FAILED'],
+      COMPLETED: [], // Terminal state - no transitions allowed after completion
+      ROLLED_BACK: [], // Terminal state
+      FAILED: ['PREPARING', 'ROLLED_BACK'],
+    } as const;
+
+    // Access the internal VALID_TRANSITIONS via module inspection
+    // This enforces that any table modification fails CI unless the test is explicitly updated
+    await import('./cutover-state');
+    
+    // Build actual from the exported isValidTransition function by testing all combinations
+    const states: CutoverState[] = [
+      'PREPARING', 'READY_FOR_CUTOVER', 'APPROVED', 'CUTOVER_IN_PROGRESS',
+      'GRACE_PERIOD', 'COMPLETED', 'ROLLED_BACK', 'FAILED'
+    ];
+    
+    const actual: Record<CutoverState, CutoverState[]> = {} as Record<CutoverState, CutoverState[]>;
+    for (const from of states) {
+      actual[from] = states.filter(to => isValidTransition(from, to));
+    }
+
+    expect(actual).toEqual(expected);
   });
 });

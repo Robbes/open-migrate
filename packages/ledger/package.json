@@ -8,13 +8,13 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@openmig/core": "workspace:*",
     "@openmig/shared": "workspace:*",
-    "better-sqlite3": "^12.11.1",
-    "pg": "^8.22.0",
-    "postgres": "^3.4.9"
+    "drizzle-orm": "catalog:",
+    "pg": "catalog:",
+    "@types/pg": "catalog:"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/imap-simple": "^4.2.10",
     "imap-simple": "^5.1.0"
   }

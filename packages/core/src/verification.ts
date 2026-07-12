@@ -100,12 +100,12 @@ export interface VerificationDeps {
   getSourceSamples(
     dataType: 'mail' | 'calendar' | 'contacts' | 'files',
     count: number
-  ): Promise<Array<{ id: string; content: Uint8Array | string }>>;
+  ): Promise<Array<{ id: string; naturalKeyHash: string; content: Uint8Array | string }>>;
   
   getTargetSamples(
     dataType: 'mail' | 'calendar' | 'contacts' | 'files',
     count: number
-  ): Promise<Array<{ id: string; content: Uint8Array | string }>>;
+  ): Promise<Array<{ id: string; naturalKeyHash: string; content: Uint8Array | string }>>;
   
   // Discrepancy detection
   findMissingOnTarget(
@@ -205,25 +205,38 @@ async function verifyDataType(
   const missingOnTarget = await deps.findMissingOnTarget(dataType);
   const extraOnTarget = await deps.findExtraOnTarget(dataType);
   
-  // Calculate matched count
-  const matchedCount = Math.min(sourceCount, targetCount) - missingOnTarget.length - extraOnTarget.length;
+  // Calculate matched count: items that exist on both source and target
+  // matchedCount = source items - items missing on target
+  const matchedCount = sourceCount - missingOnTarget.length;
   
   // Sample-based checksum verification
   const sampleSize = calculateSampleSize(sourceCount, config);
   const sourceSamples = await deps.getSourceSamples(dataType, sampleSize);
   const targetSamples = await deps.getTargetSamples(dataType, sampleSize);
   
+  // Create a map of target samples by naturalKeyHash for efficient lookup
+  const targetSamplesByHash = new Map<string, { id: string; content: Uint8Array | string }>();
+  for (const sample of targetSamples) {
+    targetSamplesByHash.set(sample.naturalKeyHash, { id: sample.id, content: sample.content });
+  }
+  
   let checksumMatches = 0;
   let checksumMismatches = 0;
   
-  // Compare samples
-  for (let i = 0; i < Math.min(sourceSamples.length, targetSamples.length); i++) {
-    const sourceContent = sourceSamples[i]?.content;
-    const targetContent = targetSamples[i]?.content;
+  // Compare samples by matching naturalKeyHash
+  for (const sourceSample of sourceSamples) {
+    const targetSample = targetSamplesByHash.get(sourceSample.naturalKeyHash);
     
-    if (sourceContent && targetContent && compareContent(sourceContent, targetContent)) {
-      checksumMatches++;
+    if (targetSample) {
+      // Found matching natural key hash, compare content
+      if (compareContent(sourceSample.content, targetSample.content)) {
+        checksumMatches++;
+      } else {
+        checksumMismatches++;
+      }
     } else {
+      // Natural key hash not found on target - this is a missing item
+      // Count as a mismatch for checksum purposes
       checksumMismatches++;
     }
   }
@@ -244,7 +257,8 @@ async function verifyDataType(
     checksumMatchPercentage,
     missingOnTarget.length,
     extraOnTarget.length,
-    config
+    config,
+    sourceCount
   );
   
   // Generate issues
@@ -334,28 +348,29 @@ function determineVerificationStatus(
   checksumMatchPercentage: number,
   missingCount: number,
   extraCount: number,
-  config: VerificationConfig
+  config: VerificationConfig,
+  sourceCount: number
 ): 'PASS' | 'WARN' | 'FAIL' {
   const totalDiscrepancies = missingCount + extraCount;
-  const discrepancyPercentage = totalDiscrepancies / (matchPercentage > 0 ? 1 : 1);
+  // When sourceCount is 0, discrepancyPercentage is 0 (no items to compare)
+  const discrepancyPercentage = sourceCount > 0 ? totalDiscrepancies / sourceCount : 0;
   
+  // FAIL if any critical thresholds are not met
   if (
-    matchPercentage >= config.requiredMatchPercentage &&
-    checksumMatchPercentage >= config.requiredMatchPercentage &&
-    discrepancyPercentage <= config.maxDiscrepancyPercentage
+    matchPercentage < config.requiredMatchPercentage ||
+    checksumMatchPercentage < config.requiredMatchPercentage ||
+    discrepancyPercentage > config.maxDiscrepancyPercentage
   ) {
-    return 'PASS';
+    return 'FAIL';
   }
   
-  if (
-    matchPercentage >= 0.95 &&
-    checksumMatchPercentage >= 0.95 &&
-    discrepancyPercentage <= config.maxDiscrepancyPercentage * 2
-  ) {
+  // WARN if there are any discrepancies (even within tolerance)
+  if (totalDiscrepancies > 0) {
     return 'WARN';
   }
   
-  return 'FAIL';
+  // PASS only when no discrepancies and all thresholds met
+  return 'PASS';
 }
 
 /**

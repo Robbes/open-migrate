@@ -33,6 +33,35 @@ export default tseslint.config(
     },
   },
   {
+    // Enforce architecture rule: core must not import drizzle-orm or @openmig/ledger directly
+    // Only @openmig/shared is allowed from @openmig/* in packages/core/src (excluding tests)
+    files: ['packages/core/src/**/*.ts'],
+    ignores: ['packages/core/src/**/*.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'drizzle-orm',
+              message: 'Drizzle ORM imports are not allowed in core. Use the @openmig/shared ports instead.',
+            },
+            {
+              name: '@openmig/ledger',
+              message: 'Direct ledger imports are not allowed in core. Use the @openmig/shared ports instead.',
+            },
+          ],
+          patterns: [
+            {
+              group: ['@openmig/ledger/*'],
+              message: 'Direct ledger imports are not allowed in core. Use the @openmig/shared ports instead.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['**/*.test.ts', '**/*.spec.ts'],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',

@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@types/imap-simple": "^4.2.10",
+    "drizzle-orm": "catalog:",
     "imap-simple": "^5.1.0"
   }
 }

@@ -7,50 +7,75 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 async function runMigration(postgresUrl: string): Promise<void> {
-  const { default: postgres } = await import('postgres');
-  
+  const { Pool } = await import('pg');
+  const { readdirSync } = await import('node:fs');
+
   // Retry logic for connection stability
   const maxRetries = 5;
   const baseDelay = 200; // ms
-  
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    const sql = postgres(postgresUrl);
-    
+    const pool = new Pool({ connectionString: postgresUrl });
+
     try {
-      await sql`SELECT pg_advisory_lock(727001)`;
+      const client = await pool.connect();
       try {
-        const exists = await sql`SELECT EXISTS (
-          SELECT 1 FROM information_schema.tables
-          WHERE table_schema = 'public' AND table_name = 'tenant'
-        )`;
+        await client.query(`SELECT pg_advisory_lock(727001)`);
+        try {
+          // Check if full schema exists by looking for cutover_state table (created in 0004)
+          const result = await client.query<{ exists: boolean }>(`SELECT EXISTS (
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = 'cutover_state'
+          ) as exists`);
 
-        if (exists[0].exists) {
-          console.log('[Migration] Schema already exists, skipping.');
-          return;
+          if (result.rows[0].exists) {
+            console.log('[Migration] Full schema already exists, skipping.');
+            return;
+          }
+
+          // Drop all tables if partial schema exists (for clean test runs)
+          const tablesResult = await client.query<{ tablename: string }>(`
+            SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+          `);
+          
+          if (tablesResult.rows.length > 0) {
+            console.log('[Migration] Partial schema detected, dropping all tables for clean state...');
+            const tableNames = tablesResult.rows.map((r: { tablename: string }) => r.tablename).join(', ');
+            console.log(`[Migration] Dropping tables: ${tableNames}`);
+            await client.query(`DROP TABLE IF EXISTS ${tablesResult.rows.map((r: { tablename: string }) => `"${r.tablename}"`).join(', ')} CASCADE`);
+          }
+
+          // Run all migrations in order
+          const migrationsDir = join(__dirname, 'packages/ledger/migrations');
+          const migrationFiles = readdirSync(migrationsDir)
+            .filter(f => f.endsWith('.sql'))
+            .sort();
+
+          console.log('[Migration] Running ledger schema migrations...');
+          for (const migrationFile of migrationFiles) {
+            const migrationPath = join(migrationsDir, migrationFile);
+            const migrationSql = readFileSync(migrationPath, 'utf-8');
+            console.log(`[Migration] Running ${migrationFile}...`);
+            await client.query(migrationSql);
+          }
+          console.log('[Migration] All schema migrations complete.');
+          return; // Success
+        } finally {
+          await client.query(`SELECT pg_advisory_unlock(727001)`);
+          client.release();
         }
-
-        const migrationPath = join(__dirname, 'packages/ledger/migrations/0001_init.sql');
-        const migrationSql = readFileSync(migrationPath, 'utf-8');
-
-        console.log('[Migration] Running ledger schema migration...');
-        await sql.unsafe(migrationSql);
-        console.log('[Migration] Schema migration complete.');
-        return; // Success
       } finally {
-        await sql`SELECT pg_advisory_unlock(727001)`;
+        await pool.end();
       }
     } catch (err) {
       const error = err as Error;
       console.warn(`[Migration] Attempt ${attempt}/${maxRetries} failed: ${error.message}`);
-      
+
       if (attempt === maxRetries) {
-        await sql.end();
         // Re-throw the original error to preserve the cause chain
         throw error;
       }
-      
-      await sql.end();
-      
+
       // Exponential backoff
       const delay = baseDelay * Math.pow(2, attempt - 1);
       console.log(`[Migration] Retrying in ${delay}ms...`);
