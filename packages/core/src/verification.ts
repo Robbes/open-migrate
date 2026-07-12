@@ -170,15 +170,6 @@ export async function runVerification(
     0
   );
   
-  // Log per-domain verification results for debugging
-  console.log('=== Verification Results ===');
-  console.log(`mail: { sourceCount: ${mail.sourceCount}, targetCount: ${mail.targetCount}, status: ${mail.status} }`);
-  console.log(`calendar: { sourceCount: ${calendar.sourceCount}, targetCount: ${calendar.targetCount}, status: ${calendar.status} }`);
-  console.log(`contacts: { sourceCount: ${contacts.sourceCount}, targetCount: ${contacts.targetCount}, status: ${contacts.status} }`);
-  console.log(`files: { sourceCount: ${files.sourceCount}, targetCount: ${files.targetCount}, status: ${files.status} }`);
-  console.log(`overallStatus: ${overallStatus}`);
-  console.log('============================');
-  
   return {
     tenantId,
     mappingId,
@@ -214,8 +205,9 @@ async function verifyDataType(
   const missingOnTarget = await deps.findMissingOnTarget(dataType);
   const extraOnTarget = await deps.findExtraOnTarget(dataType);
   
-  // Calculate matched count
-  const matchedCount = Math.min(sourceCount, targetCount) - missingOnTarget.length - extraOnTarget.length;
+  // Calculate matched count: items that exist on both source and target
+  // matchedCount = source items - items missing on target
+  const matchedCount = sourceCount - missingOnTarget.length;
   
   // Sample-based checksum verification
   const sampleSize = calculateSampleSize(sourceCount, config);
@@ -363,23 +355,22 @@ function determineVerificationStatus(
   // When sourceCount is 0, discrepancyPercentage is 0 (no items to compare)
   const discrepancyPercentage = sourceCount > 0 ? totalDiscrepancies / sourceCount : 0;
   
+  // FAIL if any critical thresholds are not met
   if (
-    matchPercentage >= config.requiredMatchPercentage &&
-    checksumMatchPercentage >= config.requiredMatchPercentage &&
-    discrepancyPercentage <= config.maxDiscrepancyPercentage
+    matchPercentage < config.requiredMatchPercentage ||
+    checksumMatchPercentage < config.requiredMatchPercentage ||
+    discrepancyPercentage > config.maxDiscrepancyPercentage
   ) {
-    return 'PASS';
+    return 'FAIL';
   }
   
-  if (
-    matchPercentage >= 0.95 &&
-    checksumMatchPercentage >= 0.95 &&
-    discrepancyPercentage <= config.maxDiscrepancyPercentage * 2
-  ) {
+  // WARN if there are any discrepancies (even within tolerance)
+  if (totalDiscrepancies > 0) {
     return 'WARN';
   }
   
-  return 'FAIL';
+  // PASS only when no discrepancies and all thresholds met
+  return 'PASS';
 }
 
 /**

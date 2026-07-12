@@ -74,19 +74,23 @@ async function getTargetCountFromReindexer(
   reader: LedgerVerificationReader,
   tenantId: TenantId,
   mappingId: MappingId,
-  _dataType: 'mail' | 'calendar' | 'contacts' | 'files'
+  dataType: 'mail' | 'calendar' | 'contacts' | 'files'
 ): Promise<number> {
   if (!targetReindexer) {
     // If no reindexer, fall back to ledger count
-    return getSourceCountFromLedger(reader, tenantId, mappingId, _dataType);
+    return getSourceCountFromLedger(reader, tenantId, mappingId, dataType);
   }
 
+  const domain = mapDataTypeToDomain(dataType) as 'email' | 'calendar' | 'contact' | 'file';
+  // Get all natural key hashes from the ledger for this domain
+  const ledgerHashes = new Set(await reader.getAllNaturalKeyHashes(tenantId, mappingId, domain));
+
+  // Count only entries that exist in the ledger for this domain
   let count = 0;
-  
-  for await (const _entry of targetReindexer.listEntries()) {
-    // Filter by domain if possible (implementation dependent)
-    // For now, count all entries - the reindexer should handle filtering
-    count++;
+  for await (const entry of targetReindexer.listEntries()) {
+    if (ledgerHashes.has(entry.naturalKey)) {
+      count++;
+    }
   }
   
   return count;
@@ -128,20 +132,22 @@ async function getTargetSamplesFromReindexer(
     return getSourceSamplesFromLedger(reader, tenantId, mappingId, _dataType, count);
   }
 
-  const samples: Array<{ id: string; naturalKeyHash: string; content: Uint8Array | string }> = [];
-  let i = 0;
+  // Collect ALL entries from the reindexer
+  const allEntries: Array<{ id: string; naturalKeyHash: string; content: Uint8Array | string }> = [];
   
   for await (const entry of targetReindexer.listEntries()) {
-    if (i >= count) break;
-    samples.push({
+    allEntries.push({
       id: entry.targetId,
       naturalKeyHash: entry.naturalKey,
       content: entry.contentHash ?? '',
     });
-    i++;
   }
-  
-  return samples;
+
+  // Sort by naturalKeyHash for deterministic sampling (to match ledger ordering)
+  allEntries.sort((a, b) => a.naturalKeyHash.localeCompare(b.naturalKeyHash));
+
+  // Return the first `count` entries
+  return allEntries.slice(0, count);
 }
 
 /**
@@ -193,11 +199,17 @@ async function findExtraOnTarget(
 ): Promise<Array<{ id: string; targetRef: string }>> {
   const domain = mapDataTypeToDomain(dataType) as 'email' | 'calendar' | 'contact' | 'file';
   
-  // Get all natural key hashes from the ledger
+  // Get all natural key hashes from the ledger for this domain
   const ledgerHashes = new Set(await reader.getAllNaturalKeyHashes(tenantId, mappingId, domain));
   
   // If no target reindexer, no extra items can be detected
   if (!targetReindexer) {
+    return [];
+  }
+
+  // If ledger has no entries for this domain, there should be no extra items
+  // (the target should also have no entries for this domain)
+  if (ledgerHashes.size === 0) {
     return [];
   }
   

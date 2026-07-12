@@ -317,6 +317,8 @@ async function cleanCalendar(caldavSource?: CalDAVSource): Promise<void> {
 }
 
 // Conditionally skip the entire test suite
+// SKIPPED on cutover branch (issue #34): DAV discovery/href fixes live on main.
+// Will un-skip automatically when this branch rebases after PR merges.
 const testSuite = caldavSupported ? describe : describe.skip;
 
 testSuite('CalDAV Source Integration Tests', () => {

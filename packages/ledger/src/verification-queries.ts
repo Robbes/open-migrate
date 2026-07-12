@@ -100,7 +100,7 @@ export function createLedgerVerificationReader(config: LedgerVerificationReaderC
             eq(schema.item.domain, domain)
           )
         )
-        .orderBy(sql`random()`)
+        .orderBy(schema.item.naturalKeyHash)
         .limit(count);
       
       return result.map((row) => ({

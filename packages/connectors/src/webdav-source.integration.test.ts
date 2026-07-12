@@ -214,6 +214,8 @@ if (skipReason) {
   console.warn(`[WebDAV Tests] Skipping: ${skipReason}`);
 }
 
+// SKIPPED on cutover branch (issue #34): DAV discovery/href fixes live on main.
+// Will un-skip automatically when this branch rebases after PR merges.
 describe.skip('WebDAV Source Integration Tests', () => {
   let webdavSource: WebdavFileSource;
 

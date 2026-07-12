@@ -81,6 +81,8 @@ if (!caldavSupported || !carddavSupported) {
 }
 
 // Conditionally skip the entire test suite if CalDAV/CardDAV not supported
+// SKIPPED on cutover branch (issue #34): DAV discovery/href fixes live on main.
+// Will un-skip automatically when this branch rebases after PR merges.
 const describeSuite = (!caldavSupported || !carddavSupported) ? describe.skip : describe;
 // Database connection
 const PG_CONNECTION_STRING = process.env.TEST_DATABASE_URL;
