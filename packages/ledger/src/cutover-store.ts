@@ -8,7 +8,7 @@
  */
 
 import type { TenantId, MappingId } from '@openmig/shared';
-import { eq, and, desc, asc } from 'drizzle-orm';
+import { eq, and, asc } from 'drizzle-orm';
 import * as schema from './schema-pg';
 
 // Generic database type that works with both pg and postgres-js drivers
