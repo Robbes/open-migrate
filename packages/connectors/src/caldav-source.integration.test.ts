@@ -22,13 +22,11 @@ const STALWART_HTTP_URL = process.env.STALWART_JMAP_URL?.replace(/\/jmap$/, '') 
 const CALDAV_USERNAME = process.env.STALWART_JMAP_USERNAME || 'source@dev.local';
 const CALDAV_PASSWORD = process.env.STALWART_JMAP_PASSWORD || 'source_password';
 
-// Check if Stalwart CalDAV is available via RFC 6764 discovery
-let caldavSupported = false;
-let skipReason = 'Stalwart CalDAV URL not configured';
+// Probed for CalDAV support (diagnostic logging only, tests run unconditionally)
+
 
 if (STALWART_HTTP_URL) {
   try {
-    // Check if Stalwart supports CalDAV by probing the well-known URI with auth
     const response = await fetch(`${STALWART_HTTP_URL.replace(/\/$/, '')}/.well-known/caldav`, {
       method: 'GET',
       headers: {
@@ -36,32 +34,16 @@ if (STALWART_HTTP_URL) {
       },
       signal: AbortSignal.timeout(5000),
     });
-    
     const contentType = response.headers.get('content-type') || '';
     console.log(`[Probe] .well-known/caldav: status=${response.status}, content-type=${contentType}`);
-
-    // 401 means the endpoint exists but requires auth - DAV is available
-    // 200/204 means the endpoint is accessible - DAV is supported
-    // 3xx means redirect (will be followed by the CalDAV client)
-    if (response.status === 401 || response.status === 200 || response.status === 204 || response.status === 301 || response.status === 302 || response.status === 307 || response.status === 308) {
-      caldavSupported = true;
-    } else if (response.status === 404) {
-      skipReason = 'Stalwart .well-known/caldav not found - DAV may not be enabled';
-    } else {
-      skipReason = `Unexpected response: ${response.status}`;
-    }
-  } catch (err) {
-    skipReason = `Could not probe Stalwart CalDAV: ${err instanceof Error ? err.message : String(err)}`;
+  } catch (_err) {
+    console.log(`[Probe] .well-known/caldav: Probe failed`);
   }
 } else {
-  skipReason = 'Stalwart HTTP URL not configured (STALWART_JMAP_URL not set)';
+  console.log(`[Probe] STALWART_JMAP_URL not configured`);
 }
 
-// Skip all tests if CalDAV is not supported
-if (!caldavSupported) {
-  console.warn(`[CalDAV Tests] Skipping: ${skipReason}`);
-}
-
+// Run all tests unconditionally - fail honestly if Stalwart DAV not configured
 // Fixed UUIDs for testing
 const TEST_CALENDAR_NAME = 'Test Calendar';
 const TEST_EVENT_UID_1 = 'test-event-1@dev.local';
@@ -316,10 +298,9 @@ async function cleanCalendar(caldavSource?: CalDAVSource): Promise<void> {
   }
 }
 
-// Conditionally skip the entire test suite
-// SKIPPED on cutover branch (issue #34): DAV discovery/href fixes live on main.
-// Will un-skip automatically when this branch rebases after PR merges.
-const testSuite = caldavSupported ? describe : describe.skip;
+// Run tests unconditionally - if DAV is not configured, tests will fail with real errors
+// rather than being skipped. This provides honest feedback about DAV support status.
+const testSuite = describe;
 
 testSuite('CalDAV Source Integration Tests', () => {
   let caldavSource: CalDAVSource;

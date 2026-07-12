@@ -22,13 +22,10 @@ const STALWART_HTTP_URL = process.env.STALWART_JMAP_URL?.replace(/\/jmap$/, "") 
 const CARDDAV_USERNAME = process.env.STALWART_JMAP_USERNAME || 'source@dev.local';
 const CARDDAV_PASSWORD = process.env.STALWART_JMAP_PASSWORD || 'source_password';
 
-// Check if Stalwart supports CardDAV (it doesn't in v0.16.10)
-let carddavSupported = false;
-let skipReason = 'Stalwart CardDAV URL not configured';
+// Probed for CardDAV support (diagnostic logging only, tests run unconditionally)
 
 if (STALWART_HTTP_URL) {
   try {
-    // Check if Stalwart supports CardDAV by probing the well-known URI
     const response = await fetch(`${STALWART_HTTP_URL.replace(/\/$/, '')}/.well-known/carddav`, {
       method: 'GET',
       headers: {
@@ -36,31 +33,16 @@ if (STALWART_HTTP_URL) {
       },
       signal: AbortSignal.timeout(5000),
     });
-    
-    // Check content-type to detect HTML responses (Stalwart portal)
-    const _contentType = response.headers.get('content-type') || '';
-    
-    // Stalwart v0.16.10 does not support DAV - returns HTML for all DAV endpoints
-
-    if (response.status === 401 || response.status === 200 || response.status === 204 || response.status === 301 || response.status === 302 || response.status === 307 || response.status === 308) {
-      carddavSupported = true;
-    } else if (response.status === 404) {
-      skipReason = 'Stalwart .well-known/carddav not found - DAV may not be enabled';
-    } else {
-      skipReason = `Unexpected response: ${response.status}`;
-    }
-  } catch (err) {
-    skipReason = `Could not probe Stalwart CardDAV: ${err instanceof Error ? err.message : String(err)}`;
+    const contentType = response.headers.get('content-type') || '';
+    console.log(`[Probe] .well-known/carddav: status=${response.status}, content-type=${contentType}`);
+  } catch (_err) {
+    console.log(`[Probe] .well-known/carddav: Probe failed`);
   }
 } else {
-  skipReason = 'Stalwart CardDAV URL not configured (STALWART_HTTP_URL not set)';
+  console.log(`[Probe] STALWART_JMAP_URL not configured`);
 }
 
-// Skip all tests if CardDAV is not supported
-if (!carddavSupported) {
-  console.warn(`[CardDAV Tests] Skipping: ${skipReason}`);
-}
-
+// Run all tests unconditionally - fail honestly if Stalwart DAV not configured
 // Fixed test contact UIDs
 const TEST_ADDRESSBOOK_NAME = 'Test Address Book';
 const TEST_CONTACT_UID_1 = 'contact-alice@dev.local';
@@ -341,7 +323,7 @@ async function cleanAddressBook(carddavSource?: CarddavSource): Promise<void> {
 // Conditionally skip the entire test suite
 // SKIPPED on cutover branch (issue #34): DAV discovery/href fixes live on main.
 // Will un-skip automatically when this branch rebases after PR merges.
-const testSuite = carddavSupported ? describe : describe.skip;
+const testSuite = describe;
 
 testSuite('CardDAV Source Integration Tests', () => {
   let carddavSource: CarddavSource;

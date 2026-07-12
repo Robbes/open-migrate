@@ -30,60 +30,8 @@ const NEXTCLOUD_WEBDAV_URL = process.env.NEXTCLOUD_WEBDAV_URL;
 const NEXTCLOUD_USERNAME = process.env.NEXTCLOUD_USERNAME || 'testadmin';
 const NEXTCLOUD_PASSWORD = process.env.NEXTCLOUD_PASSWORD || 'testadmin_password';
 
-// Probe Stalwart for CalDAV/CardDAV support via RFC 6764 well-known discovery
-let caldavSupported = false;
-let carddavSupported = false;
-
-if (STALWART_HTTP_URL) {
-  try {
-    // Check CalDAV support
-    const caldavResponse = await fetch(`${STALWART_HTTP_URL.replace(/\/$/, '')}/.well-known/caldav`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${STALWART_USERNAME}:${STALWART_PASSWORD}`).toString('base64')}`,
-      },
-      signal: AbortSignal.timeout(5000),
-    });
-    const caldavContentType = caldavResponse.headers.get('content-type') || '';
-    const _caldavIsHtml = caldavContentType.includes('text/html') || caldavContentType.includes('application/xhtml+xml');
-
-    // 401 means the endpoint exists but requires auth - DAV is available
-    // 200/204 means the endpoint is accessible - DAV is supported
-    // 3xx means redirect (will be followed by the DAV client)
-    if (caldavResponse.status === 401 || caldavResponse.status === 200 || caldavResponse.status === 204 || caldavResponse.status === 301 || caldavResponse.status === 302 || caldavResponse.status === 307 || caldavResponse.status === 308) {
-      caldavSupported = true;
-    }
-
-    // Check CardDAV support
-    const carddavResponse = await fetch(`${STALWART_HTTP_URL.replace(/\/$/, '')}/.well-known/carddav`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${STALWART_USERNAME}:${STALWART_PASSWORD}`).toString('base64')}`,
-      },
-      signal: AbortSignal.timeout(5000),
-    });
-    const carddavContentType = carddavResponse.headers.get('content-type') || '';
-    const _carddavIsHtml = carddavContentType.includes('text/html') || carddavContentType.includes('application/xhtml+xml');
-
-    // 401 means the endpoint exists but requires auth - DAV is available
-    // 200/204 means the endpoint is accessible - DAV is supported
-    // 3xx means redirect (will be followed by the DAV client)
-    if (carddavResponse.status === 401 || carddavResponse.status === 200 || carddavResponse.status === 204 || carddavResponse.status === 301 || carddavResponse.status === 302 || carddavResponse.status === 307 || carddavResponse.status === 308) {
-      carddavSupported = true;
-    }
-  } catch {
-    // DAV not supported
-  }
-}
-
-if (!caldavSupported || !carddavSupported) {
-  console.warn(`[Unified Sync Tests] Skipping: Stalwart v0.16.10 does not support CalDAV/CardDAV protocols (only JMAP/IMAP)`);
-}
-
-// Conditionally skip the entire test suite if CalDAV/CardDAV not supported
-// SKIPPED on cutover branch (issue #34): DAV discovery/href fixes live on main.
-// Will un-skip automatically when this branch rebases after PR merges.
-const describeSuite = (!caldavSupported || !carddavSupported) ? describe.skip : describe;
+// Run all DAV tests unconditionally - fail honestly if Stalwart DAV not configured
+const describeSuite = describe;
 // Database connection
 const PG_CONNECTION_STRING = process.env.TEST_DATABASE_URL;
 if (!PG_CONNECTION_STRING) {

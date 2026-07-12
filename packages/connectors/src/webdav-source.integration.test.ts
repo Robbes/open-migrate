@@ -215,7 +215,7 @@ if (skipReason) {
 }
 
 // Conditional skip based on Nextcloud availability
-const testSuite = skipReason ? describe.skip : describe;
+const testSuite = describe;
 
 testSuite('WebDAV Source Integration Tests', () => {
   let webdavSource: WebdavFileSource;
