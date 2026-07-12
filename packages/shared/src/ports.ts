@@ -406,4 +406,11 @@ export interface LedgerVerificationReader {
     domain: 'email' | 'calendar' | 'contact' | 'file',
     count: number
   ): Promise<Array<{ id: string; contentHash: string }>>;
+  
+  /** Get all natural key hashes for a given domain (used for discrepancy detection) */
+  getAllNaturalKeyHashes(
+    tenantId: TenantId,
+    mappingId: MappingId,
+    domain: 'email' | 'calendar' | 'contact' | 'file'
+  ): Promise<string[]>;
 }
