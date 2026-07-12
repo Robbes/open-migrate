@@ -170,6 +170,15 @@ export async function runVerification(
     0
   );
   
+  // Log per-domain verification results for debugging
+  console.log('=== Verification Results ===');
+  console.log(`mail: { sourceCount: ${mail.sourceCount}, targetCount: ${mail.targetCount}, status: ${mail.status} }`);
+  console.log(`calendar: { sourceCount: ${calendar.sourceCount}, targetCount: ${calendar.targetCount}, status: ${calendar.status} }`);
+  console.log(`contacts: { sourceCount: ${contacts.sourceCount}, targetCount: ${contacts.targetCount}, status: ${contacts.status} }`);
+  console.log(`files: { sourceCount: ${files.sourceCount}, targetCount: ${files.targetCount}, status: ${files.status} }`);
+  console.log(`overallStatus: ${overallStatus}`);
+  console.log('============================');
+  
   return {
     tenantId,
     mappingId,
@@ -256,7 +265,8 @@ async function verifyDataType(
     checksumMatchPercentage,
     missingOnTarget.length,
     extraOnTarget.length,
-    config
+    config,
+    sourceCount
   );
   
   // Generate issues
@@ -346,10 +356,12 @@ function determineVerificationStatus(
   checksumMatchPercentage: number,
   missingCount: number,
   extraCount: number,
-  config: VerificationConfig
+  config: VerificationConfig,
+  sourceCount: number
 ): 'PASS' | 'WARN' | 'FAIL' {
   const totalDiscrepancies = missingCount + extraCount;
-  const discrepancyPercentage = totalDiscrepancies / (matchPercentage > 0 ? 1 : 1);
+  // When sourceCount is 0, discrepancyPercentage is 0 (no items to compare)
+  const discrepancyPercentage = sourceCount > 0 ? totalDiscrepancies / sourceCount : 0;
   
   if (
     matchPercentage >= config.requiredMatchPercentage &&
