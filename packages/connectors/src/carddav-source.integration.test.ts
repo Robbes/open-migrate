@@ -38,14 +38,16 @@ async function waitForCarddav(maxRetries = 60, delayMs = 3000): Promise<void> {
   }
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const response = await fetch(`${NEXTCLOUD_WEBDAV_URL.replace(/\/$/, '')}/.well-known/carddav`, {
-        method: 'GET',
+      // Check the WebDAV root endpoint with PROPFIND
+      const response = await fetch(`${NEXTCLOUD_WEBDAV_URL.replace(/\/$/, '')}/`, {
+        method: 'PROPFIND',
         headers: {
           Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
+          Depth: '0',
         },
       });
-      // Nextcloud returns 302 redirect for well-known, then 207 for PROPFIND
-      if (response.status === 200 || response.status === 302 || response.status === 207) {
+      // Nextcloud returns 207 (Multi-Status) for successful PROPFIND
+      if (response.status === 207) {
         return;
       }
     } catch {
@@ -79,7 +81,62 @@ async function seedContacts(carddavSource: CarddavSource): Promise<void> {
     }
     
     // Create the test address book using MKCOL
+    console.log(`[Seed CardDAV] addressBookHomeSet: ${addressBookHomeSet}`);
     addressBookUrl = new URL(`test-addressbook/`, addressBookHomeSet).toString();
+    console.log(`[Seed CardDAV] addressBookUrl: ${addressBookUrl}`);
+    
+    // First, let's try to list the collections under the addressBookHomeSet to see if it exists
+    let addressBookHomeSetExists = false;
+    try {
+      const listResponse = await fetch(addressBookHomeSet, {
+        method: 'PROPFIND',
+        headers: {
+          'Depth': '0',
+          Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
+        },
+      });
+      console.log(`[Seed CardDAV] PROPFIND on addressBookHomeSet: ${listResponse.status}`);
+      if (listResponse.status === 207) {
+        addressBookHomeSetExists = true;
+        console.log('[Seed CardDAV] addressBookHomeSet exists');
+      } else {
+        const body = await listResponse.text();
+        console.log(`[Seed CardDAV] PROPFIND response: ${body.substring(0, 500)}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`[Seed CardDAV] PROPFIND error: ${msg}`);
+    }
+    
+    // If the addressBookHomeSet doesn't exist, create it
+    if (!addressBookHomeSetExists) {
+      console.log('[Seed CardDAV] Creating addressBookHomeSet...');
+      const mkcolXml = `<?xml version="1.0" encoding="utf-8"?>
+        <D:mkcol xmlns:D="DAV:">
+          <D:set>
+            <D:prop>
+              <D:displayname>${NEXTCLOUD_USERNAME}</D:displayname>
+            </D:prop>
+          </D:set>
+        </D:mkcol>`;
+      
+      const createHomeSetResponse = await fetch(addressBookHomeSet, {
+        method: 'MKCOL',
+        headers: {
+          'Content-Type': 'application/xml',
+          Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
+        },
+        body: mkcolXml,
+      });
+      
+      console.log(`[Seed CardDAV] MKCOL on addressBookHomeSet: ${createHomeSetResponse.status}`);
+      if (createHomeSetResponse.status === 201 || createHomeSetResponse.status === 409) {
+        console.log('[Seed CardDAV] Created addressBookHomeSet');
+      } else {
+        const body = await createHomeSetResponse.text();
+        console.log(`[Seed CardDAV] MKCOL response: ${body.substring(0, 500)}`);
+      }
+    }
     
     const mkcolXml = `<?xml version="1.0" encoding="utf-8"?>
       <D:mkcol xmlns:D="DAV:" xmlns:CA="urn:ietf:params:xml:ns:carddav">
@@ -94,28 +151,48 @@ async function seedContacts(carddavSource: CarddavSource): Promise<void> {
         </D:set>
       </D:mkcol>`;
 
-    try {
-      const response = await fetch(addressBookUrl, {
-        method: 'MKCOL',
-        headers: {
-          'Content-Type': 'application/xml',
-          Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
-        },
-        body: mkcolXml,
-      });
+    // Retry MKCOL up to 3 times with delays
+    let addressBookCreated = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const response = await fetch(addressBookUrl, {
+          method: 'MKCOL',
+          headers: {
+            'Content-Type': 'application/xml',
+            Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
+          },
+          body: mkcolXml,
+        });
 
-      if (response.status === 201 || response.status === 409) {
-        console.log('[Seed] Created test address book');
-        // Refresh folders to get the new address book
-        const refreshedFolders = await carddavSource.listFolders();
-        testAddressBook = refreshedFolders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
-      } else {
-        const body = await response.text();
-        console.log(`[Seed] Address book creation response: ${response.status} - ${body.substring(0, 200)}`);
+        if (response.status === 201) {
+          console.log('[Seed] Created test address book');
+          addressBookCreated = true;
+          break;
+        } else if (response.status === 409) {
+          // Address book already exists, that's fine
+          console.log('[Seed] Address book already exists');
+          addressBookCreated = true;
+          break;
+        } else {
+          const body = await response.text();
+          console.log(`[Seed] Address book creation attempt ${attempt + 1} response: ${response.status} - ${body.substring(0, 200)}`);
+          if (attempt < 2) {
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+          }
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.log(`[Seed] Address book creation attempt ${attempt + 1} error: ${msg}`);
+        if (attempt < 2) {
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+        }
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.log(`[Seed] Address book creation error: ${msg}`);
+    }
+
+    if (addressBookCreated) {
+      // Refresh folders to get the new address book
+      const refreshedFolders = await carddavSource.listFolders();
+      testAddressBook = refreshedFolders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
     }
   } else {
     // Use the discovered address book path
