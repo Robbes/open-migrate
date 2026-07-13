@@ -93,16 +93,17 @@ export class WebdavFileSource implements FileSource {
       
       const file = this.parseFileFromEntry(entry);
       if (file) {
-        // Check if file has changed since cursor
+        // Check if file has changed since cursor (using basename as key)
         if (this.hasChanged(file, cursor)) {
           hasChanges = true;
-          // Fetch file content for files
-          const content = await this.fetchFileContent(file.path);
+          // Fetch file content using the full href (sourceRef)
+          const sourceRef = this.resolveHref(entry.href);
+          const content = await this.fetchFileContent(sourceRef);
           
           items.push({
             item: {
               ...file,
-              sourceRef: file.path,
+              sourceRef: entry.href,  // Keep full href for fetching
             },
             content,
           });
@@ -121,11 +122,9 @@ export class WebdavFileSource implements FileSource {
 
   /**
    * Fetch the raw content of a file.
+   * The url should already be fully resolved (caller handles resolution).
    */
-  async fetchFileContent(filePath: string): Promise<Uint8Array> {
-    // filePath comes from server-returned href, use resolveHref (Rule A)
-    const url = this.resolveHref(filePath);
-    
+  async fetchFileContent(url: string): Promise<Uint8Array> {
     const response = await this.httpClient.request({
       method: 'GET',
       url,
@@ -348,9 +347,14 @@ export class WebdavFileSource implements FileSource {
       return null;
     }
     
+    // Extract basename from href, percent-decoded
+    // The href may be root-relative (e.g., /remote.php/dav/files/user/file.txt)
+    const pathFromHref = new URL(entry.href, 'http://localhost').pathname;
+    const name = decodeURIComponent(pathFromHref.split('/').filter(Boolean).pop() ?? '');
+    
     const file: WebDAVFile = {
-      path: entry.href,
-      name: this.extractNameFromPath(entry.href),
+      path: name,  // Use basename as the path (natural key)
+      name: name,
       isDirectory: false,
       size: entry.getContentLength || 0,
       modifiedAt: entry.getLastModified ? this.parseDate(entry.getLastModified) : new Date().toISOString(),
@@ -360,6 +364,7 @@ export class WebdavFileSource implements FileSource {
     
     if (entry.getContentType) {
       file.mimeType = entry.getContentType;
+      file.contentType = entry.getContentType;
     }
     
     if (entry.getCreated) {

@@ -153,16 +153,22 @@ export class CalDAVSource implements CalendarSource {
       },
     });
 
-    if (response.status !== 207) {
-      throw new Error(`PROPFIND failed with status ${response.status}: ${response.body}`);
-    }
-
-    const homeSet = this.parseCalendarHomeSetResponse(response.body);
-    if (homeSet) {
-      this.calendarHomeSet = homeSet;
+    if (response.status === 207) {
+      const homeSet = this.parseCalendarHomeSetResponse(response.body);
+      if (homeSet) {
+        this.calendarHomeSet = homeSet;
+      } else {
+        // Final fallback: construct calendar home set from username
+        // Nextcloud typically serves calendars at /remote.php/dav/calendars/{username}/
+        const baseUrl = this.config.url.replace(/\/$/, '');
+        this.calendarHomeSet = `${baseUrl}/calendars/${this.config.username}/`;
+      }
+    } else if (response.status === 404) {
+      // PROPFIND failed with 404, use fallback constructed URL
+      const baseUrl = this.config.url.replace(/\/$/, '');
+      this.calendarHomeSet = `${baseUrl}/calendars/${this.config.username}/`;
     } else {
-      // Final fallback: use the configured URL as the home set
-      this.calendarHomeSet = this.config.calendarHomeSet || this.normalizePath(this.config.url);
+      throw new Error(`PROPFIND failed with status ${response.status}: ${response.body}`);
     }
   }
 
@@ -222,6 +228,11 @@ export class CalDAVSource implements CalendarSource {
         Authorization: this.getAuthorizationHeader(),
       },
     });
+
+    // Handle 404 - collection doesn't exist yet, return empty list
+    if (response.status === 404) {
+      return [];
+    }
 
     if (response.status !== 207) {
       throw new Error(`PROPFIND failed with status ${response.status}: ${response.body}`);
@@ -320,40 +331,40 @@ export class CalDAVSource implements CalendarSource {
   private parseCollectionsResponse(body: string, _homeSet: string): CalendarFolder[] {
     const folders: CalendarFolder[] = [];
 
-    // Extract all response elements
-    const responseRegex = /<D:response[^>]*>([\s\S]*?)<\/D:response>/gi;
+    // Extract all response elements - namespace-agnostic regex
+    const responseRegex = /<[A-Za-z]+:response[^>]*>([\s\S]*?)<\/[A-Za-z]+:response>/gi;
     let match: RegExpExecArray | null;
 
     while ((match = responseRegex.exec(body)) !== null) {
       const responseXml = match[1];
       if (!responseXml) continue;
 
-      // Extract href
-      const hrefMatch = responseXml.match(/<D:href>([^<]+)<\/D:href>/i);
+      // Extract href - namespace-agnostic
+      const hrefMatch = responseXml.match(/<[A-Za-z]+:href>([^<]+)<\/[A-Za-z]+:href>/i);
       if (!hrefMatch || !hrefMatch[1]) continue;
 
       const href = hrefMatch[1].trim();
       
-      // Check if this is a calendar collection (has calendar-collection type)
-      const isCalendarCollection = /<[CDR]:calendar-collection/i.test(responseXml);
+      // Check if this is a calendar collection (has calendar-collection type) - namespace-agnostic
+      const isCalendarCollection = /<[A-Za-z]+:calendar-collection|<calendar-collection/i.test(responseXml);
       
       // Skip if not a calendar collection or if it's the home set itself
       if (!isCalendarCollection) continue;
 
-      // Extract display name
-      const displayNameMatch = responseXml.match(/<D:displayname[^>]*>([^<]*)<\/D:displayname>/i);
+      // Extract display name - namespace-agnostic
+      const displayNameMatch = responseXml.match(/<[A-Za-z]+:displayname[^>]*>([^<]*)<\/[A-Za-z]+:displayname>/i);
       const displayName = displayNameMatch && displayNameMatch[1] ? displayNameMatch[1].trim() : undefined;
 
-      // Extract description
-      const descriptionMatch = responseXml.match(/<C:calendar-description[^>]*>([^<]*)<\/C:calendar-description>/i);
+      // Extract description - namespace-agnostic
+      const descriptionMatch = responseXml.match(/<[A-Za-z]+:calendar-description[^>]*>([^<]*)<\/[A-Za-z]+:calendar-description>/i);
       const description = descriptionMatch && descriptionMatch[1] ? descriptionMatch[1].trim() : undefined;
 
-      // Extract timezone
-      const timezoneMatch = responseXml.match(/<C:calendar-timezone[^>]*>([^<]*)<\/C:calendar-timezone>/i);
+      // Extract timezone - namespace-agnostic
+      const timezoneMatch = responseXml.match(/<[A-Za-z]+:calendar-timezone[^>]*>([^<]*)<\/[A-Za-z]+:calendar-timezone>/i);
       const timezone = timezoneMatch && timezoneMatch[1] ? timezoneMatch[1].trim() : undefined;
 
-      // Extract color
-      const colorMatch = responseXml.match(/<CR:color[^>]*>([^<]*)<\/CR:color>/i);
+      // Extract color - namespace-agnostic
+      const colorMatch = responseXml.match(/<[A-Za-z]+:color[^>]*>([^<]*)<\/[A-Za-z]+:color>/i);
       const color = colorMatch && colorMatch[1] ? colorMatch[1].trim() : undefined;
 
       // Build the folder path
@@ -379,34 +390,34 @@ export class CalDAVSource implements CalendarSource {
     let syncToken: string | undefined;
     let ctag: string | undefined;
 
-    // Extract sync-token if present
-    const syncTokenMatch = body.match(/<D:sync-token>([^<]+)<\/D:sync-token>/i);
+    // Extract sync-token if present - namespace-agnostic
+    const syncTokenMatch = body.match(/<[A-Za-z]+:sync-token>([^<]+)<\/[A-Za-z]+:sync-token>/i);
     if (syncTokenMatch && syncTokenMatch[1]) {
       syncToken = syncTokenMatch[1].trim();
     }
 
-    // Extract CTag if present (in Content-Mod-Time or other headers)
-    const ctagMatch = body.match(/<D:getetag>([^<]+)<\/D:getetag>/i);
+    // Extract CTag if present (in Content-Mod-Time or other headers) - namespace-agnostic
+    const ctagMatch = body.match(/<[A-Za-z]+:getetag>([^<]+)<\/[A-Za-z]+:getetag>/i);
     if (ctagMatch && ctagMatch[1]) {
       ctag = ctagMatch[1].trim();
     }
 
-    // Extract all calendar objects
-    const responseRegex = /<D:response[^>]*>([\s\S]*?)<\/D:response>/gi;
+    // Extract all calendar objects - namespace-agnostic
+    const responseRegex = /<[A-Za-z]+:response[^>]*>([\s\S]*?)<\/[A-Za-z]+:response>/gi;
     let match: RegExpExecArray | null;
 
     while ((match = responseRegex.exec(body)) !== null) {
       const responseXml = match[1];
       if (!responseXml) continue;
 
-      // Extract href
-      const hrefMatch = responseXml.match(/<D:href>([^<]+)<\/D:href>/i);
+      // Extract href - namespace-agnostic
+      const hrefMatch = responseXml.match(/<[A-Za-z]+:href>([^<]+)<\/[A-Za-z]+:href>/i);
       if (!hrefMatch || !hrefMatch[1]) continue;
 
       const href = hrefMatch[1].trim();
 
-      // Extract calendar data
-      const calendarDataMatch = responseXml.match(/<C:calendar-data[^>]*>([\s\S]*?)<\/C:calendar-data>/i);
+      // Extract calendar data - namespace-agnostic
+      const calendarDataMatch = responseXml.match(/<[A-Za-z]+:calendar-data[^>]*>([\s\S]*?)<\/[A-Za-z]+:calendar-data>/i);
       if (!calendarDataMatch || !calendarDataMatch[1]) continue;
 
       const icalendar = this.parseCalendarData(calendarDataMatch[1]);
@@ -704,6 +715,11 @@ export class CalDAVSource implements CalendarSource {
    * Rule A: REPLACE the base path with the server-returned path.
    */
   private resolveHref(href: string): string {
+    // If href is already a full URL, return it as-is
+    if (href.startsWith('http://') || href.startsWith('https://')) {
+      return href;
+    }
+    
     const origin = new URL(this.config.url).origin;
     // Normalize href to ensure it starts with /
     const normalizedHref = href.startsWith('/') ? href : '/' + href;

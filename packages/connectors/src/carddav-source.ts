@@ -156,16 +156,22 @@ export class CarddavSource implements ContactSource {
       },
     });
 
-    if (response.status !== 207) {
-      throw new Error(`PROPFIND failed with status ${response.status}: ${response.body}`);
-    }
-
-    const homeSet = this.parseAddressBookHomeSetResponse(response.body);
-    if (homeSet) {
-      this.addressBookHomeSet = homeSet;
+    if (response.status === 207) {
+      const homeSet = this.parseAddressBookHomeSetResponse(response.body);
+      if (homeSet) {
+        this.addressBookHomeSet = homeSet;
+      } else {
+        // Final fallback: construct address book home set from username
+        // Nextcloud typically serves address books at /remote.php/dav/addressbooks/{username}/
+        const baseUrl = this.config.url.replace(/\/$/, '');
+        this.addressBookHomeSet = `${baseUrl}/addressbooks/${this.config.username}/`;
+      }
+    } else if (response.status === 404) {
+      // PROPFIND failed with 404, use fallback constructed URL
+      const baseUrl = this.config.url.replace(/\/$/, '');
+      this.addressBookHomeSet = `${baseUrl}/addressbooks/${this.config.username}/`;
     } else {
-      // Final fallback: use the configured URL as the home set
-      this.addressBookHomeSet = this.config.addressBookHomeSet || this.normalizePath(this.config.url);
+      throw new Error(`PROPFIND failed with status ${response.status}: ${response.body}`);
     }
   }
 
@@ -225,6 +231,11 @@ export class CarddavSource implements ContactSource {
         Authorization: this.getAuthorizationHeader(),
       },
     });
+
+    // Handle 404 - collection doesn't exist yet, return empty list
+    if (response.status === 404) {
+      return [];
+    }
 
     if (response.status !== 207) {
       throw new Error(`PROPFIND failed with status ${response.status}: ${response.body}`);
@@ -309,8 +320,8 @@ export class CarddavSource implements ContactSource {
    * Parse address book home set from PROPFIND response.
    */
   private parseAddressBookHomeSetResponse(body: string): string | null {
-    // Look for addressbook-home-set in the response
-    const match = body.match(/<A:addressbook-home-set[^>]*>([^<]+)<\/A:addressbook-home-set>/i);
+    // Look for addressbook-home-set in the response - namespace-agnostic
+    const match = body.match(/<[A-Za-z]+:addressbook-home-set[^>]*>([^<]+)<\/[A-Za-z]+:addressbook-home-set>/i);
     if (match && match[1]) {
       return this.normalizePath(match[1].trim());
     }
@@ -323,16 +334,16 @@ export class CarddavSource implements ContactSource {
   private parseCollectionsResponse(body: string, homeSet: string): ContactFolder[] {
     const folders: ContactFolder[] = [];
     
-    // Find all response elements
-    const responseRegex = /<D:response[^>]*>([\s\S]*?)<\/D:response>/gi;
+    // Find all response elements - namespace-agnostic
+    const responseRegex = /<[A-Za-z]+:response[^>]*>([\s\S]*?)<\/[A-Za-z]+:response>/gi;
     let match: RegExpExecArray | null;
 
     while ((match = responseRegex.exec(body)) !== null) {
       const responseContent = match[1];
       if (!responseContent) continue;
       
-      // Extract href
-      const hrefMatch = responseContent.match(/<D:href[^>]*>([^<]+)<\/D:href>/i);
+      // Extract href - namespace-agnostic
+      const hrefMatch = responseContent.match(/<[A-Za-z]+:href>([^<]+)<\/[A-Za-z]+:href>/i);
       if (!hrefMatch || !hrefMatch[1]) continue;
       
       const path = this.normalizePath(hrefMatch[1].trim());
@@ -340,16 +351,16 @@ export class CarddavSource implements ContactSource {
       // Skip if this is the home set itself
       if (path === this.normalizePath(homeSet)) continue;
 
-      // Extract display name
-      const displayNameMatch = responseContent.match(/<D:displayname[^>]*>([^<]*)<\/D:displayname>/i);
+      // Extract display name - namespace-agnostic
+      const displayNameMatch = responseContent.match(/<[A-Za-z]+:displayname[^>]*>([^<]*)<\/[A-Za-z]+:displayname>/i);
       const displayName = displayNameMatch && displayNameMatch[1] ? displayNameMatch[1].trim() : undefined;
 
-      // Extract description
-      const descriptionMatch = responseContent.match(/<A:addressbook-description[^>]*>([^<]*)<\/A:addressbook-description>/i);
+      // Extract description - namespace-agnostic
+      const descriptionMatch = responseContent.match(/<[A-Za-z]+:addressbook-description[^>]*>([^<]*)<\/[A-Za-z]+:addressbook-description>/i);
       const description = descriptionMatch && descriptionMatch[1] ? this.decodeXmlEntities(descriptionMatch[1].trim()) : undefined;
 
-      // Extract color
-      const colorMatch = responseContent.match(/<CR:color[^>]*>([^<]+)<\/CR:color>/i);
+      // Extract color - namespace-agnostic
+      const colorMatch = responseContent.match(/<[A-Za-z]+:color[^>]*>([^<]+)<\/[A-Za-z]+:color>/i);
       const _color = colorMatch && colorMatch[1] ? colorMatch[1].trim() : undefined;
 
       folders.push({
@@ -370,34 +381,34 @@ export class CarddavSource implements ContactSource {
     let syncToken: string | undefined;
     let ctag: string | undefined;
 
-    // Extract sync-token if present
-    const syncTokenMatch = body.match(/<D:sync-token[^>]*>([^<]+)<\/D:sync-token>/i);
+    // Extract sync-token if present - namespace-agnostic
+    const syncTokenMatch = body.match(/<[A-Za-z]+:sync-token[^>]*>([^<]+)<\/[A-Za-z]+:sync-token>/i);
     if (syncTokenMatch && syncTokenMatch[1]) {
       syncToken = syncTokenMatch[1].trim();
     }
 
-    // Extract CTag from ETag if present
-    const ctagMatch = body.match(/<D:getetag[^>]*>([^<]+)<\/D:getetag>/i);
+    // Extract CTag from ETag if present - namespace-agnostic
+    const ctagMatch = body.match(/<[A-Za-z]+:getetag[^>]*>([^<]+)<\/[A-Za-z]+:getetag>/i);
     if (ctagMatch && ctagMatch[1]) {
       ctag = ctagMatch[1].trim();
     }
 
-    // Find all response elements
-    const responseRegex = /<D:response[^>]*>([\s\S]*?)<\/D:response>/gi;
+    // Find all response elements - namespace-agnostic
+    const responseRegex = /<[A-Za-z]+:response[^>]*>([\s\S]*?)<\/[A-Za-z]+:response>/gi;
     let match: RegExpExecArray | null;
 
     while ((match = responseRegex.exec(body)) !== null) {
       const responseContent = match[1];
       if (!responseContent) continue;
       
-      // Extract href
-      const hrefMatch = responseContent.match(/<D:href[^>]*>([^<]+)<\/D:href>/i);
+      // Extract href - namespace-agnostic
+      const hrefMatch = responseContent.match(/<[A-Za-z]+:href>([^<]+)<\/[A-Za-z]+:href>/i);
       if (!hrefMatch || !hrefMatch[1]) continue;
       
       const href = hrefMatch[1].trim();
 
-      // Extract vCard data
-      const vcardMatch = responseContent.match(/<A:address-data[^>]*>([\s\S]*?)<\/A:address-data>/i);
+      // Extract vCard data - namespace-agnostic
+      const vcardMatch = responseContent.match(/<[A-Za-z]+:address-data[^>]*>([\s\S]*?)<\/[A-Za-z]+:address-data>/i);
       if (vcardMatch && vcardMatch[1]) {
         const vcardData = this.decodeXmlEntities(vcardMatch[1].trim());
         objects.push({
@@ -831,6 +842,11 @@ export class CarddavSource implements ContactSource {
    * Rule A: REPLACE the base path with the server-returned path.
    */
   private resolveHref(href: string): string {
+    // If href is already a full URL, return it as-is
+    if (href.startsWith('http://') || href.startsWith('https://')) {
+      return href;
+    }
+    
     const origin = new URL(this.config.url).origin;
     // Normalize href to ensure it starts with /
     const normalizedHref = href.startsWith('/') ? href : '/' + href;

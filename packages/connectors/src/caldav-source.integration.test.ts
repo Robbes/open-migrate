@@ -84,13 +84,10 @@ async function seedCalendarEvents(caldavSource: CalDAVSource): Promise<void> {
     calendarUrl = new URL(`test-calendar/`, calendarHomeSet).toString();
     
     const mkcalendarXml = `<?xml version="1.0" encoding="utf-8"?>
-      <D:mkcalendar xmlns:D="DAV:" xmlns:CA="urn:ietf:params:xml:ns:caldav">
+      <D:mkcalendar xmlns:D="DAV:">
         <D:set>
           <D:prop>
             <D:displayname>${TEST_CALENDAR_NAME}</D:displayname>
-            <CA:supported-calendar-component-set>
-              <CA:comp name="VEVENT"/>
-            </CA:supported-calendar-component-set>
           </D:prop>
         </D:set>
       </D:mkcalendar>`;
