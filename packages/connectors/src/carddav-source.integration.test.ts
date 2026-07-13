@@ -22,8 +22,8 @@ const NEXTCLOUD_WEBDAV_URL = process.env.NEXTCLOUD_WEBDAV_URL;
 const NEXTCLOUD_USERNAME = process.env.NEXTCLOUD_USERNAME || 'testadmin';
 const NEXTCLOUD_PASSWORD = process.env.NEXTCLOUD_PASSWORD || 'testadmin_password';
 
-// Fixed test contact UIDs
-const TEST_ADDRESSBOOK_NAME = 'Test Address Book';
+// Use Nextcloud's default addressbook name (auto-created)
+const TEST_ADDRESSBOOK_NAME = 'contacts';
 const TEST_CONTACT_UID_1 = 'contact-alice@dev.local';
 const TEST_CONTACT_UID_2 = 'contact-bob@dev.local';
 const TEST_CONTACT_UID_3 = 'contact-charlie@dev.local';
@@ -60,148 +60,25 @@ async function waitForCarddav(maxRetries = 60, delayMs = 3000): Promise<void> {
 
 /**
  * Seed test contacts via raw DAV PUT.
- * Creates a test address book and populates it with vCard contacts.
- * Uses RFC 6764 discovery to get the correct addressbook-home-set URL.
+ * Uses Nextcloud's default addressbook at .../addressbooks/users/<user>/contacts/
+ * No MKCOL needed - Nextcloud auto-creates this collection.
  */
 async function seedContacts(carddavSource: CarddavSource): Promise<void> {
   const carddavUrl = NEXTCLOUD_WEBDAV_URL!.replace(/\/$/, '');
   
-  // Trigger discovery to get the addressbook-home-set
+  // Discover address books - Nextcloud auto-creates default 'contacts' collection
   const folders = await carddavSource.listFolders();
   
-  // Try to find or create the test address book
-  let testAddressBook = folders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
-  let addressBookUrl: string | undefined;
+  // Use the default 'contacts' address book (auto-created by Nextcloud)
+  // or fall back to the first available address book
+  const testAddressBook = folders.find(f => f.name === 'contacts') || folders[0];
   
   if (!testAddressBook) {
-    // Address book doesn't exist, we need to create it
-    const addressBookHomeSet = (carddavSource as any).addressBookHomeSet;
-    if (!addressBookHomeSet) {
-      throw new Error('Address book home-set not discovered. DAV may not be enabled on the server.');
-    }
-    
-    // Create the test address book using MKCOL
-    console.log(`[Seed CardDAV] addressBookHomeSet: ${addressBookHomeSet}`);
-    addressBookUrl = new URL(`test-addressbook/`, addressBookHomeSet).toString();
-    console.log(`[Seed CardDAV] addressBookUrl: ${addressBookUrl}`);
-    
-    // First, let's try to list the collections under the addressBookHomeSet to see if it exists
-    let addressBookHomeSetExists = false;
-    try {
-      const listResponse = await fetch(addressBookHomeSet, {
-        method: 'PROPFIND',
-        headers: {
-          'Depth': '0',
-          Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
-        },
-      });
-      console.log(`[Seed CardDAV] PROPFIND on addressBookHomeSet: ${listResponse.status}`);
-      if (listResponse.status === 207) {
-        addressBookHomeSetExists = true;
-        console.log('[Seed CardDAV] addressBookHomeSet exists');
-      } else {
-        const body = await listResponse.text();
-        console.log(`[Seed CardDAV] PROPFIND response: ${body.substring(0, 500)}`);
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.log(`[Seed CardDAV] PROPFIND error: ${msg}`);
-    }
-    
-    // If the addressBookHomeSet doesn't exist, create it
-    if (!addressBookHomeSetExists) {
-      console.log('[Seed CardDAV] Creating addressBookHomeSet...');
-      const mkcolXml = `<?xml version="1.0" encoding="utf-8"?>
-        <D:mkcol xmlns:D="DAV:">
-          <D:set>
-            <D:prop>
-              <D:displayname>${NEXTCLOUD_USERNAME}</D:displayname>
-            </D:prop>
-          </D:set>
-        </D:mkcol>`;
-      
-      const createHomeSetResponse = await fetch(addressBookHomeSet, {
-        method: 'MKCOL',
-        headers: {
-          'Content-Type': 'application/xml',
-          Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
-        },
-        body: mkcolXml,
-      });
-      
-      console.log(`[Seed CardDAV] MKCOL on addressBookHomeSet: ${createHomeSetResponse.status}`);
-      if (createHomeSetResponse.status === 201 || createHomeSetResponse.status === 409) {
-        console.log('[Seed CardDAV] Created addressBookHomeSet');
-      } else {
-        const body = await createHomeSetResponse.text();
-        console.log(`[Seed CardDAV] MKCOL response: ${body.substring(0, 500)}`);
-      }
-    }
-    
-    const mkcolXml = `<?xml version="1.0" encoding="utf-8"?>
-      <D:mkcol xmlns:D="DAV:" xmlns:CA="urn:ietf:params:xml:ns:carddav">
-        <D:set>
-          <D:prop>
-            <D:resourcetype>
-              <D:collection/>
-              <CA:addressbook/>
-            </D:resourcetype>
-            <D:displayname>${TEST_ADDRESSBOOK_NAME}</D:displayname>
-          </D:prop>
-        </D:set>
-      </D:mkcol>`;
-
-    // Retry MKCOL up to 3 times with delays
-    let addressBookCreated = false;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const response = await fetch(addressBookUrl, {
-          method: 'MKCOL',
-          headers: {
-            'Content-Type': 'application/xml',
-            Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
-          },
-          body: mkcolXml,
-        });
-
-        if (response.status === 201) {
-          console.log('[Seed] Created test address book');
-          addressBookCreated = true;
-          break;
-        } else if (response.status === 409) {
-          // Address book already exists, that's fine
-          console.log('[Seed] Address book already exists');
-          addressBookCreated = true;
-          break;
-        } else {
-          const body = await response.text();
-          console.log(`[Seed] Address book creation attempt ${attempt + 1} response: ${response.status} - ${body.substring(0, 200)}`);
-          if (attempt < 2) {
-            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
-          }
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.log(`[Seed] Address book creation attempt ${attempt + 1} error: ${msg}`);
-        if (attempt < 2) {
-          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
-        }
-      }
-    }
-
-    if (addressBookCreated) {
-      // Refresh folders to get the new address book
-      const refreshedFolders = await carddavSource.listFolders();
-      testAddressBook = refreshedFolders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
-    }
-  } else {
-    // Use the discovered address book path
-    addressBookUrl = new URL(`${testAddressBook.path.replace(/\/$/, '')}/`, carddavUrl).toString();
-  }
-  
-  if (!testAddressBook || !addressBookUrl) {
     throw new Error('No address book available for seeding. DAV configuration may be incorrect.');
   }
+  
+  const addressBookUrl = new URL(`${testAddressBook.path.replace(/\/$/, '')}/`, carddavUrl).toString();
+  console.log(`[Seed CardDAV] Using address book: ${testAddressBook.name} at ${addressBookUrl}`);
 
   // Seed test contacts
   const testContacts = [
@@ -343,7 +220,7 @@ async function cleanAddressBook(carddavSource?: CarddavSource): Promise<void> {
         const href = match[1];
         if (!href) continue;
         // Only delete resources in our test address book
-        if (href.includes('test-addressbook')) {
+        if (href.includes(TEST_ADDRESSBOOK_NAME)) {
           resourcesToDelete.push(href);
         }
       }
@@ -362,9 +239,9 @@ async function cleanAddressBook(carddavSource?: CarddavSource): Promise<void> {
       }
     }
 
-    // Delete the address book itself
-    if (addressBookHomeSet) {
-      const addressBookUrl = new URL(`test-addressbook/`, addressBookHomeSet).toString();
+    // Delete the address book itself (only if it's not the default 'contacts' address book)
+    if (addressBookHomeSet && TEST_ADDRESSBOOK_NAME !== 'contacts') {
+      const addressBookUrl = new URL(`${TEST_ADDRESSBOOK_NAME}/`, addressBookHomeSet).toString();
       try {
         await fetch(addressBookUrl, {
           method: 'DELETE',

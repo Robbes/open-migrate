@@ -363,9 +363,13 @@ export class CarddavSource implements ContactSource {
       const colorMatch = responseContent.match(/<[A-Za-z]+:color[^>]*>([^<]+)<\/[A-Za-z]+:color>/i);
       const _color = colorMatch && colorMatch[1] ? colorMatch[1].trim() : undefined;
 
+      // Skip Nextcloud internal address books
+      const name = displayName || this.extractNameFromPath(path);
+      if (this.isInternalCollection(name)) continue;
+
       folders.push({
         path,
-        name: displayName || this.extractNameFromPath(path),
+        name,
         description,
       });
     }
@@ -873,6 +877,20 @@ export class CarddavSource implements ContactSource {
   private extractNameFromPath(path: string): string {
     const parts = path.split('/').filter(p => p.length > 0);
     return parts[parts.length - 1] || 'Address Book';
+  }
+
+  /**
+   * Check if a collection name indicates it's an internal Nextcloud collection.
+   * These are auto-created by Nextcloud and should be filtered out.
+   */
+  private isInternalCollection(name: string): boolean {
+    // Nextcloud internal address book collections
+    const internalPatterns = [
+      /^z-server-generated--system$/,
+      /^z-app-generated--contactsinteraction--recent$/,
+      /^contact_birthdays$/,
+    ];
+    return internalPatterns.some(pattern => pattern.test(name));
   }
 
   /**

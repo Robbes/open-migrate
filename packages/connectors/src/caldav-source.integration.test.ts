@@ -23,8 +23,8 @@ const NEXTCLOUD_WEBDAV_URL = process.env.NEXTCLOUD_WEBDAV_URL;
 const NEXTCLOUD_USERNAME = process.env.NEXTCLOUD_USERNAME || 'testadmin';
 const NEXTCLOUD_PASSWORD = process.env.NEXTCLOUD_PASSWORD || 'testadmin_password';
 
-// Fixed UUIDs for testing
-const TEST_CALENDAR_NAME = 'Test Calendar';
+// Use Nextcloud's default calendar name (auto-created)
+const TEST_CALENDAR_NAME = 'personal';
 const TEST_EVENT_UID_1 = 'test-event-1@dev.local';
 const TEST_EVENT_UID_2 = 'test-event-2@dev.local';
 const TEST_EVENT_UID_3 = 'test-event-3@dev.local';
@@ -37,16 +37,18 @@ async function waitForCaldav(maxRetries = 60, delayMs = 3000): Promise<void> {
   if (!NEXTCLOUD_WEBDAV_URL) {
     throw new Error('NEXTCLOUD_WEBDAV_URL not configured - cannot wait for CalDAV');
   }
+  // Extract the base URL (remove /remote.php/dav path)
+  const baseUrl = NEXTCLOUD_WEBDAV_URL.replace(/\/remote\.php\/dav\/?$/, '');
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const response = await fetch(`${NEXTCLOUD_WEBDAV_URL.replace(/\/$/, '')}/.well-known/caldav`, {
+      const response = await fetch(`${baseUrl}/.well-known/caldav`, {
         method: 'GET',
         headers: {
           Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
         },
       });
-      // Nextcloud returns 302 redirect for well-known, then 207 for PROPFIND
-      if (response.status === 200 || response.status === 302 || response.status === 207) {
+      // Nextcloud returns 301/302 redirect for well-known
+      if (response.status === 200 || response.status === 301 || response.status === 302 || response.status === 207) {
         return;
       }
     } catch {
@@ -59,70 +61,26 @@ async function waitForCaldav(maxRetries = 60, delayMs = 3000): Promise<void> {
 
 /**
  * Seed test calendar events via raw DAV PUT.
- * Creates a test calendar and populates it with iCalendar events.
- * Uses RFC 6764 discovery to get the correct calendar-home-set URL.
+ * Uses Nextcloud's default calendar at .../calendars/users/<user>/personal/
+ * No MKCALENDAR needed - Nextcloud auto-creates this collection.
  */
 async function seedCalendarEvents(caldavSource: CalDAVSource): Promise<void> {
   const caldavUrl = NEXTCLOUD_WEBDAV_URL!.replace(/\/$/, '');
   
-  // Trigger discovery to get the calendar-home-set
+  // Discover calendars - Nextcloud auto-creates default 'personal' calendar
   const folders = await caldavSource.listFolders();
+  console.log(`[Seed CalDAV] Discovered ${folders.length} folders:`, folders.map(f => `${f.name} (${f.path})`));
   
-  // Try to find or create the test calendar
-  let testCalendar = folders.find(f => f.name === TEST_CALENDAR_NAME);
-  let calendarUrl: string | undefined;
+  // Use the default 'personal' calendar (auto-created by Nextcloud)
+  // or fall back to the first available calendar
+  const testCalendar = folders.find(f => f.name.toLowerCase() === 'personal') || folders[0];
   
   if (!testCalendar) {
-    // Calendar doesn't exist, we need to create it
-    // The CalDAVSource should have discovered the calendar-home-set
-    const calendarHomeSet = (caldavSource as any).calendarHomeSet;
-    if (!calendarHomeSet) {
-      throw new Error('Calendar home-set not discovered. DAV may not be enabled on the server.');
-    }
-    
-    // Create the test calendar using MKCALENDAR
-    calendarUrl = new URL(`test-calendar/`, calendarHomeSet).toString();
-    
-    const mkcalendarXml = `<?xml version="1.0" encoding="utf-8"?>
-      <D:mkcalendar xmlns:D="DAV:">
-        <D:set>
-          <D:prop>
-            <D:displayname>${TEST_CALENDAR_NAME}</D:displayname>
-          </D:prop>
-        </D:set>
-      </D:mkcalendar>`;
-
-    try {
-      const response = await fetch(calendarUrl, {
-        method: 'MKCALENDAR',
-        headers: {
-          'Content-Type': 'application/xml',
-          Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
-        },
-        body: mkcalendarXml,
-      });
-      
-      if (response.status === 201 || response.status === 204) {
-        console.log('[Seed] Created test calendar');
-        // Refresh folders to get the new calendar
-        const refreshedFolders = await caldavSource.listFolders();
-        testCalendar = refreshedFolders.find(f => f.name === TEST_CALENDAR_NAME);
-      } else {
-        const body = await response.text();
-        console.warn(`[Seed] Calendar creation failed: ${response.status} - ${body.substring(0, 200)}`);
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[Seed] Calendar creation error: ${msg}`);
-    }
-  } else {
-    // Use the discovered calendar path
-    calendarUrl = new URL(`${testCalendar.path.replace(/\/$/, '')}/`, caldavUrl).toString();
-  }
-  
-  if (!testCalendar || !calendarUrl) {
     throw new Error('No calendar available for seeding. DAV configuration may be incorrect.');
   }
+  
+  const calendarUrl = new URL(`${testCalendar.path.replace(/\/$/, '')}/`, caldavUrl).toString();
+  console.log(`[Seed CalDAV] Using calendar: ${testCalendar.name} at ${calendarUrl}`);
 
   // Seed test events
   const testEvents = [
@@ -153,7 +111,6 @@ async function seedCalendarEvents(caldavSource: CalDAVSource): Promise<void> {
     const icalendar = `BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//OpenMig//Test//EN
-METHOD:PUBLISH
 BEGIN:VEVENT
 UID:${event.uid}
 DTSTAMP:20240101T000000Z
@@ -172,7 +129,7 @@ END:VCALENDAR`;
       const response = await fetch(eventUrl, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'text/calendar',
+          'Content-Type': 'text/calendar; charset="utf-8"',
           Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
         },
         body: icalendar,
@@ -182,7 +139,7 @@ END:VCALENDAR`;
         console.log(`[Seed] Created event: ${event.uid}`);
       } else {
         const body = await response.text();
-        console.warn(`[Seed] Event ${event.uid} response: ${response.status} - ${body.substring(0, 200)}`);
+        console.warn(`[Seed] Event ${event.uid} response: ${response.status} - ${body}`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -241,7 +198,7 @@ async function cleanCalendar(caldavSource?: CalDAVSource): Promise<void> {
         const href = match[1];
         if (!href) continue;
         // Only delete resources in our test calendar
-        if (href.includes('test-calendar')) {
+        if (href.includes(TEST_CALENDAR_NAME)) {
           resourcesToDelete.push(href);
         }
       }
@@ -260,9 +217,9 @@ async function cleanCalendar(caldavSource?: CalDAVSource): Promise<void> {
       }
     }
 
-    // Delete the calendar itself
-    if (calendarHomeSet) {
-      const calendarUrl = new URL(`test-calendar/`, calendarHomeSet).toString();
+    // Delete the calendar itself (only if it's not the default 'personal' calendar)
+    if (calendarHomeSet && TEST_CALENDAR_NAME !== 'personal') {
+      const calendarUrl = new URL(`${TEST_CALENDAR_NAME}/`, calendarHomeSet).toString();
       try {
         await fetch(calendarUrl, {
           method: 'DELETE',
@@ -324,10 +281,10 @@ testSuite('CalDAV Source Integration Tests', () => {
       expect(folders).toBeDefined();
       expect(Array.isArray(folders)).toBe(true);
       
-      // Should find at least the test calendar
-      const testCalendar = folders.find(f => f.name === TEST_CALENDAR_NAME);
+      // Should find at least the test calendar (case-insensitive match)
+      const testCalendar = folders.find(f => f.name.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
       expect(testCalendar).toBeDefined();
-      expect(testCalendar?.name).toBe(TEST_CALENDAR_NAME);
+      expect(testCalendar?.name.toLowerCase()).toBe(TEST_CALENDAR_NAME.toLowerCase());
 
       console.log('[listFolders] Discovered calendars:', folders.map(f => f.name));
     });
@@ -345,7 +302,7 @@ testSuite('CalDAV Source Integration Tests', () => {
 
       // First, get the calendar folder
       const folders = await caldavSource.listFolders();
-      const testCalendar = folders.find(f => f.name === TEST_CALENDAR_NAME);
+      const testCalendar = folders.find(f => f.name.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
       expect(testCalendar).toBeDefined();
 
       // List events since epoch (all events)
@@ -396,7 +353,7 @@ testSuite('CalDAV Source Integration Tests', () => {
       process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await caldavSource.listFolders();
-      const testCalendar = folders.find(f => f.name === TEST_CALENDAR_NAME);
+      const testCalendar = folders.find(f => f.name.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
       expect(testCalendar).toBeDefined();
 
       // First call - get all events
@@ -426,7 +383,7 @@ testSuite('CalDAV Source Integration Tests', () => {
       process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await caldavSource.listFolders();
-      const testCalendar = folders.find(f => f.name === TEST_CALENDAR_NAME);
+      const testCalendar = folders.find(f => f.name.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
       expect(testCalendar).toBeDefined();
 
       // First sync - collect all events
@@ -455,10 +412,13 @@ testSuite('CalDAV Source Integration Tests', () => {
       process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await caldavSource.listFolders();
-      const testCalendar = folders.find(f => f.name === TEST_CALENDAR_NAME);
+      const testCalendar = folders.find(f => f.name.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
       expect(testCalendar).toBeDefined();
 
       const { items } = await caldavSource.listSince(testCalendar!);
+
+      console.log('[Event Parsing] Found', items.length, 'events');
+      console.log('[Event Parsing] Event UIDs:', items.map(i => i.item.uid));
 
       // Find our first test event
       const testEvent = items.find(i => i.item.uid.toLowerCase() === TEST_EVENT_UID_1.toLowerCase());

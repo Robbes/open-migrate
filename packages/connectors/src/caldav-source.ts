@@ -293,9 +293,11 @@ export class CalDAVSource implements CalendarSource {
     syncToken?: string,
     ctag?: string,
   ): string {
+    // Nextcloud requires sync-token element even for full syncs
+    // Use empty string for full sync, actual token for incremental sync
     const syncTokenElement = syncToken
       ? `<D:sync-token>${this.escapeXml(syncToken)}</D:sync-token>`
-      : '';
+      : '<D:sync-token/>';
 
     const ctagElement = ctag
       ? `<C:expand xmlns:C="urn:ietf:params:xml:ns:caldav" start="19700101T000000Z" end="20991231235959Z"/>`
@@ -345,8 +347,8 @@ export class CalDAVSource implements CalendarSource {
 
       const href = hrefMatch[1].trim();
       
-      // Check if this is a calendar collection (has calendar-collection type) - namespace-agnostic
-      const isCalendarCollection = /<[A-Za-z]+:calendar-collection|<calendar-collection/i.test(responseXml);
+      // Check if this is a calendar collection (has calendar-collection or calendar type) - namespace-agnostic
+      const isCalendarCollection = /<[A-Za-z]+:calendar-collection|<calendar-collection|<[A-Za-z]+:calendar\/|<calendar\//i.test(responseXml);
       
       // Skip if not a calendar collection or if it's the home set itself
       if (!isCalendarCollection) continue;
@@ -367,12 +369,16 @@ export class CalDAVSource implements CalendarSource {
       const colorMatch = responseXml.match(/<[A-Za-z]+:color[^>]*>([^<]*)<\/[A-Za-z]+:color>/i);
       const color = colorMatch && colorMatch[1] ? colorMatch[1].trim() : undefined;
 
+      // Skip Nextcloud internal collections
+      const name = displayName || this.extractNameFromPath(href);
+      if (this.isInternalCollection(name)) continue;
+
       // Build the folder path
       const path = this.normalizePath(href);
 
       folders.push({
         path,
-        name: displayName || this.extractNameFromPath(path),
+        name,
         description,
         timezone,
         color,
@@ -746,6 +752,20 @@ export class CalDAVSource implements CalendarSource {
   private extractNameFromPath(path: string): string {
     const parts = path.split('/').filter(p => p.length > 0);
     return parts[parts.length - 1] || 'Calendar';
+  }
+
+  /**
+   * Check if a collection name indicates it's an internal Nextcloud collection.
+   * These are auto-created by Nextcloud and should be filtered out.
+   */
+  private isInternalCollection(name: string): boolean {
+    // Nextcloud internal calendar collections
+    const internalPatterns = [
+      /^z-server-generated--system$/,
+      /^z-app-generated--contactsinteraction--recent$/,
+      /^contact_birthdays$/,
+    ];
+    return internalPatterns.some(pattern => pattern.test(name));
   }
 
   /**
