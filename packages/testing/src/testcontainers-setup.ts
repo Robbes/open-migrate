@@ -303,6 +303,7 @@ async function startNextcloud(): Promise<{
 }> {
   console.log('[NextcloudSetup] Starting Nextcloud container...');
 
+  // Start container WITHOUT HTTP wait strategy - we'll use internal readiness check instead
   const nextcloudContainer = await new GenericContainer('nextcloud:34-apache')
     .withEnvironment({
       SQLITE_DATABASE: 'nextcloud',
@@ -312,20 +313,139 @@ async function startNextcloud(): Promise<{
     })
     .withExposedPorts(80)
     .withStartupTimeout(300000) // 5 minutes for Nextcloud to initialize
-    .withWaitStrategy(Wait.forHttp('/status.php', 80).forStatusCodeMatching(status => status === 200));
+    .withWaitStrategy(Wait.forListeningPorts()); // Just wait for port to be open, not HTTP response
 
   const container = await nextcloudContainer.start();
+  const containerId = container.getId() as string;
 
-  const nextcloudHost = container.getHost();
-  const nextcloudPort = container.getMappedPort(80);
+  // Read the real host/port at runtime
+  const nextcloudHost = container.getHost() as string;
+  const nextcloudPort = container.getMappedPort(80) as number;
   const webdavUrl = `http://${nextcloudHost}:${nextcloudPort}/remote.php/dav`;
 
-  console.log(`[NextcloudSetup] Nextcloud ready at ${webdavUrl}`);
+  console.log(`[NextcloudSetup] Nextcloud container started at ${webdavUrl}`);
+
+  // GATE 1: Internal readiness check - poll from INSIDE the container where Host = localhost
+  // This bypasses the trusted domain issue since localhost is always trusted
+  console.log('[NextcloudSetup] Gate 1: Waiting for internal readiness (curl to localhost/status.php)...');
+  let internalReady = false;
+  const maxInternalAttempts = 60; // 5 minutes at 5s intervals
+  const internalIntervalMs = 5000;
+  
+  for (let i = 0; i < maxInternalAttempts; i++) {
+    try {
+      const { stdout } = await execFileAsync('docker', [
+        'exec', containerId, 'curl', '-s', '-o', '/dev/null', '-w', '%{http_code}',
+        'http://localhost/status.php',
+      ] as string[]);
+      
+      const statusCode = stdout.trim();
+      if (statusCode === '200') {
+        console.log(`[NextcloudSetup] Gate 1 PASSED: Internal readiness confirmed after ${i + 1} attempts (HTTP 200)`);
+        internalReady = true;
+        break;
+      } else {
+        console.log(`[NextcloudSetup] Gate 1: Internal status = ${statusCode}, waiting...`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`[NextcloudSetup] Gate 1: Internal check failed (attempt ${i + 1}): ${msg}`);
+    }
+    await new Promise(resolve => setTimeout(resolve, internalIntervalMs));
+  }
+  
+  if (!internalReady) {
+    throw new Error(`Nextcloud internal readiness failed: Did not get HTTP 200 from localhost/status.php after ${maxInternalAttempts} attempts. Nextcloud may not have started properly.`);
+  }
+
+  // GATE 2: Configure trusted domains using runtime host:port values
+  console.log('[NextcloudSetup] Gate 2: Registering trusted domains...');
+  const trustedDomains: string[] = [
+    `${nextcloudHost}:${nextcloudPort}`,           // direct host:port from testcontainers (e.g., 172.17.0.1:40920)
+    `localhost:${nextcloudPort}`,                  // localhost access
+    `host.docker.internal:${nextcloudPort}`,       // bridge gateway access
+  ];
+
+  try {
+    // Register each trusted domain via occ command
+    // Start from index 0 to replace the default 'localhost' and add all necessary domains
+    for (let i = 0; i < trustedDomains.length; i++) {
+      const domain = trustedDomains[i]!;
+      await execFileAsync('docker', [
+        'exec', containerId, 'php', 'occ',
+        'config:system:set', 'trusted_domains', `${i}`, '--value', domain,
+      ] as string[]);
+      console.log(`[NextcloudSetup] Registered trusted domain: ${domain}`);
+    }
+    console.log('[NextcloudSetup] Gate 2 PASSED: Trusted domains configured');
+    // Small delay to ensure occ changes are fully applied
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[NextcloudSetup] Error registering trusted domains: ${msg}`);
+    throw new Error(`Failed to configure Nextcloud trusted domains: ${msg}`, { cause: err });
+  }
+
+  // GATE 3: External verification - check if DAV is accessible from the host
+  console.log('[NextcloudSetup] Gate 3: Verifying DAV readiness (checking DAV root access)...');
+  const username = 'testadmin';
+  const password = 'testadmin_password';
+  const davRootUrl = `http://${nextcloudHost}:${nextcloudPort}/remote.php/dav/`;
+  
+  let propfindReady = false;
+  const maxPropfindAttempts = 30;
+  const propfindIntervalMs = 2000;
+  let lastStatus = 0;
+  let lastBody = '';
+  let statusBody = '';
+  
+  for (let i = 0; i < maxPropfindAttempts; i++) {
+    try {
+      // First, check if the status page is accessible (to verify trusted domains are working)
+      const statusResponse = await fetch(`http://${nextcloudHost}:${nextcloudPort}/status.php`, {
+        method: 'GET',
+      });
+      statusBody = await statusResponse.text();
+      
+      // Now try PROPFIND on the DAV root
+      const response = await fetch(davRootUrl, {
+        method: 'PROPFIND',
+        headers: {
+          'Authorization': `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`,
+          'Depth': '0',
+        },
+      });
+      
+      lastStatus = response.status;
+      lastBody = await response.text().then(b => b.slice(0, 200));
+      
+      if (response.status === 207) {
+        console.log(`[NextcloudSetup] Gate 3 PASSED: DAV ready after ${i + 1} attempts (PROPFIND 207)`);
+        propfindReady = true;
+        break;
+      } else {
+        console.log(`[NextcloudSetup] Gate 3: PROPFIND returned ${response.status}, status.php returned ${statusResponse.status}, waiting...`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`[NextcloudSetup] Gate 3: PROPFIND error (attempt ${i + 1}): ${msg}`);
+      lastBody = msg.slice(0, 200);
+    }
+    await new Promise(resolve => setTimeout(resolve, propfindIntervalMs));
+  }
+  
+  if (!propfindReady) {
+    const errorMsg = `Nextcloud DAV not ready: PROPFIND did not return 207 after ${maxPropfindAttempts} attempts. Last status: ${lastStatus}. Response body (first 200 chars): ${lastBody}. status.php body: ${statusBody.slice(0, 200)}`;
+    console.error(`[NextcloudSetup] ${errorMsg}`);
+    throw new Error(errorMsg);
+  }
+
+  console.log(`[NextcloudSetup] Nextcloud DAV fully ready at ${webdavUrl}`);
 
   return {
     webdavUrl,
-    username: 'testadmin',
-    password: 'testadmin_password',
+    username,
+    password,
     container,
   };
 }

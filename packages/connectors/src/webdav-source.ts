@@ -45,8 +45,8 @@ export class WebdavFileSource implements FileSource {
     // Start from root path
     const rootPath = this.config.rootPath || '/';
     
-    // Perform PROPFIND to discover folders
-    const response = await this.performPropfind(rootPath, '1');
+    // Perform PROPFIND to discover folders (config-derived path, use buildUrl)
+    const response = await this.performPropfind(rootPath, '1', false);
     
     // Parse and filter for collections (directories)
     const folders: FileFolder[] = [];
@@ -78,8 +78,8 @@ export class WebdavFileSource implements FileSource {
   ): Promise<{ items: ReadonlyArray<RawFileItem>; nextCursor: SyncCursor }> {
     const folderPath = this.normalizePath(folder.path);
     
-    // Perform PROPFIND with Depth: 1 to get files in folder
-    const response = await this.performPropfind(folderPath, '1');
+    // folder.path comes from server-returned href, use resolveHref (Rule A)
+    const response = await this.performPropfind(folderPath, '1', true);
     
     // Parse entries and filter for files (not directories)
     const items: RawFileItem[] = [];
@@ -93,16 +93,17 @@ export class WebdavFileSource implements FileSource {
       
       const file = this.parseFileFromEntry(entry);
       if (file) {
-        // Check if file has changed since cursor
+        // Check if file has changed since cursor (using basename as key)
         if (this.hasChanged(file, cursor)) {
           hasChanges = true;
-          // Fetch file content for files
-          const content = await this.fetchFileContent(file.path);
+          // Fetch file content using the full href (sourceRef)
+          const sourceRef = this.resolveHref(entry.href);
+          const content = await this.fetchFileContent(sourceRef);
           
           items.push({
             item: {
               ...file,
-              sourceRef: file.path,
+              sourceRef: entry.href,  // Keep full href for fetching
             },
             content,
           });
@@ -121,10 +122,9 @@ export class WebdavFileSource implements FileSource {
 
   /**
    * Fetch the raw content of a file.
+   * The url should already be fully resolved (caller handles resolution).
    */
-  async fetchFileContent(filePath: string): Promise<Uint8Array> {
-    const url = this.buildUrl(filePath);
-    
+  async fetchFileContent(url: string): Promise<Uint8Array> {
     const response = await this.httpClient.request({
       method: 'GET',
       url,
@@ -147,16 +147,25 @@ export class WebdavFileSource implements FileSource {
   /**
    * Perform a PROPFIND request to a WebDAV resource.
    * 
-   * @param path - The path to the resource
+   * @param path - The path to the resource (can be config-derived or server-returned)
    * @param depth - The depth header value ('0', '1', or 'infinity')
+   * @param useResolveHref - If true, treat path as server-returned href (Rule A).
+   *                        If false, treat as config-derived path (Rule B).
    * @returns Parsed PROPFIND response
    */
-  private async performPropfind(path: string, depth: string): Promise<PropfindResponse> {
+  private async performPropfind(
+    path: string, 
+    depth: string,
+    useResolveHref: boolean = false
+  ): Promise<PropfindResponse> {
     const propfindXml = this.buildPropfindXml();
+    
+    // Use resolveHref for server-returned paths, buildUrl for config-derived
+    const url = useResolveHref ? this.resolveHref(path) : this.buildUrl(path);
     
     const response = await this.httpClient.request({
       method: 'PROPFIND',
-      url: this.buildUrl(path),
+      url,
       body: propfindXml,
       headers: {
         'Content-Type': 'application/xml',
@@ -338,9 +347,14 @@ export class WebdavFileSource implements FileSource {
       return null;
     }
     
+    // Extract basename from href, percent-decoded
+    // The href may be root-relative (e.g., /remote.php/dav/files/user/file.txt)
+    const pathFromHref = new URL(entry.href, 'http://localhost').pathname;
+    const name = decodeURIComponent(pathFromHref.split('/').filter(Boolean).pop() ?? '');
+    
     const file: WebDAVFile = {
-      path: entry.href,
-      name: this.extractNameFromPath(entry.href),
+      path: decodeURIComponent(pathFromHref),  // full decoded path
+      name: name,
       isDirectory: false,
       size: entry.getContentLength || 0,
       modifiedAt: entry.getLastModified ? this.parseDate(entry.getLastModified) : new Date().toISOString(),
@@ -350,6 +364,7 @@ export class WebdavFileSource implements FileSource {
     
     if (entry.getContentType) {
       file.mimeType = entry.getContentType;
+      file.contentType = entry.getContentType;
     }
     
     if (entry.getCreated) {
@@ -516,17 +531,49 @@ export class WebdavFileSource implements FileSource {
   }
 
   /**
-   * Build a full URL from a path.
+   * Build a URL by appending a relative path to the configured base URL.
+   * Used for config-derived paths (e.g., rootPath, folder paths from our config).
+   * Rule B: APPEND the path to the base, preserving any subpath prefix.
+   * 
+   * Examples:
+   * - buildUrl('/documents') with base 'https://example.com/webdav' → 'https://example.com/webdav/documents'
+   * - buildUrl('files/test.txt') with base 'https://example.com/webdav' → 'https://example.com/webdav/files/test.txt'
    */
-  private buildUrl(path: string): string {
-    const baseUrl = this.config.url.replace(/\/$/, '');
-    // Handle empty path case
-    if (path === '') {
-      return baseUrl;
+  private buildUrl(relativePath: string): string {
+    // Handle empty path case - return base URL without trailing slash
+    if (relativePath === '') {
+      return this.config.url.replace(/\/$/, '');
     }
-    // Manually join paths to avoid URL constructor replacing base path
-    const result = baseUrl + (path.startsWith('/') ? path : '/' + path);
-    return result;
+    
+    const baseUrl = this.config.url.endsWith('/') 
+      ? this.config.url 
+      : this.config.url + '/';
+    
+    // Remove leading slash from relative path to avoid double slash
+    const path = relativePath.startsWith('/') ? relativePath.slice(1) : relativePath;
+    
+    return baseUrl + path;
+  }
+
+  /**
+   * Resolve a server-returned href against the base URL's origin.
+   * Used for hrefs returned by the server in PROPFIND multistatus responses.
+   * Rule A: REPLACE the base path with the server's origin + the href path.
+   * 
+   * Examples:
+   * - resolveHref('/remote.php/dav/files/user/Documents/') with base 'http://host:1/remote.php/dav' 
+   *   → 'http://host:1/remote.php/dav/files/user/Documents/'
+   * - resolveHref('/documents/report.pdf') with base 'https://example.com/webdav'
+   *   → 'https://example.com/documents/report.pdf' (server href replaces base path)
+   */
+  private resolveHref(href: string): string {
+    const baseUrl = this.config.url;
+    const origin = new URL(baseUrl).origin;
+    
+    // Ensure href starts with / for proper resolution
+    const normalizedHref = href.startsWith('/') ? href : '/' + href;
+    
+    return new URL(normalizedHref, origin).toString();
   }
 
   /**

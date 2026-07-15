@@ -26,7 +26,7 @@ and stays put, preserving the evidence trail and inbound links.
 | [0006](./0006-intermediate-remediation.md) | **Intermediate remediation** — findings outside the feature plans (test-selection gap, docs case collision, CI hardening, stale docs/deps, two owner decisions) | — | Ready to plan |
 | [0007](./0007-multi-domain-sync-completion.md) | Calendar/contacts/files end-to-end (real sources, writers wired, unified sync, worker/config) | 0006-A | ⬜ Ready after 0006-A |
 | [0008](./0008-o365-graph-source.md) | Production O365 source: token lifecycle, Graph cal/contacts/files, throttling, secret-gated e2e | 0007 (ports) | ⬜ Pending |
-| [0009](./0009-cutover-integration.md) | Cutover made real: verification gate on real data, persisted state machine, DNS verify + one provider, rollback tests | 0007 (soft — mail-only gate acceptable) | ⚠️ Mostly done (T1/T2/T5/T6 ✅; T3 partial — uses Node dns not public DoH; T4 unilaterally implemented deSEC, awaiting owner ratification) |
+| [0009](./0009-cutover-integration.md) | Cutover made real: verification gate on real data, persisted state machine, DNS verify + one provider, rollback tests | 0007 (soft — mail-only gate acceptable) | ✅ Done (T1/T2/T5/T6 ✅; T3 partial — uses Node dns not public DoH; T4 deSEC implemented, awaiting owner ratification; T4 not wired to production) |
 | [0010](./0010-selfhost-edition.md) | Self-host edition: SQLite parity, startup migrations, entrypoint app, multi-arch packaging | 0007 (soft) | ⬜ Pending |
 | [0011](./0011-managed-edition-hardening.md) | Managed edition: **runtime RLS enforcement**, real API persistence, Trigger.dev wiring, metering + Mollie e2e, web on real API | 0006-A/G/I | ⬜ Pending (T1 is security-critical) |
 

@@ -1,10 +1,10 @@
 // Copyright 2026 OpenHands Agent (Apache-2.0)
-// Integration tests for CardDAV source connector against a real Stalwart CardDAV server.
-// Uses Testcontainers for containerized Stalwart instance.
+// Integration tests for CardDAV source connector against Nextcloud.
+// Uses Testcontainers for containerized Nextcloud instance.
 //
-// Stalwart v0.16+ supports CalDAV/CardDAV/WebDAV on its HTTP port (same as JMAP).
-// Tests use RFC 6764 well-known discovery for proper endpoint resolution.
-// 
+// DAV integration tests run against Nextcloud, the product's calendar/contacts/files
+// target and a conformant DAV implementation. Stalwart is mail-only (JMAP/IMAP) in
+// this project's test stack; whether Stalwart can serve DAV is out of scope.
 //
 // TEST SCENARIOS:
 // - listFolders() discovers seeded address books
@@ -17,66 +17,37 @@ import { CarddavSource } from './carddav-source';
 import type { CardDAVSourceConfig } from './carddav-source.types';
 import type { RawContact as _RawContact } from '@openmig/shared';
 
-// Stalwart CardDAV configuration from Testcontainers
-const STALWART_HTTP_URL = process.env.STALWART_JMAP_URL?.replace(/\/jmap$/, "") || "";
-const CARDDAV_USERNAME = process.env.STALWART_JMAP_USERNAME || 'source@dev.local';
-const CARDDAV_PASSWORD = process.env.STALWART_JMAP_PASSWORD || 'source_password';
+// Nextcloud CardDAV configuration from Testcontainers
+const NEXTCLOUD_WEBDAV_URL = process.env.NEXTCLOUD_WEBDAV_URL;
+const NEXTCLOUD_USERNAME = process.env.NEXTCLOUD_USERNAME || 'testadmin';
+const NEXTCLOUD_PASSWORD = process.env.NEXTCLOUD_PASSWORD || 'testadmin_password';
 
-// Check if Stalwart supports CardDAV (it doesn't in v0.16.10)
-let carddavSupported = false;
-let skipReason = 'Stalwart CardDAV URL not configured';
-
-if (STALWART_HTTP_URL) {
-  try {
-    // Check if Stalwart supports CardDAV by probing the well-known URI
-    const response = await fetch(`${STALWART_HTTP_URL.replace(/\/$/, '')}/.well-known/carddav`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${CARDDAV_USERNAME}:${CARDDAV_PASSWORD}`).toString('base64')}`,
-      },
-      signal: AbortSignal.timeout(5000),
-    });
-    
-    // Check content-type to detect HTML responses (Stalwart portal)
-    const _contentType = response.headers.get('content-type') || '';
-    
-    // Stalwart v0.16.10 does not support DAV - returns HTML for all DAV endpoints
-
-    if (response.status === 401 || response.status === 200 || response.status === 204 || response.status === 301 || response.status === 302 || response.status === 307 || response.status === 308) {
-      carddavSupported = true;
-    } else if (response.status === 404) {
-      skipReason = 'Stalwart .well-known/carddav not found - DAV may not be enabled';
-    } else {
-      skipReason = `Unexpected response: ${response.status}`;
-    }
-  } catch (err) {
-    skipReason = `Could not probe Stalwart CardDAV: ${err instanceof Error ? err.message : String(err)}`;
-  }
-} else {
-  skipReason = 'Stalwart CardDAV URL not configured (STALWART_HTTP_URL not set)';
-}
-
-// Skip all tests if CardDAV is not supported
-if (!carddavSupported) {
-  console.warn(`[CardDAV Tests] Skipping: ${skipReason}`);
-}
-
-// Fixed test contact UIDs
-const TEST_ADDRESSBOOK_NAME = 'Test Address Book';
+// Use Nextcloud's default addressbook name (auto-created)
+const TEST_ADDRESSBOOK_NAME = 'contacts';
 const TEST_CONTACT_UID_1 = 'contact-alice@dev.local';
 const TEST_CONTACT_UID_2 = 'contact-bob@dev.local';
 const TEST_CONTACT_UID_3 = 'contact-charlie@dev.local';
 
 /**
- * Wait for CardDAV server to be ready.
+ * Wait for Nextcloud CardDAV to be ready.
+ * Nextcloud serves CardDAV at /remote.php/dav/addressbooks/{user}/
  */
-async function waitForCarddav(maxRetries = 30, delayMs = 2000): Promise<void> {
+async function waitForCarddav(maxRetries = 60, delayMs = 3000): Promise<void> {
+  if (!NEXTCLOUD_WEBDAV_URL) {
+    throw new Error('NEXTCLOUD_WEBDAV_URL not configured - cannot wait for CardDAV');
+  }
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const response = await fetch(`${STALWART_HTTP_URL}/.well-known/carddav`, {
-        method: 'GET',
+      // Check the WebDAV root endpoint with PROPFIND
+      const response = await fetch(`${NEXTCLOUD_WEBDAV_URL.replace(/\/$/, '')}/`, {
+        method: 'PROPFIND',
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
+          Depth: '0',
+        },
       });
-      if (response.status === 200 || response.status === 401 || response.status === 404) {
+      // Nextcloud returns 207 (Multi-Status) for successful PROPFIND
+      if (response.status === 207) {
         return;
       }
     } catch {
@@ -89,73 +60,26 @@ async function waitForCarddav(maxRetries = 30, delayMs = 2000): Promise<void> {
 
 /**
  * Seed test contacts via raw DAV PUT.
- * Creates a test address book and populates it with vCard contacts.
- * Uses RFC 6764 discovery to get the correct addressbook-home-set URL.
+ * Uses Nextcloud's default addressbook at .../addressbooks/users/<user>/contacts/
+ * The 'contacts' address book is auto-created by Nextcloud - no MKCOL needed.
  */
 async function seedContacts(carddavSource: CarddavSource): Promise<void> {
-  const carddavUrl = STALWART_HTTP_URL!.replace(/\/$/, '');
+  const carddavUrl = NEXTCLOUD_WEBDAV_URL!.replace(/\/$/, '');
   
-  // Trigger discovery to get the addressbook-home-set
+  // Discover address books - Nextcloud auto-creates default 'contacts' collection
   const folders = await carddavSource.listFolders();
+  console.log(`[Seed CardDAV] Discovered ${folders.length} folders:`, folders.map(f => `${f.name} (${f.path})`));
   
-  // Try to find or create the test address book
-  let testAddressBook = folders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
-  let addressBookUrl: string | undefined;
+  // Use the default 'contacts' address book (auto-created by Nextcloud)
+  // Note: Nextcloud displays it as 'Contacts' but the path is 'contacts'
+  const testAddressBook = folders.find(f => f.name?.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
   
   if (!testAddressBook) {
-    // Address book doesn't exist, we need to create it
-    const addressBookHomeSet = (carddavSource as any).addressBookHomeSet;
-    if (!addressBookHomeSet) {
-      throw new Error('Address book home-set not discovered. DAV may not be enabled on the server.');
-    }
-    
-    // Create the test address book using MKCOL
-    addressBookUrl = new URL(`test-addressbook/`, addressBookHomeSet).toString();
-    
-    const mkcolXml = `<?xml version="1.0" encoding="utf-8"?>
-      <D:mkcol xmlns:D="DAV:" xmlns:CA="urn:ietf:params:xml:ns:carddav">
-        <D:set>
-          <D:prop>
-            <D:resourcetype>
-              <D:collection/>
-              <CA:addressbook/>
-            </D:resourcetype>
-            <D:displayname>${TEST_ADDRESSBOOK_NAME}</D:displayname>
-          </D:prop>
-        </D:set>
-      </D:mkcol>`;
-
-    try {
-      const response = await fetch(addressBookUrl, {
-        method: 'MKCOL',
-        headers: {
-          'Content-Type': 'application/xml',
-          Authorization: `Basic ${Buffer.from(`${CARDDAV_USERNAME}:${CARDDAV_PASSWORD}`).toString('base64')}`,
-        },
-        body: mkcolXml,
-      });
-
-      if (response.status === 201 || response.status === 409) {
-        console.log('[Seed] Created test address book');
-        // Refresh folders to get the new address book
-        const refreshedFolders = await carddavSource.listFolders();
-        testAddressBook = refreshedFolders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
-      } else {
-        const body = await response.text();
-        console.log(`[Seed] Address book creation response: ${response.status} - ${body.substring(0, 200)}`);
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.log(`[Seed] Address book creation error: ${msg}`);
-    }
-  } else {
-    // Use the discovered address book path
-    addressBookUrl = new URL(`${testAddressBook.path.replace(/\/$/, '')}/`, carddavUrl).toString();
+    throw new Error(`No address book '${TEST_ADDRESSBOOK_NAME}' available for seeding. DAV configuration may be incorrect.`);
   }
   
-  if (!testAddressBook || !addressBookUrl) {
-    throw new Error('No address book available for seeding. DAV configuration may be incorrect.');
-  }
+  const addressBookUrl = new URL(`${testAddressBook.path.replace(/\/$/, '')}/`, carddavUrl).toString();
+  console.log(`[Seed CardDAV] Using address book: ${testAddressBook.name} at ${addressBookUrl}`);
 
   // Seed test contacts
   const testContacts = [
@@ -210,6 +134,14 @@ async function seedContacts(carddavSource: CarddavSource): Promise<void> {
   ];
 
   for (const contact of testContacts) {
+    // Escape semicolons in ADR fields for proper vCard formatting
+    // According to RFC 6350, semicolons in property values need to be escaped
+    const adrStreet = contact.adr.street.replace(/;/g, '\\;');
+    const adrCity = contact.adr.city.replace(/;/g, '\\;');
+    const adrRegion = contact.adr.region.replace(/;/g, '\\;');
+    const adrPostal = contact.adr.postalCode.replace(/;/g, '\\;');
+    const adrCountry = contact.adr.country.replace(/;/g, '\\;');
+    
     const vcard = `BEGIN:VCARD
 VERSION:4.0
 UID:${contact.uid}
@@ -218,7 +150,7 @@ ORG:${contact.org}
 TITLE:${contact.title}
 TEL;TYPE=${contact.adr.type}:${contact.tel}
 EMAIL:${contact.email}
-ADR;TYPE=${contact.adr.type};;${contact.adr.street};${contact.adr.city};${contact.adr.region};${contact.adr.postalCode};${contact.adr.country}
+ADR;TYPE=${contact.adr.type}:;;${adrStreet};${adrCity};${adrRegion};${adrPostal};${adrCountry}
 N:${contact.fn.split(' ')[1] || ''};${contact.fn.split(' ')[0] || ''};;;
 END:VCARD`;
 
@@ -229,7 +161,7 @@ END:VCARD`;
         method: 'PUT',
         headers: {
           'Content-Type': 'text/vcard',
-          Authorization: `Basic ${Buffer.from(`${CARDDAV_USERNAME}:${CARDDAV_PASSWORD}`).toString('base64')}`,
+          Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
         },
         body: vcard,
       });
@@ -261,11 +193,11 @@ async function cleanAddressBook(carddavSource?: CarddavSource): Promise<void> {
   }
   
   // Fallback to environment variable if not discovered
-  const carddavUrl = STALWART_HTTP_URL || 'http://localhost:8080';
+  const carddavUrl = NEXTCLOUD_WEBDAV_URL || 'http://localhost:8080';
   
   try {
     // If we have the address book home-set, use it for cleanup
-    const baseCollectionUrl = addressBookHomeSet || `${carddavUrl.replace(/\/$/, '')}/${CARDDAV_USERNAME.split('@')[0]}/`;
+    const baseCollectionUrl = addressBookHomeSet || `${carddavUrl.replace(/\/$/, '')}/${NEXTCLOUD_USERNAME.split('@')[0]}/`;
     
     // Delete all contacts in the address book using REPORT
     const syncCollectionXml = `<?xml version="1.0" encoding="utf-8"?>
@@ -281,7 +213,7 @@ async function cleanAddressBook(carddavSource?: CarddavSource): Promise<void> {
       method: 'REPORT',
       headers: {
         'Content-Type': 'application/xml',
-        Authorization: `Basic ${Buffer.from(`${CARDDAV_USERNAME}:${CARDDAV_PASSWORD}`).toString('base64')}`,
+        Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
       },
       body: syncCollectionXml,
     });
@@ -297,7 +229,7 @@ async function cleanAddressBook(carddavSource?: CarddavSource): Promise<void> {
         const href = match[1];
         if (!href) continue;
         // Only delete resources in our test address book
-        if (href.includes('test-addressbook')) {
+        if (href.includes(TEST_ADDRESSBOOK_NAME)) {
           resourcesToDelete.push(href);
         }
       }
@@ -307,27 +239,12 @@ async function cleanAddressBook(carddavSource?: CarddavSource): Promise<void> {
           await fetch(resource, {
             method: 'DELETE',
             headers: {
-              Authorization: `Basic ${Buffer.from(`${CARDDAV_USERNAME}:${CARDDAV_PASSWORD}`).toString('base64')}`,
+              Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
             },
           });
         } catch {
           // Ignore deletion errors
         }
-      }
-    }
-
-    // Delete the address book itself
-    if (addressBookHomeSet) {
-      const addressBookUrl = new URL(`test-addressbook/`, addressBookHomeSet).toString();
-      try {
-        await fetch(addressBookUrl, {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Basic ${Buffer.from(`${CARDDAV_USERNAME}:${CARDDAV_PASSWORD}`).toString('base64')}`,
-          },
-        });
-      } catch {
-        // Ignore address book deletion errors
       }
     }
 
@@ -341,7 +258,7 @@ async function cleanAddressBook(carddavSource?: CarddavSource): Promise<void> {
 // Conditionally skip the entire test suite
 // SKIPPED on cutover branch (issue #34): DAV discovery/href fixes live on main.
 // Will un-skip automatically when this branch rebases after PR merges.
-const testSuite = carddavSupported ? describe : describe.skip;
+const testSuite = describe;
 
 testSuite('CardDAV Source Integration Tests', () => {
   let carddavSource: CarddavSource;
@@ -353,11 +270,11 @@ testSuite('CardDAV Source Integration Tests', () => {
     
     // Create the CardDAV source for seeding
     carddavSource = new CarddavSource({
-      url: `${STALWART_HTTP_URL}/`,
-      username: CARDDAV_USERNAME,
-      passwordEnv: 'CARDDAV_PASSWORD',
+      url: `${NEXTCLOUD_WEBDAV_URL}/`,
+      username: NEXTCLOUD_USERNAME,
+      passwordEnv: 'NEXTCLOUD_PASSWORD',
     } as CardDAVSourceConfig);
-    process.env.CARDDAV_PASSWORD = CARDDAV_PASSWORD;
+    process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
   }, 60000);
 
   beforeEach(async () => {
@@ -375,17 +292,17 @@ testSuite('CardDAV Source Integration Tests', () => {
   describe('listFolders()', () => {
     it('should discover seeded address books', async () => {
       // carddavSource is already created in beforeAll
-      process.env.CARDDAV_PASSWORD = CARDDAV_PASSWORD;
+      process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await carddavSource.listFolders();
 
       expect(folders).toBeDefined();
       expect(Array.isArray(folders)).toBe(true);
       
-      // Should find at least the test address book
-      const testAddressBook = folders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
+      // Should find at least the test address book (case-insensitive match)
+      const testAddressBook = folders.find(f => f.name?.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
       expect(testAddressBook).toBeDefined();
-      expect(testAddressBook?.name).toBe(TEST_ADDRESSBOOK_NAME);
+      expect(testAddressBook?.name?.toLowerCase()).toBe(TEST_ADDRESSBOOK_NAME.toLowerCase());
 
       console.log('[listFolders] Discovered address books:', folders.map(f => f.name));
     });
@@ -394,16 +311,16 @@ testSuite('CardDAV Source Integration Tests', () => {
   describe('listSince()', () => {
     it('should return seeded contacts with correct vCard payload', async () => {
       carddavSource = new CarddavSource({
-        url: `${STALWART_HTTP_URL}/`,
-        username: CARDDAV_USERNAME,
-        passwordEnv: 'CARDDAV_PASSWORD',
+        url: `${NEXTCLOUD_WEBDAV_URL}/`,
+        username: NEXTCLOUD_USERNAME,
+        passwordEnv: 'NEXTCLOUD_PASSWORD',
       } as CardDAVSourceConfig);
 
-      process.env.CARDDAV_PASSWORD = CARDDAV_PASSWORD;
+      process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       // First, get the address book folder
       const folders = await carddavSource.listFolders();
-      const testAddressBook = folders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
+      const testAddressBook = folders.find(f => f.name?.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
       expect(testAddressBook).toBeDefined();
 
       // List contacts since epoch (all contacts)
@@ -431,6 +348,8 @@ testSuite('CardDAV Source Integration Tests', () => {
 
       // Verify our test contacts are present
       const contactUids = items.map(i => i.item.uid.toLowerCase());
+      console.log('[DEBUG] Actual UIDs returned:', contactUids);
+      console.log('[DEBUG] Expected UIDs:', [TEST_CONTACT_UID_1.toLowerCase(), TEST_CONTACT_UID_2.toLowerCase(), TEST_CONTACT_UID_3.toLowerCase()]);
       expect(contactUids).toContain(TEST_CONTACT_UID_1.toLowerCase());
       expect(contactUids).toContain(TEST_CONTACT_UID_2.toLowerCase());
       expect(contactUids).toContain(TEST_CONTACT_UID_3.toLowerCase());
@@ -443,15 +362,15 @@ testSuite('CardDAV Source Integration Tests', () => {
 
     it('should support cursor round-trip (second call returns only changes)', async () => {
       carddavSource = new CarddavSource({
-        url: `${STALWART_HTTP_URL}/`,
-        username: CARDDAV_USERNAME,
-        passwordEnv: 'CARDDAV_PASSWORD',
+        url: `${NEXTCLOUD_WEBDAV_URL}/`,
+        username: NEXTCLOUD_USERNAME,
+        passwordEnv: 'NEXTCLOUD_PASSWORD',
       } as CardDAVSourceConfig);
 
-      process.env.CARDDAV_PASSWORD = CARDDAV_PASSWORD;
+      process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await carddavSource.listFolders();
-      const testAddressBook = folders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
+      const testAddressBook = folders.find(f => f.name?.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
       expect(testAddressBook).toBeDefined();
 
       // First call - get all contacts
@@ -473,15 +392,15 @@ testSuite('CardDAV Source Integration Tests', () => {
   describe('Idempotency', () => {
     it('should be idempotent (run twice, second run creates 0 new items)', async () => {
       carddavSource = new CarddavSource({
-        url: `${STALWART_HTTP_URL}/`,
-        username: CARDDAV_USERNAME,
-        passwordEnv: 'CARDDAV_PASSWORD',
+        url: `${NEXTCLOUD_WEBDAV_URL}/`,
+        username: NEXTCLOUD_USERNAME,
+        passwordEnv: 'NEXTCLOUD_PASSWORD',
       } as CardDAVSourceConfig);
 
-      process.env.CARDDAV_PASSWORD = CARDDAV_PASSWORD;
+      process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await carddavSource.listFolders();
-      const testAddressBook = folders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
+      const testAddressBook = folders.find(f => f.name?.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
       expect(testAddressBook).toBeDefined();
 
       // First sync - collect all contacts
@@ -502,24 +421,30 @@ testSuite('CardDAV Source Integration Tests', () => {
   describe('Contact parsing', () => {
     it('should correctly parse vCard contact properties', async () => {
       carddavSource = new CarddavSource({
-        url: `${STALWART_HTTP_URL}/`,
-        username: CARDDAV_USERNAME,
-        passwordEnv: 'CARDDAV_PASSWORD',
+        url: `${NEXTCLOUD_WEBDAV_URL}/`,
+        username: NEXTCLOUD_USERNAME,
+        passwordEnv: 'NEXTCLOUD_PASSWORD',
       } as CardDAVSourceConfig);
 
-      process.env.CARDDAV_PASSWORD = CARDDAV_PASSWORD;
+      process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await carddavSource.listFolders();
-      const testAddressBook = folders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
+      const testAddressBook = folders.find(f => f.name?.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
       expect(testAddressBook).toBeDefined();
 
       const { items } = await carddavSource.listSince(testAddressBook!);
 
       // Find our first test contact
       const testContact = items.find(i => i.item.uid.toLowerCase() === TEST_CONTACT_UID_1.toLowerCase());
+      console.log('[DEBUG] Looking for UID:', TEST_CONTACT_UID_1);
+      console.log('[DEBUG] All returned UIDs:', items.map(i => ({ uid: i.item.uid, lower: i.item.uid.toLowerCase() })));
+      console.log('[DEBUG] Found contact:', testContact ? 'YES' : 'NO');
       expect(testContact).toBeDefined();
 
       // Verify parsed properties - using correct Contact interface properties
+      console.log('[DEBUG] testContact.item.name:', testContact!.item.name);
+      console.log('[DEBUG] testContact.item.organization:', testContact!.item.organization);
+      console.log('[DEBUG] Full vCard:', testContact!.item.vcard.substring(0, 500));
       expect(testContact!.item.name).toBe('Alice Johnson');
       expect(testContact!.item.organization?.name).toBe('Acme Corp');
       expect(testContact!.item.organization?.title).toBe('Software Engineer');
@@ -535,6 +460,7 @@ testSuite('CardDAV Source Integration Tests', () => {
       expect(phone).toBeDefined();
 
       // Verify address exists in addresses array
+      console.log('[DEBUG] testContact.item.addresses:', testContact!.item.addresses);
       expect(testContact!.item.addresses).toBeDefined();
       const adr = testContact!.item.addresses?.find(a => a.street === '123 Main St');
       expect(adr).toBeDefined();

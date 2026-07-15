@@ -15,6 +15,7 @@ import type {
   TenantId,
   MappingId,
 } from '@openmig/shared';
+import type { GenericRawItem } from '@openmig/core';
 import { fileNaturalKeyHash, fileContentHash } from '@openmig/shared';
 
 /**
@@ -59,6 +60,57 @@ export class WebDAVTargetWriter implements FileTargetWriter {
     this.tenantId = deps.tenantId;
     this.mappingId = deps.mappingId;
     this.httpClient = deps.httpClient ?? createDefaultHttpClient();
+  }
+
+  /**
+   * Alias for ensureDirectory to support GenericTargetWriter interface.
+   * Ensures a folder (directory) exists and returns its ID.
+   */
+  async ensureFolder(folder: FileFolder): Promise<string> {
+    return this.ensureDirectory(folder);
+  }
+
+  /**
+   * Alias for upsertFile to support GenericTargetWriter interface.
+   * Idempotently writes an item (file) to the target.
+   */
+  async upsertItem(
+    folderId: string,
+    naturalKey: string,
+    raw: GenericRawItem,
+  ): Promise<{ targetId: string; created: boolean }> {
+    // Convert GenericRawItem to RawFileItem
+    // For WebDAV, content is Uint8Array, so we need to convert string or ArrayBuffer
+    const contentBytes: Uint8Array = typeof raw.content === 'string'
+      ? new TextEncoder().encode(raw.content)
+      : raw.content instanceof ArrayBuffer
+        ? new Uint8Array(raw.content)
+        : raw.content;
+
+    // Construct RawFileItem with the naturalKey as the file path
+    const result = await this.upsertFile(folderId, {
+      item: {
+        path: naturalKey,
+        isDirectory: false,
+        size: contentBytes.length,
+        modifiedAt: new Date().toISOString(),
+        sourceRef: naturalKey,
+        mimeType: raw.metadata?.mimeType || 'application/octet-stream',
+      },
+      content: contentBytes,
+    });
+    return { targetId: result.targetId, created: result.created };
+  }
+
+  /**
+   * Alias for findFileByNaturalKey to support GenericTargetWriter interface.
+   * Checks if an item (file) exists by its natural key (path).
+   */
+  async findByNaturalKey(
+    folderId: string,
+    naturalKey: string,
+  ): Promise<string | undefined> {
+    return this.findFileByNaturalKey(folderId, naturalKey);
   }
 
   /**

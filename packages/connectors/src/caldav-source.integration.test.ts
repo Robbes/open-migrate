@@ -1,9 +1,10 @@
 // Copyright 2026 OpenHands Agent (Apache-2.0)
-// Integration tests for CalDAV source connector against a real Stalwart CalDAV server.
-// Uses Testcontainers for containerized Stalwart instance.
+// Integration tests for CalDAV source connector against Nextcloud.
+// Uses Testcontainers for containerized Nextcloud instance.
 //
-// Stalwart v0.16+ supports CalDAV/CardDAV/WebDAV on its HTTP port (same as JMAP).
-// Tests use RFC 6764 well-known discovery for proper endpoint resolution.
+// DAV integration tests run against Nextcloud, the product's calendar/contacts/files
+// target and a conformant DAV implementation. Stalwart is mail-only (JMAP/IMAP) in
+// this project's test stack; whether Stalwart can serve DAV is out of scope.
 //
 // TEST SCENARIOS:
 // - listFolders() discovers seeded calendars
@@ -16,68 +17,38 @@ import { CalDAVSource } from './caldav-source';
 import type { CalDAVSourceConfig } from './caldav-source.types';
 import type { RawCalendarEvent as _RawCalendarEvent } from '@openmig/shared';
 
-// Stalwart CalDAV configuration from Testcontainers
-// Use the base HTTP URL (not the JMAP-specific path) - CalDAV is served on the same port
-const STALWART_HTTP_URL = process.env.STALWART_JMAP_URL?.replace(/\/jmap$/, '') || '';
-const CALDAV_USERNAME = process.env.STALWART_JMAP_USERNAME || 'source@dev.local';
-const CALDAV_PASSWORD = process.env.STALWART_JMAP_PASSWORD || 'source_password';
+// Nextcloud CalDAV configuration from Testcontainers
+// Nextcloud serves CalDAV/CardDAV/WebDAV on its WebDAV endpoint
+const NEXTCLOUD_WEBDAV_URL = process.env.NEXTCLOUD_WEBDAV_URL;
+const NEXTCLOUD_USERNAME = process.env.NEXTCLOUD_USERNAME || 'testadmin';
+const NEXTCLOUD_PASSWORD = process.env.NEXTCLOUD_PASSWORD || 'testadmin_password';
 
-// Check if Stalwart CalDAV is available via RFC 6764 discovery
-let caldavSupported = false;
-let skipReason = 'Stalwart CalDAV URL not configured';
-
-if (STALWART_HTTP_URL) {
-  try {
-    // Check if Stalwart supports CalDAV by probing the well-known URI with auth
-    const response = await fetch(`${STALWART_HTTP_URL.replace(/\/$/, '')}/.well-known/caldav`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${CALDAV_USERNAME}:${CALDAV_PASSWORD}`).toString('base64')}`,
-      },
-      signal: AbortSignal.timeout(5000),
-    });
-    
-    const contentType = response.headers.get('content-type') || '';
-    console.log(`[Probe] .well-known/caldav: status=${response.status}, content-type=${contentType}`);
-
-    // 401 means the endpoint exists but requires auth - DAV is available
-    // 200/204 means the endpoint is accessible - DAV is supported
-    // 3xx means redirect (will be followed by the CalDAV client)
-    if (response.status === 401 || response.status === 200 || response.status === 204 || response.status === 301 || response.status === 302 || response.status === 307 || response.status === 308) {
-      caldavSupported = true;
-    } else if (response.status === 404) {
-      skipReason = 'Stalwart .well-known/caldav not found - DAV may not be enabled';
-    } else {
-      skipReason = `Unexpected response: ${response.status}`;
-    }
-  } catch (err) {
-    skipReason = `Could not probe Stalwart CalDAV: ${err instanceof Error ? err.message : String(err)}`;
-  }
-} else {
-  skipReason = 'Stalwart HTTP URL not configured (STALWART_JMAP_URL not set)';
-}
-
-// Skip all tests if CalDAV is not supported
-if (!caldavSupported) {
-  console.warn(`[CalDAV Tests] Skipping: ${skipReason}`);
-}
-
-// Fixed UUIDs for testing
-const TEST_CALENDAR_NAME = 'Test Calendar';
+// Use Nextcloud's default calendar name (auto-created)
+const TEST_CALENDAR_NAME = 'personal';
 const TEST_EVENT_UID_1 = 'test-event-1@dev.local';
 const TEST_EVENT_UID_2 = 'test-event-2@dev.local';
 const TEST_EVENT_UID_3 = 'test-event-3@dev.local';
 
 /**
- * Wait for CalDAV server to be ready.
+ * Wait for Nextcloud CalDAV to be ready.
+ * Nextcloud serves CalDAV at /remote.php/dav/calendars/{user}/
  */
-async function waitForCaldav(maxRetries = 30, delayMs = 2000): Promise<void> {
+async function waitForCaldav(maxRetries = 60, delayMs = 3000): Promise<void> {
+  if (!NEXTCLOUD_WEBDAV_URL) {
+    throw new Error('NEXTCLOUD_WEBDAV_URL not configured - cannot wait for CalDAV');
+  }
+  // Extract the base URL (remove /remote.php/dav path)
+  const baseUrl = NEXTCLOUD_WEBDAV_URL.replace(/\/remote\.php\/dav\/?$/, '');
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const response = await fetch(`${STALWART_HTTP_URL}/.well-known/caldav`, {
+      const response = await fetch(`${baseUrl}/.well-known/caldav`, {
         method: 'GET',
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
+        },
       });
-      if (response.status === 200 || response.status === 401 || response.status === 404) {
+      // Nextcloud returns 301/302 redirect for well-known
+      if (response.status === 200 || response.status === 301 || response.status === 302 || response.status === 207) {
         return;
       }
     } catch {
@@ -90,73 +61,26 @@ async function waitForCaldav(maxRetries = 30, delayMs = 2000): Promise<void> {
 
 /**
  * Seed test calendar events via raw DAV PUT.
- * Creates a test calendar and populates it with iCalendar events.
- * Uses RFC 6764 discovery to get the correct calendar-home-set URL.
+ * Uses Nextcloud's default calendar at .../calendars/users/<user>/personal/
+ * No MKCALENDAR needed - Nextcloud auto-creates this collection.
  */
 async function seedCalendarEvents(caldavSource: CalDAVSource): Promise<void> {
-  const caldavUrl = STALWART_HTTP_URL!.replace(/\/$/, '');
+  const caldavUrl = NEXTCLOUD_WEBDAV_URL!.replace(/\/$/, '');
   
-  // Trigger discovery to get the calendar-home-set
+  // Discover calendars - Nextcloud auto-creates default 'personal' calendar
   const folders = await caldavSource.listFolders();
+  console.log(`[Seed CalDAV] Discovered ${folders.length} folders:`, folders.map(f => `${f.name} (${f.path})`));
   
-  // Try to find or create the test calendar
-  let testCalendar = folders.find(f => f.name === TEST_CALENDAR_NAME);
-  let calendarUrl: string | undefined;
+  // Use the default 'personal' calendar (auto-created by Nextcloud)
+  // or fall back to the first available calendar
+  const testCalendar = folders.find(f => f.name?.toLowerCase() === 'personal') || folders[0];
   
   if (!testCalendar) {
-    // Calendar doesn't exist, we need to create it
-    // The CalDAVSource should have discovered the calendar-home-set
-    const calendarHomeSet = (caldavSource as any).calendarHomeSet;
-    if (!calendarHomeSet) {
-      throw new Error('Calendar home-set not discovered. DAV may not be enabled on the server.');
-    }
-    
-    // Create the test calendar using MKCALENDAR
-    calendarUrl = new URL(`test-calendar/`, calendarHomeSet).toString();
-    
-    const mkcalendarXml = `<?xml version="1.0" encoding="utf-8"?>
-      <D:mkcalendar xmlns:D="DAV:" xmlns:CA="urn:ietf:params:xml:ns:caldav">
-        <D:set>
-          <D:prop>
-            <D:displayname>${TEST_CALENDAR_NAME}</D:displayname>
-            <CA:supported-calendar-component-set>
-              <CA:comp name="VEVENT"/>
-            </CA:supported-calendar-component-set>
-          </D:prop>
-        </D:set>
-      </D:mkcalendar>`;
-
-    try {
-      const response = await fetch(calendarUrl, {
-        method: 'MKCALENDAR',
-        headers: {
-          'Content-Type': 'application/xml',
-          Authorization: `Basic ${Buffer.from(`${CALDAV_USERNAME}:${CALDAV_PASSWORD}`).toString('base64')}`,
-        },
-        body: mkcalendarXml,
-      });
-      
-      if (response.status === 201 || response.status === 204) {
-        console.log('[Seed] Created test calendar');
-        // Refresh folders to get the new calendar
-        const refreshedFolders = await caldavSource.listFolders();
-        testCalendar = refreshedFolders.find(f => f.name === TEST_CALENDAR_NAME);
-      } else {
-        const body = await response.text();
-        console.warn(`[Seed] Calendar creation failed: ${response.status} - ${body.substring(0, 200)}`);
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[Seed] Calendar creation error: ${msg}`);
-    }
-  } else {
-    // Use the discovered calendar path
-    calendarUrl = new URL(`${testCalendar.path.replace(/\/$/, '')}/`, caldavUrl).toString();
-  }
-  
-  if (!testCalendar || !calendarUrl) {
     throw new Error('No calendar available for seeding. DAV configuration may be incorrect.');
   }
+  
+  const calendarUrl = new URL(`${testCalendar.path.replace(/\/$/, '')}/`, caldavUrl).toString();
+  console.log(`[Seed CalDAV] Using calendar: ${testCalendar.name} at ${calendarUrl}`);
 
   // Seed test events
   const testEvents = [
@@ -187,7 +111,6 @@ async function seedCalendarEvents(caldavSource: CalDAVSource): Promise<void> {
     const icalendar = `BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//OpenMig//Test//EN
-METHOD:PUBLISH
 BEGIN:VEVENT
 UID:${event.uid}
 DTSTAMP:20240101T000000Z
@@ -206,8 +129,8 @@ END:VCALENDAR`;
       const response = await fetch(eventUrl, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'text/calendar',
-          Authorization: `Basic ${Buffer.from(`${CALDAV_USERNAME}:${CALDAV_PASSWORD}`).toString('base64')}`,
+          'Content-Type': 'text/calendar; charset="utf-8"',
+          Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
         },
         body: icalendar,
       });
@@ -216,7 +139,7 @@ END:VCALENDAR`;
         console.log(`[Seed] Created event: ${event.uid}`);
       } else {
         const body = await response.text();
-        console.warn(`[Seed] Event ${event.uid} response: ${response.status} - ${body.substring(0, 200)}`);
+        console.warn(`[Seed] Event ${event.uid} response: ${response.status} - ${body}`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -239,11 +162,11 @@ async function cleanCalendar(caldavSource?: CalDAVSource): Promise<void> {
   }
   
   // Fallback to environment variable if not discovered
-  const caldavUrl = STALWART_HTTP_URL || 'http://localhost:8080';
+  const caldavUrl = NEXTCLOUD_WEBDAV_URL || 'http://localhost:8080';
   
   try {
     // If we have the calendar home-set, use it for cleanup
-    const baseCollectionUrl = calendarHomeSet || `${caldavUrl.replace(/\/$/, '')}/${CALDAV_USERNAME.split('@')[0]}/`;
+    const baseCollectionUrl = calendarHomeSet || `${caldavUrl.replace(/\/$/, '')}/${NEXTCLOUD_USERNAME.split('@')[0]}/`;
     
     // Delete all events in the calendar using REPORT
     const syncCollectionXml = `<?xml version="1.0" encoding="utf-8"?>
@@ -259,7 +182,7 @@ async function cleanCalendar(caldavSource?: CalDAVSource): Promise<void> {
       method: 'REPORT',
       headers: {
         'Content-Type': 'application/xml',
-        Authorization: `Basic ${Buffer.from(`${CALDAV_USERNAME}:${CALDAV_PASSWORD}`).toString('base64')}`,
+        Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
       },
       body: syncCollectionXml,
     });
@@ -275,7 +198,7 @@ async function cleanCalendar(caldavSource?: CalDAVSource): Promise<void> {
         const href = match[1];
         if (!href) continue;
         // Only delete resources in our test calendar
-        if (href.includes('test-calendar')) {
+        if (href.includes(TEST_CALENDAR_NAME)) {
           resourcesToDelete.push(href);
         }
       }
@@ -285,7 +208,7 @@ async function cleanCalendar(caldavSource?: CalDAVSource): Promise<void> {
           await fetch(resource, {
             method: 'DELETE',
             headers: {
-              Authorization: `Basic ${Buffer.from(`${CALDAV_USERNAME}:${CALDAV_PASSWORD}`).toString('base64')}`,
+              Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
             },
           });
         } catch {
@@ -294,14 +217,14 @@ async function cleanCalendar(caldavSource?: CalDAVSource): Promise<void> {
       }
     }
 
-    // Delete the calendar itself
-    if (calendarHomeSet) {
-      const calendarUrl = new URL(`test-calendar/`, calendarHomeSet).toString();
+    // Delete the calendar itself (only if it's not the default 'personal' calendar)
+    if (calendarHomeSet && TEST_CALENDAR_NAME !== 'personal') {
+      const calendarUrl = new URL(`${TEST_CALENDAR_NAME}/`, calendarHomeSet).toString();
       try {
         await fetch(calendarUrl, {
           method: 'DELETE',
           headers: {
-            Authorization: `Basic ${Buffer.from(`${CALDAV_USERNAME}:${CALDAV_PASSWORD}`).toString('base64')}`,
+            Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
           },
         });
       } catch {
@@ -316,10 +239,9 @@ async function cleanCalendar(caldavSource?: CalDAVSource): Promise<void> {
   }
 }
 
-// Conditionally skip the entire test suite
-// SKIPPED on cutover branch (issue #34): DAV discovery/href fixes live on main.
-// Will un-skip automatically when this branch rebases after PR merges.
-const testSuite = caldavSupported ? describe : describe.skip;
+// Run tests unconditionally - if DAV is not configured, tests will fail with real errors
+// rather than being skipped. This provides honest feedback about DAV support status.
+const testSuite = describe;
 
 testSuite('CalDAV Source Integration Tests', () => {
   let caldavSource: CalDAVSource;
@@ -331,11 +253,11 @@ testSuite('CalDAV Source Integration Tests', () => {
     
     // Create the CalDAV source for seeding
     caldavSource = new CalDAVSource({
-      url: `${STALWART_HTTP_URL}/`,
-      username: CALDAV_USERNAME,
-      passwordEnv: 'CALDAV_PASSWORD',
+      url: `${NEXTCLOUD_WEBDAV_URL}/`,
+      username: NEXTCLOUD_USERNAME,
+      passwordEnv: 'NEXTCLOUD_PASSWORD',
     } as CalDAVSourceConfig);
-    process.env.CALDAV_PASSWORD = CALDAV_PASSWORD;
+    process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
   }, 60000);
 
   beforeEach(async () => {
@@ -359,10 +281,10 @@ testSuite('CalDAV Source Integration Tests', () => {
       expect(folders).toBeDefined();
       expect(Array.isArray(folders)).toBe(true);
       
-      // Should find at least the test calendar
-      const testCalendar = folders.find(f => f.name === TEST_CALENDAR_NAME);
+      // Should find at least the test calendar (case-insensitive match)
+      const testCalendar = folders.find(f => f.name?.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
       expect(testCalendar).toBeDefined();
-      expect(testCalendar?.name).toBe(TEST_CALENDAR_NAME);
+      expect(testCalendar?.name?.toLowerCase()).toBe(TEST_CALENDAR_NAME.toLowerCase());
 
       console.log('[listFolders] Discovered calendars:', folders.map(f => f.name));
     });
@@ -371,16 +293,16 @@ testSuite('CalDAV Source Integration Tests', () => {
   describe('listSince()', () => {
     it('should return seeded events with correct iCalendar payload', async () => {
       caldavSource = new CalDAVSource({
-        url: `${STALWART_HTTP_URL}/`,
-        username: CALDAV_USERNAME,
-        passwordEnv: 'CALDAV_PASSWORD',
+        url: `${NEXTCLOUD_WEBDAV_URL}/`,
+        username: NEXTCLOUD_USERNAME,
+        passwordEnv: 'NEXTCLOUD_PASSWORD',
       } as CalDAVSourceConfig);
 
-      process.env.CALDAV_PASSWORD = CALDAV_PASSWORD;
+      process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       // First, get the calendar folder
       const folders = await caldavSource.listFolders();
-      const testCalendar = folders.find(f => f.name === TEST_CALENDAR_NAME);
+      const testCalendar = folders.find(f => f.name?.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
       expect(testCalendar).toBeDefined();
 
       // List events since epoch (all events)
@@ -423,15 +345,15 @@ testSuite('CalDAV Source Integration Tests', () => {
 
     it('should support cursor round-trip (second call returns only changes)', async () => {
       caldavSource = new CalDAVSource({
-        url: `${STALWART_HTTP_URL}/`,
-        username: CALDAV_USERNAME,
-        passwordEnv: 'CALDAV_PASSWORD',
+        url: `${NEXTCLOUD_WEBDAV_URL}/`,
+        username: NEXTCLOUD_USERNAME,
+        passwordEnv: 'NEXTCLOUD_PASSWORD',
       } as CalDAVSourceConfig);
 
-      process.env.CALDAV_PASSWORD = CALDAV_PASSWORD;
+      process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await caldavSource.listFolders();
-      const testCalendar = folders.find(f => f.name === TEST_CALENDAR_NAME);
+      const testCalendar = folders.find(f => f.name?.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
       expect(testCalendar).toBeDefined();
 
       // First call - get all events
@@ -453,15 +375,15 @@ testSuite('CalDAV Source Integration Tests', () => {
   describe('Idempotency', () => {
     it('should be idempotent (run twice, second run creates 0 new items)', async () => {
       caldavSource = new CalDAVSource({
-        url: `${STALWART_HTTP_URL}/`,
-        username: CALDAV_USERNAME,
-        passwordEnv: 'CALDAV_PASSWORD',
+        url: `${NEXTCLOUD_WEBDAV_URL}/`,
+        username: NEXTCLOUD_USERNAME,
+        passwordEnv: 'NEXTCLOUD_PASSWORD',
       } as CalDAVSourceConfig);
 
-      process.env.CALDAV_PASSWORD = CALDAV_PASSWORD;
+      process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await caldavSource.listFolders();
-      const testCalendar = folders.find(f => f.name === TEST_CALENDAR_NAME);
+      const testCalendar = folders.find(f => f.name?.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
       expect(testCalendar).toBeDefined();
 
       // First sync - collect all events
@@ -482,18 +404,21 @@ testSuite('CalDAV Source Integration Tests', () => {
   describe('Event parsing', () => {
     it('should correctly parse iCalendar event properties', async () => {
       caldavSource = new CalDAVSource({
-        url: `${STALWART_HTTP_URL}/`,
-        username: CALDAV_USERNAME,
-        passwordEnv: 'CALDAV_PASSWORD',
+        url: `${NEXTCLOUD_WEBDAV_URL}/`,
+        username: NEXTCLOUD_USERNAME,
+        passwordEnv: 'NEXTCLOUD_PASSWORD',
       } as CalDAVSourceConfig);
 
-      process.env.CALDAV_PASSWORD = CALDAV_PASSWORD;
+      process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await caldavSource.listFolders();
-      const testCalendar = folders.find(f => f.name === TEST_CALENDAR_NAME);
+      const testCalendar = folders.find(f => f.name?.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
       expect(testCalendar).toBeDefined();
 
       const { items } = await caldavSource.listSince(testCalendar!);
+
+      console.log('[Event Parsing] Found', items.length, 'events');
+      console.log('[Event Parsing] Event UIDs:', items.map(i => i.item.uid));
 
       // Find our first test event
       const testEvent = items.find(i => i.item.uid.toLowerCase() === TEST_EVENT_UID_1.toLowerCase());

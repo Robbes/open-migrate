@@ -215,7 +215,7 @@ if (skipReason) {
 }
 
 // Conditional skip based on Nextcloud availability
-const testSuite = skipReason ? describe.skip : describe;
+const testSuite = describe;
 
 testSuite('WebDAV Source Integration Tests', () => {
   let webdavSource: WebdavFileSource;
@@ -300,10 +300,10 @@ testSuite('WebDAV Source Integration Tests', () => {
       }
 
       // Verify our test files are present
-      const filePaths = items.map(i => i.item.path);
-      expect(filePaths).toContain(TEST_FILE_1);
-      expect(filePaths).toContain(TEST_FILE_2);
-      expect(filePaths).toContain(TEST_FILE_3);
+      const fileNames = items.map(i => i.item.name);
+      expect(fileNames).toContain(TEST_FILE_1);
+      expect(fileNames).toContain(TEST_FILE_2);
+      expect(fileNames).toContain(TEST_FILE_3);
 
       expect(nextCursor).toBeDefined();
       expect(nextCursor.value).toBeDefined();
@@ -389,7 +389,7 @@ testSuite('WebDAV Source Integration Tests', () => {
       const { items } = await webdavSource.listSince(testFolder!);
 
       // Find our first test file
-      const testFile = items.find(i => i.item.path === TEST_FILE_1);
+      const testFile = items.find(i => i.item.name === TEST_FILE_1);
       expect(testFile).toBeDefined();
 
       // Verify content
@@ -418,7 +418,7 @@ testSuite('WebDAV Source Integration Tests', () => {
       const { items } = await webdavSource.listSince(testFolder!);
 
       // Find the JSON file
-      const jsonFile = items.find(i => i.item.path === TEST_FILE_3);
+      const jsonFile = items.find(i => i.item.name === TEST_FILE_3);
       expect(jsonFile).toBeDefined();
 
       // Verify JSON content can be parsed
@@ -476,7 +476,7 @@ testSuite('WebDAV Source Integration Tests', () => {
       
       // Should detect the modified file
       expect(sync2.items.length).toBe(1);
-      expect(sync2.items[0]!.item.path).toBe(TEST_FILE_1);
+      expect(sync2.items[0]!.item.name).toBe(TEST_FILE_1);
 
       // Verify the modified content
       const decoder = new TextDecoder();

@@ -9,7 +9,7 @@
 | T3 DNS: verify-only resolver checks + guided runbook | ⚠️ Partial | `packages/core/src/dns-verify-only.ts` implements verifyMX/SPF/DKIM/DMARC/autodiscover + checkPropagation; wired into cutover CLI (line 245 of cutover-commands.ts); **ISSUE**: uses Node built-in `dns` module (system resolver), NOT public DoH resolvers (1.1.1.1/8.8.8.8/9.9.9.9) as required by PropagationChecker split principle; no dedicated tests for verify-only functions (dns-manager.unit.test.ts uses mock provider only) |
 | T4 DNS provider adapter (one real provider) | ⚠️ Implemented without approval | `packages/core/src/dns-provider-desec.ts` implements deSEC adapter (expects `DESEC_TOKEN` env); **NOT wired** into production (commented out in `run-cutover.ts:128`, `run-rollback.ts:77`); per ADR-0002/review finding C2, first provider choice is owner decision — this was implemented unilaterally |
 | T5 rollback path integration test | ✅ Done | PR #31 merged (56f4a50); commit 35956b0 "Add cutover integration tests (Steps 8-10)"; `packages/core/src/rollback.integration.test.ts` tests gate-fail and grace-window rollback paths |
-| T6 cutover runbook + user comms templates | ✅ Done | PR #31 merged (56f4a50); commit c96ae51 "Add cutover runbook and communication templates (Steps 11-12)"; `docs/cutover-runbook.md` (7138 bytes) contains runbook + comms templates |
+| T6 cutover runbook + user comms templates | ✅ Done | PR #31 merged (56f4a50); commit c96ae51 "Add cutover runbook and communication templates (Steps 11-12)"; `docs/cutover-runbook.md` (283 lines) + `docs/cutover-communication-templates.md` (368 lines) contain runbook + comms templates |
 
 > Read `AGENTS.md`, the arch doc (§11 shadow & cutover, §20 verification & rollback) and
 > workplan 0004 first. **Depends on:** 0007 (verification should count all domains, but a
@@ -113,3 +113,21 @@ and match their actual names/flags (spot-check by running `--help`).
   dry-run are mandatory paths through the code, not optional flags.
 - Grace-window default stays 72 h (0004); make it config, keep the safe default.
 - Stalwart rules per `docs/stalwart-integration-fix.md`; new tests use the 0006-A naming.
+
+## Related: DAV Integration Status (Issue #32)
+
+CalDAV/CardDAV/WebDAV integration tests are **failing** against Stalwart v0.16.10 due to missing
+DAV service configuration. See `docs/dav-integration-status.md` for full assessment.
+
+**Current state**:
+- CalDAV/CardDAV: 10 tests FAIL (Stalwart returns 403/HTML instead of DAV responses)
+- WebDAV: 7 tests SKIP (Nextcloud not configured — expected)
+- Unified-Sync: 4 tests FAIL (depends on CalDAV/CardDAV)
+
+**Root cause**: Stalwart's DAV services require explicit HTTP listener configuration not present
+in the minimal test setup.
+
+**Action required**: Owner decision on whether to:
+1. Configure Stalwart DAV services
+2. Accept DAV as unsupported for now (re-skip with explicit reason)
+3. Use alternative DAV target for tests

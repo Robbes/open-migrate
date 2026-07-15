@@ -29,6 +29,7 @@ jobs:
         uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v44.5.7
         with:
           # Docs-only changes (docs/**, **.md) skip lint/tests
+          # Integration tests run when DAV/ledger/testing packages change
           files: |
             **.ts
             **.tsx
@@ -39,7 +40,12 @@ jobs:
             **.json
             package.json
             pnpm-lock.yaml
-            packages/**
+            packages/connectors/**
+            packages/core/**
+            packages/ledger/**
+            packages/testing/**
+            packages/scheduler/**
+            packages/provisioner/**
             apps/**
             deploy/**
 

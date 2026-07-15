@@ -590,4 +590,39 @@ describe('WebdavFileSource', () => {
       expect(extractNameFromPath('/documents/subfolder/')).toBe('subfolder');
     });
   });
+
+  describe('URL resolution', () => {
+    it('should resolve server-returned hrefs using resolveHref (Rule A)', () => {
+      // Test case: Nextcloud returns /remote.php/dav/files/... but config.url is http://host:port/remote.php/dav
+      const nextcloudConfig: WebDAVSourceConfig = {
+        url: 'http://localhost:32774/remote.php/dav',
+        username: 'testuser',
+        passwordEnv: 'WEBDAV_PASSWORD',
+      };
+      const source = new WebdavFileSource(nextcloudConfig);
+      
+      // Access private method via any for testing
+      const resolveHref = (source as any).resolveHref.bind(source);
+      
+      // Server-returned href should resolve to origin + path, NOT base + path
+      expect(resolveHref('/remote.php/dav/files/testuser/Documents/')).toBe(
+        'http://localhost:32774/remote.php/dav/files/testuser/Documents/'
+      );
+      
+      // Should NOT produce doubled path
+      expect(resolveHref('/remote.php/dav/files/testuser/Documents/')).not.toContain(
+        '/remote.php/dav/remote.php/dav/'
+      );
+    });
+    
+    it('should build config-derived URLs using buildUrl (Rule B)', () => {
+      const source = new WebdavFileSource(testConfig);
+      const buildUrl = (source as any).buildUrl.bind(source);
+      
+      // Config-derived paths should append to base, preserving subpath prefix
+      expect(buildUrl('/documents/')).toBe('https://example.com/webdav/documents/');
+      expect(buildUrl('/documents/report.pdf')).toBe('https://example.com/webdav/documents/report.pdf');
+      expect(buildUrl('files/test.txt')).toBe('https://example.com/webdav/files/test.txt');
+    });
+  });
 });
