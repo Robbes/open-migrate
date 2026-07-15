@@ -61,20 +61,22 @@ async function waitForCarddav(maxRetries = 60, delayMs = 3000): Promise<void> {
 /**
  * Seed test contacts via raw DAV PUT.
  * Uses Nextcloud's default addressbook at .../addressbooks/users/<user>/contacts/
- * No MKCOL needed - Nextcloud auto-creates this collection.
+ * The 'contacts' address book is auto-created by Nextcloud - no MKCOL needed.
  */
 async function seedContacts(carddavSource: CarddavSource): Promise<void> {
   const carddavUrl = NEXTCLOUD_WEBDAV_URL!.replace(/\/$/, '');
+  const username = NEXTCLOUD_USERNAME || 'testadmin';
   
   // Discover address books - Nextcloud auto-creates default 'contacts' collection
   const folders = await carddavSource.listFolders();
+  console.log(`[Seed CardDAV] Discovered ${folders.length} folders:`, folders.map(f => `${f.name} (${f.path})`));
   
   // Use the default 'contacts' address book (auto-created by Nextcloud)
-  // or fall back to the first available address book
-  const testAddressBook = folders.find(f => f.name === 'contacts') || folders[0];
+  // Note: Nextcloud displays it as 'Contacts' but the path is 'contacts'
+  const testAddressBook = folders.find(f => f.name.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
   
   if (!testAddressBook) {
-    throw new Error('No address book available for seeding. DAV configuration may be incorrect.');
+    throw new Error(`No address book '${TEST_ADDRESSBOOK_NAME}' available for seeding. DAV configuration may be incorrect.`);
   }
   
   const addressBookUrl = new URL(`${testAddressBook.path.replace(/\/$/, '')}/`, carddavUrl).toString();
@@ -133,6 +135,14 @@ async function seedContacts(carddavSource: CarddavSource): Promise<void> {
   ];
 
   for (const contact of testContacts) {
+    // Escape semicolons in ADR fields for proper vCard formatting
+    // According to RFC 6350, semicolons in property values need to be escaped
+    const adrStreet = contact.adr.street.replace(/;/g, '\\;');
+    const adrCity = contact.adr.city.replace(/;/g, '\\;');
+    const adrRegion = contact.adr.region.replace(/;/g, '\\;');
+    const adrPostal = contact.adr.postalCode.replace(/;/g, '\\;');
+    const adrCountry = contact.adr.country.replace(/;/g, '\\;');
+    
     const vcard = `BEGIN:VCARD
 VERSION:4.0
 UID:${contact.uid}
@@ -141,7 +151,7 @@ ORG:${contact.org}
 TITLE:${contact.title}
 TEL;TYPE=${contact.adr.type}:${contact.tel}
 EMAIL:${contact.email}
-ADR;TYPE=${contact.adr.type};;${contact.adr.street};${contact.adr.city};${contact.adr.region};${contact.adr.postalCode};${contact.adr.country}
+ADR;TYPE=${contact.adr.type}:;;${adrStreet};${adrCity};${adrRegion};${adrPostal};${adrCountry}
 N:${contact.fn.split(' ')[1] || ''};${contact.fn.split(' ')[0] || ''};;;
 END:VCARD`;
 
@@ -239,21 +249,6 @@ async function cleanAddressBook(carddavSource?: CarddavSource): Promise<void> {
       }
     }
 
-    // Delete the address book itself (only if it's not the default 'contacts' address book)
-    if (addressBookHomeSet && TEST_ADDRESSBOOK_NAME !== 'contacts') {
-      const addressBookUrl = new URL(`${TEST_ADDRESSBOOK_NAME}/`, addressBookHomeSet).toString();
-      try {
-        await fetch(addressBookUrl, {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Basic ${Buffer.from(`${NEXTCLOUD_USERNAME}:${NEXTCLOUD_PASSWORD}`).toString('base64')}`,
-          },
-        });
-      } catch {
-        // Ignore address book deletion errors
-      }
-    }
-
     console.log('[Cleanup] Address book cleaned');
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -305,10 +300,10 @@ testSuite('CardDAV Source Integration Tests', () => {
       expect(folders).toBeDefined();
       expect(Array.isArray(folders)).toBe(true);
       
-      // Should find at least the test address book
-      const testAddressBook = folders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
+      // Should find at least the test address book (case-insensitive match)
+      const testAddressBook = folders.find(f => f.name.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
       expect(testAddressBook).toBeDefined();
-      expect(testAddressBook?.name).toBe(TEST_ADDRESSBOOK_NAME);
+      expect(testAddressBook?.name.toLowerCase()).toBe(TEST_ADDRESSBOOK_NAME.toLowerCase());
 
       console.log('[listFolders] Discovered address books:', folders.map(f => f.name));
     });
@@ -326,7 +321,7 @@ testSuite('CardDAV Source Integration Tests', () => {
 
       // First, get the address book folder
       const folders = await carddavSource.listFolders();
-      const testAddressBook = folders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
+      const testAddressBook = folders.find(f => f.name.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
       expect(testAddressBook).toBeDefined();
 
       // List contacts since epoch (all contacts)
@@ -354,6 +349,8 @@ testSuite('CardDAV Source Integration Tests', () => {
 
       // Verify our test contacts are present
       const contactUids = items.map(i => i.item.uid.toLowerCase());
+      console.log('[DEBUG] Actual UIDs returned:', contactUids);
+      console.log('[DEBUG] Expected UIDs:', [TEST_CONTACT_UID_1.toLowerCase(), TEST_CONTACT_UID_2.toLowerCase(), TEST_CONTACT_UID_3.toLowerCase()]);
       expect(contactUids).toContain(TEST_CONTACT_UID_1.toLowerCase());
       expect(contactUids).toContain(TEST_CONTACT_UID_2.toLowerCase());
       expect(contactUids).toContain(TEST_CONTACT_UID_3.toLowerCase());
@@ -374,7 +371,7 @@ testSuite('CardDAV Source Integration Tests', () => {
       process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await carddavSource.listFolders();
-      const testAddressBook = folders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
+      const testAddressBook = folders.find(f => f.name.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
       expect(testAddressBook).toBeDefined();
 
       // First call - get all contacts
@@ -404,7 +401,7 @@ testSuite('CardDAV Source Integration Tests', () => {
       process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await carddavSource.listFolders();
-      const testAddressBook = folders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
+      const testAddressBook = folders.find(f => f.name.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
       expect(testAddressBook).toBeDefined();
 
       // First sync - collect all contacts
@@ -433,16 +430,22 @@ testSuite('CardDAV Source Integration Tests', () => {
       process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await carddavSource.listFolders();
-      const testAddressBook = folders.find(f => f.name === TEST_ADDRESSBOOK_NAME);
+      const testAddressBook = folders.find(f => f.name.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
       expect(testAddressBook).toBeDefined();
 
       const { items } = await carddavSource.listSince(testAddressBook!);
 
       // Find our first test contact
       const testContact = items.find(i => i.item.uid.toLowerCase() === TEST_CONTACT_UID_1.toLowerCase());
+      console.log('[DEBUG] Looking for UID:', TEST_CONTACT_UID_1);
+      console.log('[DEBUG] All returned UIDs:', items.map(i => ({ uid: i.item.uid, lower: i.item.uid.toLowerCase() })));
+      console.log('[DEBUG] Found contact:', testContact ? 'YES' : 'NO');
       expect(testContact).toBeDefined();
 
       // Verify parsed properties - using correct Contact interface properties
+      console.log('[DEBUG] testContact.item.name:', testContact!.item.name);
+      console.log('[DEBUG] testContact.item.organization:', testContact!.item.organization);
+      console.log('[DEBUG] Full vCard:', testContact!.item.vcard.substring(0, 500));
       expect(testContact!.item.name).toBe('Alice Johnson');
       expect(testContact!.item.organization?.name).toBe('Acme Corp');
       expect(testContact!.item.organization?.title).toBe('Software Engineer');
@@ -458,6 +461,7 @@ testSuite('CardDAV Source Integration Tests', () => {
       expect(phone).toBeDefined();
 
       // Verify address exists in addresses array
+      console.log('[DEBUG] testContact.item.addresses:', testContact!.item.addresses);
       expect(testContact!.item.addresses).toBeDefined();
       const adr = testContact!.item.addresses?.find(a => a.street === '123 Main St');
       expect(adr).toBeDefined();
