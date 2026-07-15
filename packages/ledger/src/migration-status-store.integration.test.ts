@@ -4,6 +4,7 @@ import { PgMigrationStatusStore } from './migration-status-store';
 import { PgLedger } from './ledger';
 import * as schemaPg from './schema-pg';
 import { eq, and } from 'drizzle-orm';
+import type { TenantId, MappingId } from '@openmig/shared';
 
 const TEST_DB_URL = process.env.TEST_DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/open_migrate_test';
 
@@ -14,8 +15,8 @@ describe('PgMigrationStatusStore', () => {
   let _ledger: PgLedger;
 
   // Fixed test UUIDs (disjoint from other tests)
-  const TENANT_ID = '00000000-0000-0000-0000-000000000001' as const;
-  const MAPPING_ID = '00000000-0000-0000-0000-000000000002' as const;
+  const TENANT_ID = '00000000-0000-0000-0000-000000000001' as TenantId;
+  const MAPPING_ID = '00000000-0000-0000-0000-000000000002' as MappingId;
   const SOURCE_MAILBOX_ID = '00000000-0000-0000-0000-000000000003' as const;
   const TARGET_MAILBOX_ID = '00000000-0000-0000-0000-000000000004' as const;
 
@@ -100,7 +101,7 @@ describe('PgMigrationStatusStore', () => {
     it('creates a new status row as pending', async () => {
       await statusStore.initDomainStatus(TENANT_ID, MAPPING_ID, 'email');
 
-      const [row] = await db
+      const rows = await db
         .select()
         .from(schemaPg.migrationStatus)
         .where(
@@ -111,11 +112,11 @@ describe('PgMigrationStatusStore', () => {
           ),
         );
 
-      expect(row).toBeDefined();
-      expect(row?.state).toBe('pending');
-      expect(row?.tenantId).toBe(TENANT_ID);
-      expect(row?.mappingId).toBe(MAPPING_ID);
-      expect(row?.domain).toBe('email');
+      expect(rows.length).toBe(1);
+      expect(rows[0]?.state).toBe('pending');
+      expect(rows[0]?.tenantId).toBe(TENANT_ID);
+      expect(rows[0]?.mappingId).toBe(MAPPING_ID);
+      expect(rows[0]?.domain).toBe('email');
     });
 
     it('is idempotent - second call does not duplicate', async () => {
@@ -142,12 +143,12 @@ describe('PgMigrationStatusStore', () => {
       await statusStore.initDomainStatus(TENANT_ID, MAPPING_ID, 'email');
       await statusStore.markInProgress(TENANT_ID, MAPPING_ID, 'email');
 
-      const [row] = await db
+      const rows = await db
         .select()
         .from(schemaPg.migrationStatus)
-        .where(eq(schemaPg.migrationStatus.id, (await getStatusRow()).id));
+        .where(eq(schemaPg.migrationStatus.id, (await getStatusRow())!.id));
 
-      expect(row?.state).toBe('in_progress');
+      expect(rows[0]?.state).toBe('in_progress');
     });
   });
 
@@ -157,13 +158,13 @@ describe('PgMigrationStatusStore', () => {
       await statusStore.markInProgress(TENANT_ID, MAPPING_ID, 'email');
       await statusStore.markCompleted(TENANT_ID, MAPPING_ID, 'email');
 
-      const [row] = await db
+      const rows = await db
         .select()
         .from(schemaPg.migrationStatus)
-        .where(eq(schemaPg.migrationStatus.id, (await getStatusRow()).id));
+        .where(eq(schemaPg.migrationStatus.id, (await getStatusRow())!.id));
 
-      expect(row?.state).toBe('completed');
-      expect(row?.completedAt).toBeDefined();
+      expect(rows[0]?.state).toBe('completed');
+      expect(rows[0]?.completedAt).toBeDefined();
     });
   });
 
@@ -173,13 +174,13 @@ describe('PgMigrationStatusStore', () => {
       await statusStore.initDomainStatus(TENANT_ID, MAPPING_ID, 'email');
       await statusStore.markFailed(TENANT_ID, MAPPING_ID, 'email', errorMessage);
 
-      const [row] = await db
+      const rows = await db
         .select()
         .from(schemaPg.migrationStatus)
-        .where(eq(schemaPg.migrationStatus.id, (await getStatusRow()).id));
+        .where(eq(schemaPg.migrationStatus.id, (await getStatusRow())!.id));
 
-      expect(row?.state).toBe('failed');
-      expect(row?.lastError).toBe(errorMessage);
+      expect(rows[0]?.state).toBe('failed');
+      expect(rows[0]?.lastError).toBe(errorMessage);
     });
   });
 
@@ -188,7 +189,7 @@ describe('PgMigrationStatusStore', () => {
       await statusStore.initDomainStatus(TENANT_ID, MAPPING_ID, 'calendar');
       await statusStore.markSkipped(TENANT_ID, MAPPING_ID, 'calendar');
 
-      const [row] = await db
+      const rows = await db
         .select()
         .from(schemaPg.migrationStatus)
         .where(
@@ -199,7 +200,7 @@ describe('PgMigrationStatusStore', () => {
           ),
         );
 
-      expect(row?.state).toBe('skipped');
+      expect(rows[0]?.state).toBe('skipped');
     });
   });
 
@@ -275,16 +276,16 @@ describe('PgMigrationStatusStore', () => {
     });
 
     it('handles empty item set with zero counts', async () => {
-      await statusStore.initDomainStatus(TENANT_ID, MAPPING_ID, 'contacts');
-      await statusStore.markInProgress(TENANT_ID, MAPPING_ID, 'contacts');
+      await statusStore.initDomainStatus(TENANT_ID, MAPPING_ID, 'calendar');
+      await statusStore.markInProgress(TENANT_ID, MAPPING_ID, 'calendar');
 
       const status = await statusStore.getStatus(TENANT_ID, MAPPING_ID);
-      const contactStatus = status.find((s) => s.domain === 'contacts');
+      const calendarStatus = status.find((s) => s.domain === 'calendar');
 
-      expect(contactStatus).toBeDefined();
-      expect(contactStatus?.itemsSynced).toBe(0);
-      expect(contactStatus?.itemsFailed).toBe(0);
-      expect(contactStatus?.bytesTransferred).toBe(0);
+      expect(calendarStatus).toBeDefined();
+      expect(calendarStatus?.itemsSynced).toBe(0);
+      expect(calendarStatus?.itemsFailed).toBe(0);
+      expect(calendarStatus?.bytesTransferred).toBe(0);
     });
   });
 
@@ -303,7 +304,7 @@ describe('PgMigrationStatusStore', () => {
   });
 
   async function getStatusRow() {
-    const [row] = await db
+    const rows = await db
       .select()
       .from(schemaPg.migrationStatus)
       .where(
@@ -311,8 +312,7 @@ describe('PgMigrationStatusStore', () => {
           eq(schemaPg.migrationStatus.tenantId, TENANT_ID),
           eq(schemaPg.migrationStatus.mappingId, MAPPING_ID),
         ),
-      )
-      .limit(1);
-    return row;
+      );
+    return rows[0];
   }
 });

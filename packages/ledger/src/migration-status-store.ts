@@ -185,7 +185,7 @@ export class PgMigrationStatusStore implements MigrationStatusStore {
         : row.status.updatedAt,
       completedAt: row.status.completedAt instanceof Date
         ? row.status.completedAt.toISOString()
-        : row.status.completedAt,
+        : row.status.completedAt ?? undefined,
       lastError: row.status.lastError ?? undefined,
     }));
   }

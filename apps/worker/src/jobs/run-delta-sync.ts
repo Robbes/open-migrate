@@ -9,11 +9,9 @@
 
 import { z } from 'zod';
 import { schemaTask } from '@trigger.dev/sdk/v3';
-import { createPgDb } from '@openmig/ledger';
-import { PgMigrationStatusStore } from '@openmig/ledger';
-import { PgLedger, PgCursorStore } from '@openmig/ledger';
+import { createPgDb, PgLedger, PgCursorStore, PgMigrationStatusStore } from '@openmig/ledger';
 import { runShadowPass, type ReconcileDeps } from '@openmig/core';
-import type { SourceConnector, TargetWriter } from '@openmig/shared';
+import type { SourceConnector, TargetWriter, TenantId, MappingId } from '@openmig/shared';
 
 // Job input schema
 const DeltaSyncJobSchema = z.object({
@@ -54,13 +52,15 @@ export const runDeltaSync = schemaTask({
     try {
       // Perform delta sync for each domain
       const domains = typedPayload.domains ?? ['email', 'calendar', 'contact', 'file'];
+      const tenantId = typedPayload.tenantId as TenantId;
+      const mappingId = typedPayload.mappingId as MappingId;
 
       for (const domain of domains) {
         console.log(`Running delta sync for domain: ${domain}`);
 
         // Initialize status for this domain
-        await statusStore.initDomainStatus(typedPayload.tenantId, typedPayload.mappingId, domain);
-        await statusStore.markInProgress(typedPayload.tenantId, typedPayload.mappingId, domain);
+        await statusStore.initDomainStatus(tenantId, mappingId, domain);
+        await statusStore.markInProgress(tenantId, mappingId, domain);
 
         try {
           if (domain === 'email') {
@@ -69,8 +69,8 @@ export const runDeltaSync = schemaTask({
             const source = null as unknown as SourceConnector;
             const target = null as unknown as TargetWriter;
             const result = await runShadowPass({
-              tenantId: typedPayload.tenantId,
-              mappingId: typedPayload.mappingId,
+              tenantId,
+              mappingId,
               source,
               target,
               ledger,
@@ -78,16 +78,16 @@ export const runDeltaSync = schemaTask({
             } as ReconcileDeps);
 
             console.log(`Mail sync completed: ${result.created} created, ${result.skipped} skipped`);
-            await statusStore.markCompleted(typedPayload.tenantId, typedPayload.mappingId, domain);
+            await statusStore.markCompleted(tenantId, mappingId, domain);
           } else {
             // Other domains (calendar, contact, file) - stub for now
             console.log(`Domain ${domain} not yet implemented`);
-            await statusStore.markSkipped(typedPayload.tenantId, typedPayload.mappingId, domain);
+            await statusStore.markSkipped(tenantId, mappingId, domain);
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
           console.error(`Domain ${domain} sync failed:`, errorMessage);
-          await statusStore.markFailed(typedPayload.tenantId, typedPayload.mappingId, domain, errorMessage);
+          await statusStore.markFailed(tenantId, mappingId, domain, errorMessage);
           throw error;
         }
       }
