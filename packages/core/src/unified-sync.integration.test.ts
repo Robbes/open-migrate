@@ -113,6 +113,12 @@ async function cleanDatabaseState(): Promise<void> {
       WHERE tenant_id = ${TENANT_ID}
     `);
     
+    // Delete mailbox_mapping for this tenant
+    await db.execute(sql`
+      DELETE FROM mailbox_mapping 
+      WHERE tenant_id = ${TENANT_ID}
+    `);
+    
     console.log('[Cleanup] Database state cleaned');
   } finally {
     await db.close();
@@ -355,6 +361,13 @@ describeSuite('Unified Sync Integration Tests', () => {
     db = createPgDb(PG_CONNECTION_STRING);
     ledger = new PgLedger(db);
     cursors = new PgCursorStore(db);
+
+    // Seed the test tenant (required before inserting mailbox_mapping/connection rows)
+    await db.execute(sql`
+      INSERT INTO tenant (id, name, status)
+      VALUES (${TENANT_ID}, 'Unified Sync Test Tenant', 'active')
+      ON CONFLICT (id) DO NOTHING
+    `);
   }, 60000);
 
   beforeEach(async () => {
