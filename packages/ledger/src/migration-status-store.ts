@@ -133,7 +133,7 @@ export class PgMigrationStatusStore implements MigrationStatusStore {
         status: schemaPg.migrationStatus,
         itemsSynced: sql<number>`COUNT(CASE WHEN ${schemaPg.item.status} IN ('copied', 'updated', 'skipped') THEN 1 END)`,
         itemsFailed: sql<number>`COUNT(CASE WHEN ${schemaPg.item.status} = 'failed' THEN 1 END)`,
-        bytesTransferred: sql<number | null>`COALESCE(SUM(${schemaPg.item.sizeBytes}), 0)`,
+        bytesTransferred: sql<number | null>`COALESCE(SUM(CASE WHEN ${schemaPg.item.status} IN ('copied', 'updated', 'skipped') THEN ${schemaPg.item.sizeBytes} ELSE 0 END), 0)`,
       })
       .from(schemaPg.migrationStatus)
       .leftJoin(
