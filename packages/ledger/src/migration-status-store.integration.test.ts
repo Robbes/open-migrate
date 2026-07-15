@@ -11,7 +11,6 @@ const TEST_DB_URL = process.env.TEST_DATABASE_URL || 'postgres://postgres:postgr
 describe('PgMigrationStatusStore', () => {
   let db: ReturnType<typeof createPgDb>;
   let statusStore: PgMigrationStatusStore;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   let _ledger: PgLedger;
 
   // Fixed test UUIDs (disjoint from other tests)
@@ -211,20 +210,20 @@ describe('PgMigrationStatusStore', () => {
       await statusStore.markInProgress(TENANT_ID, MAPPING_ID, 'email');
 
       // Seed item records
-      await db.insert(schemaPg.item).values([
+      const items = [
         {
           id: '00000000-0000-0000-0000-000000000010',
           tenantId: TENANT_ID,
           mappingId: MAPPING_ID,
-          domain: 'email',
+          domain: 'email' as const,
           collection: 'Inbox',
           naturalKey: 'msg1@example.com',
           naturalKeyHash: 'hash1',
           contentHash: 'ch1',
-          sizeBytes: 1000,
-          status: 'copied',
-          sourceRef: {},
-          targetRef: {},
+          sizeBytes: BigInt(1000),
+          status: 'copied' as const,
+          sourceRef: {} as Record<string, unknown>,
+          targetRef: {} as Record<string, unknown>,
           attemptCount: 0,
           firstSeenAt: new Date(),
           updatedAt: new Date(),
@@ -233,15 +232,15 @@ describe('PgMigrationStatusStore', () => {
           id: '00000000-0000-0000-0000-000000000011',
           tenantId: TENANT_ID,
           mappingId: MAPPING_ID,
-          domain: 'email',
+          domain: 'email' as const,
           collection: 'Inbox',
           naturalKey: 'msg2@example.com',
           naturalKeyHash: 'hash2',
           contentHash: 'ch2',
-          sizeBytes: 2000,
-          status: 'copied',
-          sourceRef: {},
-          targetRef: {},
+          sizeBytes: BigInt(2000),
+          status: 'copied' as const,
+          sourceRef: {} as Record<string, unknown>,
+          targetRef: {} as Record<string, unknown>,
           attemptCount: 0,
           firstSeenAt: new Date(),
           updatedAt: new Date(),
@@ -250,21 +249,22 @@ describe('PgMigrationStatusStore', () => {
           id: '00000000-0000-0000-0000-000000000012',
           tenantId: TENANT_ID,
           mappingId: MAPPING_ID,
-          domain: 'email',
+          domain: 'email' as const,
           collection: 'Inbox',
           naturalKey: 'msg3@example.com',
           naturalKeyHash: 'hash3',
           contentHash: 'ch3',
-          sizeBytes: 500,
-          status: 'failed',
-          sourceRef: {},
-          targetRef: {},
+          sizeBytes: BigInt(500),
+          status: 'failed' as const,
+          sourceRef: {} as Record<string, unknown>,
+          targetRef: {} as Record<string, unknown>,
           attemptCount: 1,
           lastError: 'Sync error',
           firstSeenAt: new Date(),
           updatedAt: new Date(),
         },
-      ]);
+      ];
+      await db.insert(schemaPg.item).values(items);
 
       const status = await statusStore.getStatus(TENANT_ID, MAPPING_ID);
       const emailStatus = status.find((s) => s.domain === 'email');
