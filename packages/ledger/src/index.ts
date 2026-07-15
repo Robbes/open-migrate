@@ -7,3 +7,4 @@ export * from './db';
 export * from './schema-pg';
 export * from './cutover-store';
 export * from './verification-queries';
+export * from './migration-status-store';

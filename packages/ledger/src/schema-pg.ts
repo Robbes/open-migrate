@@ -546,6 +546,38 @@ export const cursor = pgTable(
   ],
 );
 
+// ========================= Migration Status =========================
+
+export const migrationStatus = pgTable(
+  'migration_status',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenant.id, { onDelete: 'cascade' }),
+    mappingId: uuid('mapping_id')
+      .notNull()
+      .references(() => mailboxMapping.id, { onDelete: 'cascade' }),
+    domain: text('domain', { enum: ['email', 'calendar', 'contact', 'file'] }).notNull(),
+    state: text('state', {
+      enum: ['pending', 'in_progress', 'completed', 'failed', 'skipped'],
+    })
+      .notNull()
+      .default('pending'),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    lastError: text('last_error'),
+  },
+  (t) => [
+    uniqueIndex('uk_migration_status_tenant_mapping_domain').on(
+      t.tenantId,
+      t.mappingId,
+      t.domain,
+    ),
+    index('ix_migration_status_tenant_mapping').on(t.tenantId, t.mappingId),
+    index('ix_migration_status_state').on(t.state),
+  ],
+);
+
 // ========================= Tenant Members =========================
 
 export const tenantMember = pgTable(

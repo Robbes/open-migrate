@@ -414,3 +414,60 @@ export interface LedgerVerificationReader {
     domain: 'email' | 'calendar' | 'contact' | 'file'
   ): Promise<string[]>;
 }
+
+/**
+ * Migration status for a domain sync.
+ */
+export interface MigrationStatus {
+  readonly id: string;
+  readonly tenantId: TenantId;
+  readonly mappingId: MappingId;
+  readonly domain: 'email' | 'calendar' | 'contact' | 'file';
+  readonly state: 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
+  readonly itemsSynced: number;
+  readonly itemsFailed: number;
+  readonly bytesTransferred: number;
+  readonly startedAt: string;
+  readonly updatedAt: string;
+  readonly completedAt?: string;
+  readonly lastError?: string;
+}
+
+/**
+ * Port for tracking per-domain migration status.
+ * State is maintained (pending/in_progress/completed/failed/skipped),
+ * while item counts are DERIVED from the item ledger records.
+ */
+export interface MigrationStatusStore {
+  /**
+   * Initialize domain status as 'pending' (idempotent).
+   * Creates a new row if it doesn't exist, otherwise no-op.
+   */
+  initDomainStatus(tenantId: TenantId, mappingId: MappingId, domain: 'email' | 'calendar' | 'contact' | 'file'): Promise<void>;
+
+  /**
+   * Mark a domain sync as in progress.
+   */
+  markInProgress(tenantId: TenantId, mappingId: MappingId, domain: 'email' | 'calendar' | 'contact' | 'file'): Promise<void>;
+
+  /**
+   * Mark a domain sync as completed successfully.
+   */
+  markCompleted(tenantId: TenantId, mappingId: MappingId, domain: 'email' | 'calendar' | 'contact' | 'file'): Promise<void>;
+
+  /**
+   * Mark a domain sync as failed with an error.
+   */
+  markFailed(tenantId: TenantId, mappingId: MappingId, domain: 'email' | 'calendar' | 'contact' | 'file', error: string): Promise<void>;
+
+  /**
+   * Mark a domain sync as skipped (e.g., disabled or no work).
+   */
+  markSkipped(tenantId: TenantId, mappingId: MappingId, domain: 'email' | 'calendar' | 'contact' | 'file'): Promise<void>;
+
+  /**
+   * Get the migration status for a mapping, including DERIVED counts from item records.
+   * Returns status for all domains (email, calendar, contact, file).
+   */
+  getStatus(tenantId: TenantId, mappingId: MappingId): Promise<MigrationStatus[]>;
+}
