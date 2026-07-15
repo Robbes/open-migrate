@@ -15,7 +15,7 @@ import type {
   TenantId,
   MappingId,
 } from '@openmig/shared';
-import type { GenericTargetWriter, GenericRawItem } from '@openmig/core';
+import type { GenericRawItem } from '@openmig/core';
 import { fileNaturalKeyHash, fileContentHash } from '@openmig/shared';
 
 /**
@@ -39,7 +39,7 @@ export interface WebDAVTargetConfig {
 /**
  * WebDAV target writer implementation
  */
-export class WebDAVTargetWriter implements FileTargetWriter, GenericTargetWriter<FileFolder> {
+export class WebDAVTargetWriter implements FileTargetWriter {
   private readonly config: WebDAVTargetConfig;
   private readonly ledger: Ledger;
   private readonly tenantId: TenantId;

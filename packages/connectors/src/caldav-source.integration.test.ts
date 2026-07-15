@@ -73,7 +73,7 @@ async function seedCalendarEvents(caldavSource: CalDAVSource): Promise<void> {
   
   // Use the default 'personal' calendar (auto-created by Nextcloud)
   // or fall back to the first available calendar
-  const testCalendar = folders.find(f => f.name.toLowerCase() === 'personal') || folders[0];
+  const testCalendar = folders.find(f => f.name?.toLowerCase() === 'personal') || folders[0];
   
   if (!testCalendar) {
     throw new Error('No calendar available for seeding. DAV configuration may be incorrect.');
@@ -282,9 +282,9 @@ testSuite('CalDAV Source Integration Tests', () => {
       expect(Array.isArray(folders)).toBe(true);
       
       // Should find at least the test calendar (case-insensitive match)
-      const testCalendar = folders.find(f => f.name.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
+      const testCalendar = folders.find(f => f.name?.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
       expect(testCalendar).toBeDefined();
-      expect(testCalendar?.name.toLowerCase()).toBe(TEST_CALENDAR_NAME.toLowerCase());
+      expect(testCalendar?.name?.toLowerCase()).toBe(TEST_CALENDAR_NAME.toLowerCase());
 
       console.log('[listFolders] Discovered calendars:', folders.map(f => f.name));
     });
@@ -302,7 +302,7 @@ testSuite('CalDAV Source Integration Tests', () => {
 
       // First, get the calendar folder
       const folders = await caldavSource.listFolders();
-      const testCalendar = folders.find(f => f.name.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
+      const testCalendar = folders.find(f => f.name?.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
       expect(testCalendar).toBeDefined();
 
       // List events since epoch (all events)
@@ -353,7 +353,7 @@ testSuite('CalDAV Source Integration Tests', () => {
       process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await caldavSource.listFolders();
-      const testCalendar = folders.find(f => f.name.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
+      const testCalendar = folders.find(f => f.name?.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
       expect(testCalendar).toBeDefined();
 
       // First call - get all events
@@ -383,7 +383,7 @@ testSuite('CalDAV Source Integration Tests', () => {
       process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await caldavSource.listFolders();
-      const testCalendar = folders.find(f => f.name.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
+      const testCalendar = folders.find(f => f.name?.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
       expect(testCalendar).toBeDefined();
 
       // First sync - collect all events
@@ -412,7 +412,7 @@ testSuite('CalDAV Source Integration Tests', () => {
       process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await caldavSource.listFolders();
-      const testCalendar = folders.find(f => f.name.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
+      const testCalendar = folders.find(f => f.name?.toLowerCase() === TEST_CALENDAR_NAME.toLowerCase());
       expect(testCalendar).toBeDefined();
 
       const { items } = await caldavSource.listSince(testCalendar!);

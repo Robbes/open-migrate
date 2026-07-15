@@ -72,7 +72,7 @@ async function seedContacts(carddavSource: CarddavSource): Promise<void> {
   
   // Use the default 'contacts' address book (auto-created by Nextcloud)
   // Note: Nextcloud displays it as 'Contacts' but the path is 'contacts'
-  const testAddressBook = folders.find(f => f.name.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
+  const testAddressBook = folders.find(f => f.name?.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
   
   if (!testAddressBook) {
     throw new Error(`No address book '${TEST_ADDRESSBOOK_NAME}' available for seeding. DAV configuration may be incorrect.`);
@@ -300,9 +300,9 @@ testSuite('CardDAV Source Integration Tests', () => {
       expect(Array.isArray(folders)).toBe(true);
       
       // Should find at least the test address book (case-insensitive match)
-      const testAddressBook = folders.find(f => f.name.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
+      const testAddressBook = folders.find(f => f.name?.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
       expect(testAddressBook).toBeDefined();
-      expect(testAddressBook?.name.toLowerCase()).toBe(TEST_ADDRESSBOOK_NAME.toLowerCase());
+      expect(testAddressBook?.name?.toLowerCase()).toBe(TEST_ADDRESSBOOK_NAME.toLowerCase());
 
       console.log('[listFolders] Discovered address books:', folders.map(f => f.name));
     });
@@ -320,7 +320,7 @@ testSuite('CardDAV Source Integration Tests', () => {
 
       // First, get the address book folder
       const folders = await carddavSource.listFolders();
-      const testAddressBook = folders.find(f => f.name.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
+      const testAddressBook = folders.find(f => f.name?.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
       expect(testAddressBook).toBeDefined();
 
       // List contacts since epoch (all contacts)
@@ -370,7 +370,7 @@ testSuite('CardDAV Source Integration Tests', () => {
       process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await carddavSource.listFolders();
-      const testAddressBook = folders.find(f => f.name.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
+      const testAddressBook = folders.find(f => f.name?.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
       expect(testAddressBook).toBeDefined();
 
       // First call - get all contacts
@@ -400,7 +400,7 @@ testSuite('CardDAV Source Integration Tests', () => {
       process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await carddavSource.listFolders();
-      const testAddressBook = folders.find(f => f.name.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
+      const testAddressBook = folders.find(f => f.name?.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
       expect(testAddressBook).toBeDefined();
 
       // First sync - collect all contacts
@@ -429,7 +429,7 @@ testSuite('CardDAV Source Integration Tests', () => {
       process.env.NEXTCLOUD_PASSWORD = NEXTCLOUD_PASSWORD;
 
       const folders = await carddavSource.listFolders();
-      const testAddressBook = folders.find(f => f.name.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
+      const testAddressBook = folders.find(f => f.name?.toLowerCase() === TEST_ADDRESSBOOK_NAME.toLowerCase());
       expect(testAddressBook).toBeDefined();
 
       const { items } = await carddavSource.listSince(testAddressBook!);
