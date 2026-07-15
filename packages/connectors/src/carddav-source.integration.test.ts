@@ -65,7 +65,6 @@ async function waitForCarddav(maxRetries = 60, delayMs = 3000): Promise<void> {
  */
 async function seedContacts(carddavSource: CarddavSource): Promise<void> {
   const carddavUrl = NEXTCLOUD_WEBDAV_URL!.replace(/\/$/, '');
-  const username = NEXTCLOUD_USERNAME || 'testadmin';
   
   // Discover address books - Nextcloud auto-creates default 'contacts' collection
   const folders = await carddavSource.listFolders();

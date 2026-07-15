@@ -397,6 +397,7 @@ async function startNextcloud(): Promise<{
   const propfindIntervalMs = 2000;
   let lastStatus = 0;
   let lastBody = '';
+  let statusBody = '';
   
   for (let i = 0; i < maxPropfindAttempts; i++) {
     try {
@@ -404,7 +405,7 @@ async function startNextcloud(): Promise<{
       const statusResponse = await fetch(`http://${nextcloudHost}:${nextcloudPort}/status.php`, {
         method: 'GET',
       });
-      const statusBody = await statusResponse.text();
+      statusBody = await statusResponse.text();
       
       // Now try PROPFIND on the DAV root
       const response = await fetch(davRootUrl, {
@@ -434,7 +435,7 @@ async function startNextcloud(): Promise<{
   }
   
   if (!propfindReady) {
-    const errorMsg = `Nextcloud DAV not ready: PROPFIND did not return 207 after ${maxPropfindAttempts} attempts. Last status: ${lastStatus}. Response body (first 200 chars): ${lastBody}`;
+    const errorMsg = `Nextcloud DAV not ready: PROPFIND did not return 207 after ${maxPropfindAttempts} attempts. Last status: ${lastStatus}. Response body (first 200 chars): ${lastBody}. status.php body: ${statusBody.slice(0, 200)}`;
     console.error(`[NextcloudSetup] ${errorMsg}`);
     throw new Error(errorMsg);
   }
