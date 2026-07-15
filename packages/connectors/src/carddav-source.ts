@@ -162,14 +162,14 @@ export class CarddavSource implements ContactSource {
         this.addressBookHomeSet = homeSet;
       } else {
         // Final fallback: construct address book home set from username
-        // Nextcloud typically serves address books at /remote.php/dav/addressbooks/{username}/
+        // Nextcloud typically serves address books at /remote.php/dav/addressbooks/users/{username}/
         const baseUrl = this.config.url.replace(/\/$/, '');
-        this.addressBookHomeSet = `${baseUrl}/addressbooks/${this.config.username}/`;
+        this.addressBookHomeSet = `${baseUrl}/addressbooks/users/${this.config.username}/`;
       }
     } else if (response.status === 404) {
       // PROPFIND failed with 404, use fallback constructed URL
       const baseUrl = this.config.url.replace(/\/$/, '');
-      this.addressBookHomeSet = `${baseUrl}/addressbooks/${this.config.username}/`;
+      this.addressBookHomeSet = `${baseUrl}/addressbooks/users/${this.config.username}/`;
     } else {
       throw new Error(`PROPFIND failed with status ${response.status}: ${response.body}`);
     }
@@ -296,9 +296,11 @@ export class CarddavSource implements ContactSource {
     syncToken?: string,
     ctag?: string,
   ): string {
+    // Nextcloud requires sync-token element even for full syncs
+    // Use empty element for full sync, actual token for incremental sync
     const syncTokenElement = syncToken
       ? `<D:sync-token>${this.escapeXml(syncToken)}</D:sync-token>`
-      : '';
+      : '<D:sync-token/>';
 
     const vcardVersionElement = ctag
       ? `<A:address-data xmlns:A="urn:ietf:params:xml:ns:carddav"><A:prop>FN</A:prop><A:prop>UID</A:prop></A:address-data>`
@@ -614,16 +616,17 @@ export class CarddavSource implements ContactSource {
       if (/;HOME/i.test(fullLine)) type = 'home';
       else if (/;WORK/i.test(fullLine)) type = 'work';
       
-      // ADR format: ADR;;street;city;region;postal;country
-      const adrMatch = fullLine.match(/[:\s]([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);([^;\r\n]*)/);
-      if (adrMatch && adrMatch[1] && adrMatch[2] && adrMatch[3] && adrMatch[4] && adrMatch[5]) {
+      // ADR format: ADR;TYPE=work:;;street;city;region;postal;country
+      // The regex needs 7 capture groups: prefix, type, street, city, region, postal, country
+      const adrMatch = fullLine.match(/[:\s]([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);([^;\r\n]*)/);
+      if (adrMatch && adrMatch[3] && adrMatch[4] && adrMatch[5] && adrMatch[6] && adrMatch[7]) {
         addresses.push({
           type,
-          street: this.unfoldAndDecode(adrMatch[1].trim()) || undefined,
-          city: this.unfoldAndDecode(adrMatch[2].trim()) || undefined,
-          region: this.unfoldAndDecode(adrMatch[3].trim()) || undefined,
-          postalCode: this.unfoldAndDecode(adrMatch[4].trim()) || undefined,
-          country: this.unfoldAndDecode(adrMatch[5].trim()) || undefined,
+          street: this.unfoldAndDecode(adrMatch[3].trim()) || undefined,
+          city: this.unfoldAndDecode(adrMatch[4].trim()) || undefined,
+          region: this.unfoldAndDecode(adrMatch[5].trim()) || undefined,
+          postalCode: this.unfoldAndDecode(adrMatch[6].trim()) || undefined,
+          country: this.unfoldAndDecode(adrMatch[7].trim()) || undefined,
         });
       }
     }
