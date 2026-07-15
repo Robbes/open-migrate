@@ -14,6 +14,8 @@ export interface FilePermissions {
 export interface FileItem {
   /** Relative path within the sync root - the natural key. */
   readonly path: string;
+  /** File name (basename), if available. */
+  readonly name?: string;
   /** Whether this is a directory. */
   readonly isDirectory: boolean;
   /** File size in bytes (0 for directories). */
