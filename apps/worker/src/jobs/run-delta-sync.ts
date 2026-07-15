@@ -10,8 +10,8 @@
 import { z } from 'zod';
 import { schemaTask } from '@trigger.dev/sdk/v3';
 import { createPgDb, PgLedger, PgCursorStore, PgMigrationStatusStore } from '@openmig/ledger';
-import { runShadowPass, type ReconcileDeps } from '@openmig/core';
-import type { SourceConnector, TargetWriter, TenantId, MappingId } from '@openmig/shared';
+import { runShadowPass } from '@openmig/core';
+import type { ReconcileDeps, SourceConnector, TargetWriter, TenantId, MappingId } from '@openmig/shared';
 
 // Job input schema
 const DeltaSyncJobSchema = z.object({
