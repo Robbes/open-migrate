@@ -225,7 +225,7 @@ export class GraphDriveSource implements FileSource {
   }
 
   /**
-   * Fetch full raw data for an item (implements GenericSource interface).
+   * Fetch full raw data for an item (implements FileSource interface).
    */
   async fetch(item: FileItem): Promise<RawFileItem> {
     // Extract item ID from sourceRef
