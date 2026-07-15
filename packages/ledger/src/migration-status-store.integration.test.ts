@@ -10,7 +10,8 @@ const TEST_DB_URL = process.env.TEST_DATABASE_URL || 'postgres://postgres:postgr
 describe('PgMigrationStatusStore', () => {
   let db: ReturnType<typeof createPgDb>;
   let statusStore: PgMigrationStatusStore;
-  let ledger: PgLedger;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  let _ledger: PgLedger;
 
   // Fixed test UUIDs (disjoint from other tests)
   const TENANT_ID = '00000000-0000-0000-0000-000000000001' as const;
@@ -21,7 +22,7 @@ describe('PgMigrationStatusStore', () => {
   beforeAll(async () => {
     db = createPgDb(TEST_DB_URL);
     statusStore = new PgMigrationStatusStore(db);
-    ledger = new PgLedger(db);
+    _ledger = new PgLedger(db);
 
     // Setup test data: tenant, mailbox_mapping
     await db.insert(schemaPg.tenant).values({

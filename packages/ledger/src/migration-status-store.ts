@@ -5,7 +5,7 @@ import {
   type MappingId,
 } from '@openmig/shared';
 import type { PgDatabase } from './db';
-import { eq, and, sql, count, sum } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import * as schemaPg from './schema-pg';
 
 /**

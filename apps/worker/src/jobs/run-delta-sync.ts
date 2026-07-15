@@ -13,6 +13,7 @@ import { createPgDb } from '@openmig/ledger';
 import { PgMigrationStatusStore } from '@openmig/ledger';
 import { PgLedger, PgCursorStore } from '@openmig/ledger';
 import { runShadowPass, type ReconcileDeps } from '@openmig/core';
+import type { SourceConnector, TargetWriter } from '@openmig/shared';
 
 // Job input schema
 const DeltaSyncJobSchema = z.object({
@@ -65,14 +66,16 @@ export const runDeltaSync = schemaTask({
           if (domain === 'email') {
             // Mail sync using runShadowPass
             // Note: This is a placeholder - actual source/target creation needs proper config
+            const source = null as unknown as SourceConnector;
+            const target = null as unknown as TargetWriter;
             const result = await runShadowPass({
               tenantId: typedPayload.tenantId,
               mappingId: typedPayload.mappingId,
-              source: null as unknown as any, // TODO: create proper mail source
-              target: null as unknown as any, // TODO: create proper target writer
+              source,
+              target,
               ledger,
               cursors,
-            } as unknown as ReconcileDeps);
+            } as ReconcileDeps);
 
             console.log(`Mail sync completed: ${result.created} created, ${result.skipped} skipped`);
             await statusStore.markCompleted(typedPayload.tenantId, typedPayload.mappingId, domain);
