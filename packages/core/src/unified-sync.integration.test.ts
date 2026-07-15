@@ -107,18 +107,30 @@ async function cleanDatabaseState(): Promise<void> {
       WHERE tenant_id = ${TENANT_ID}
     `);
     
+    // Delete mailbox_mapping for this tenant (must be before mailbox due to FK)
+    await db.execute(sql`
+      DELETE FROM mailbox_mapping
+      WHERE tenant_id = ${TENANT_ID}
+    `);
+
+    // Delete mailbox for this tenant (must be before connection due to FK)
+    await db.execute(sql`
+      DELETE FROM mailbox
+      WHERE tenant_id = ${TENANT_ID}
+    `);
+
     // Delete connections for this tenant
     await db.execute(sql`
-      DELETE FROM connection 
+      DELETE FROM connection
       WHERE tenant_id = ${TENANT_ID}
     `);
-    
-    // Delete mailbox_mapping for this tenant
+
+    // Delete tenant
     await db.execute(sql`
-      DELETE FROM mailbox_mapping 
-      WHERE tenant_id = ${TENANT_ID}
+      DELETE FROM tenant
+      WHERE id = ${TENANT_ID}
     `);
-    
+
     console.log('[Cleanup] Database state cleaned');
   } finally {
     await db.close();
@@ -362,10 +374,84 @@ describeSuite('Unified Sync Integration Tests', () => {
     ledger = new PgLedger(db);
     cursors = new PgCursorStore(db);
 
-    // Seed the test tenant (required before inserting mailbox_mapping/connection rows)
+    // Seed the test tenant (required before inserting connection/mailbox/mapping rows)
     await db.execute(sql`
       INSERT INTO tenant (id, name, status)
       VALUES (${TENANT_ID}, 'Unified Sync Test Tenant', 'active')
+      ON CONFLICT (id) DO NOTHING
+    `);
+
+    // Seed source connection (CalDAV/CardDAV/WebDAV source - Stalwart)
+    await db.execute(sql`
+      INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status)
+      VALUES (
+        '650e8400-e29b-41d4-a716-446655440101',
+        ${TENANT_ID},
+        'source',
+        'nextcloud',
+        'Stalwart Source',
+        '{}',
+        'connected'
+      )
+      ON CONFLICT (id) DO NOTHING
+    `);
+
+    // Seed target connection (CalDAV/CardDAV/WebDAV target - Nextcloud)
+    await db.execute(sql`
+      INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status)
+      VALUES (
+        '650e8400-e29b-41d4-a716-446655440102',
+        ${TENANT_ID},
+        'target',
+        'nextcloud',
+        'Nextcloud Target',
+        '{}',
+        'connected'
+      )
+      ON CONFLICT (id) DO NOTHING
+    `);
+
+    // Seed source mailbox
+    await db.execute(sql`
+      INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, display_name, status)
+      VALUES (
+        '750e8400-e29b-41d4-a716-446655440101',
+        ${TENANT_ID},
+        '650e8400-e29b-41d4-a716-446655440101',
+        'stalwart-inbox',
+        'user',
+        'Inbox',
+        'active'
+      )
+      ON CONFLICT (id) DO NOTHING
+    `);
+
+    // Seed target mailbox
+    await db.execute(sql`
+      INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, display_name, status)
+      VALUES (
+        '750e8400-e29b-41d4-a716-446655440102',
+        ${TENANT_ID},
+        '650e8400-e29b-41d4-a716-446655440102',
+        'nextcloud-inbox',
+        'user',
+        'Inbox',
+        'active'
+      )
+      ON CONFLICT (id) DO NOTHING
+    `);
+
+    // Seed mailbox mapping
+    await db.execute(sql`
+      INSERT INTO mailbox_mapping (id, tenant_id, source_mailbox_id, target_mailbox_id, status, mode)
+      VALUES (
+        ${MAPPING_ID},
+        ${TENANT_ID},
+        '750e8400-e29b-41d4-a716-446655440101',
+        '750e8400-e29b-41d4-a716-446655440102',
+        'active',
+        'mirror'
+      )
       ON CONFLICT (id) DO NOTHING
     `);
   }, 60000);
