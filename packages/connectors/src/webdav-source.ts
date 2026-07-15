@@ -353,7 +353,7 @@ export class WebdavFileSource implements FileSource {
     const name = decodeURIComponent(pathFromHref.split('/').filter(Boolean).pop() ?? '');
     
     const file: WebDAVFile = {
-      path: name,  // Use basename as the path (natural key)
+      path: decodeURIComponent(pathFromHref),  // full decoded path
       name: name,
       isDirectory: false,
       size: entry.getContentLength || 0,
