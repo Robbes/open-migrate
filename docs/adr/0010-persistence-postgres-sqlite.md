@@ -1,6 +1,6 @@
 # ADR-0010: Persistence — Postgres+RLS (managed) / SQLite or small Postgres (self-host)
 
-- **Status:** Accepted
+- **Status:** Accepted; **partially superseded by [ADR-0023](0023-persistence-postgres-only.md)** (2026-07-16) — the SQLite / dual-backend option is dropped; both editions now use Postgres (self-host bundles a small Postgres). The Postgres+RLS-for-managed decision below still stands.
 - **Date:** 2026-06-20
 
 ## Context

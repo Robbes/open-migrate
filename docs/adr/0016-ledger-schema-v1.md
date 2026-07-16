@@ -1,6 +1,6 @@
 # ADR-0016: Ledger schema v1
 
-- **Status:** Accepted
+- **Status:** Accepted; the **"Drizzle ORM (dual pg/sqlite)" access-layer clause is superseded by [ADR-0023](0023-persistence-postgres-only.md)** (2026-07-16) — the schema is now Postgres-only. The schema design itself (the `item` idempotency anchor, tables, non-destructive semantics) is unchanged.
 - **Date:** 2026-06-20
 
 ## Context

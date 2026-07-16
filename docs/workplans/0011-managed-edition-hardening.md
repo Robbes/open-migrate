@@ -1,22 +1,28 @@
 # Workplan 0011 — Managed edition hardening: RLS for real, API completion, billing e2e
 
-## Status — 2026-07-09 (update this block at the end of every session)
+## Status — 2026-07-16 (update this block at the end of every session)
+
+> **This is the big remaining epic.** Some DB-layer RLS groundwork landed as a side effect of the
+> cutover work (0009); the security-critical *application-layer* enforcement and everything above
+> it are still open. `deploy/compose/managed.yml` already exists (from 0006-G). Ordering unchanged:
+> **T1 first** — no other task touches tenant data until the fail-closed tenant context exists.
 
 | Task | Status | Evidence |
 |---|---|---|
-| T1 runtime RLS enforcement (CRITICAL) | ⬜ Pending | — |
-| T2 API routes: replace TODO shells with real persistence | ⬜ Pending | — |
-| T3 Trigger.dev wiring: jobs call the real core | ⬜ Pending | — |
-| T4 usage metering from real runs | ⬜ Pending | — |
-| T5 billing + Mollie test-mode end-to-end | ⬜ Pending | — |
-| T6 web UI wired to the real API | ⬜ Pending | — |
-| T7 managed compose stack + operator docs | ⬜ Pending | — |
+| T1 runtime RLS enforcement (CRITICAL) | 🟡 Partial — DB layer only | **Done:** `0008_force_rls_enforcement.sql` (FORCE RLS) + `0009_create_app_user_role.sql` (non-owner `app_user`) + `packages/ledger/src/rls.integration.test.ts` prove isolation **at the SQL layer** when connected as `app_user`. **Still open (the actual security fix):** no app code sets tenant context — `apps/api/src/middleware/auth.ts:80` is still a comment; there is no `withTenant()` helper and nothing issues `SET LOCAL app.current_tenant`; API/worker connect as the owner role (bypasses RLS). Build the transaction-scoped helper and route every tenant query through it. |
+| T2 API routes: replace TODO shells with real persistence | ⬜ Pending | All handlers still `// TODO: Query database` — verified in `apps/api/src/routes/tenants/index.ts`, `routes/migrations/index.ts`, `routes/billing/*` |
+| T3 Trigger.dev wiring: jobs call the real core | ⬜ Pending | `apps/worker/src/jobs/*.ts` validate payloads + log; don't call `runShadowPass`/domain sync/cutover core |
+| T4 usage metering from real runs | ⬜ Pending | `usage_metric` table exists; nothing emits to it |
+| T5 billing + Mollie test-mode end-to-end | ⬜ Pending | `@mollie/api-client@4` service exists; invoice/webhook flow not wired |
+| T6 web UI wired to the real API | ⬜ Pending | Vite React app calls `/api` (still TODO shells). Note: `migration/nextjs-15` branch was **not** adopted — Vite stays (tag `archive/nextjs-15` preserves the RC work) |
+| T7 managed compose stack + operator docs | 🟡 Partial | `deploy/compose/managed.yml` exists (0006-G); needs seed script + `docs/operator-runbook.md` + verification the stack runs the DoD journey |
 
-> Read `AGENTS.md`, arch §7.2/§16/§17 and the restored workplan `0005-managed-edition.md`
-> (see 0006-C) first. **Depends on:** 0006 items A (trustworthy tests), G (web framework
-> decision — blocks T6 only) and I (lint honesty). **Supersedes** the open end of workplan 0005:
-> its summary claims Phases 1–2 complete and 3–6 in progress, but verified reality is thinner —
-> see "Why this slice".
+> Read `AGENTS.md`, arch §7.2/§16/§17 and the `0005-implementation-summary.md`
+> first. **Depends on:** nothing open — workplan **0006 is fully done** (tests run, lint honest,
+> compose consolidated). The web-framework question is **settled: Vite stays** (the
+> `migration/nextjs-15` branch was not adopted; tag `archive/nextjs-15` preserves it), so T6 is no
+> longer blocked. **Supersedes** the open end of workplan 0005: its summary claims Phases 1–2
+> complete and 3–6 in progress, but verified reality is thinner — see "Why this slice".
 
 ## Why this slice
 The 0005 work merged a lot of **scaffolding that looks finished but isn't wired**:
@@ -51,14 +57,14 @@ at both the API layer and the SQL layer (non-owner role + RLS). All gates green.
 - Metering: worker run results → `usage_metric` rows; invoice generation job; Mollie test-mode
   payment + webhook signature verification (service exists in
   `apps/api/src/services/mollie/index.ts` on `@mollie/api-client@4`).
-- Web app pages talking to the real API (framework per 0006-G decision).
+- Web app pages talking to the real API (Vite React app on `main`; nextjs-15 not adopted).
 - `deploy/compose/managed.yml` (consolidation per 0006-H) + operator runbook.
 
 ## Out of scope (later)
 - Zitadel/Keycloak SSO (§7.3) — local JWT stays for now; keep the auth middleware seam.
 - Vault integration (OpenBao/Infisical) — env/secret refs remain; document the seam.
 - Production IaC/GitOps/K8s (§18) and real payment method beyond Mollie test mode.
-- EN/NL i18n completion and WCAG audit (§23) — with the web epic after 0006-G.
+- EN/NL i18n completion and WCAG audit (§23) — a later web-polish slice.
 - Discovery/drift decision queue (§11.1) — needs its own slice once cutover UX starts.
 
 ## Tasks
@@ -117,7 +123,7 @@ loads billing code (hard rule 5).
 usage → invoice → payment → webhook → invoice `paid`; double webhook delivery is idempotent;
 amounts reconcile with metered usage in the test to the cent.
 
-### T6 — Web UI on the real API *(blocked on 0006-G)*
+### T6 — Web UI on the real API
 Wire the existing pages (login, dashboard, mapping wizard, status, billing) to the T2 endpoints;
 mapping wizard submits a config that `parseMappingConfig` accepts (single source of truth —
 import the shared schema); status pages render ledger-derived run state incl. errors verbatim
