@@ -158,7 +158,7 @@ describe('Verification Engine (integration)', () => {
       {
         tenantId: TEST_TENANT_ID,
         mappingId: TEST_MAPPING_ID,
-        itemType: 'mail' as const,
+        itemType: 'email' as const,
         naturalKeyHash: 'hash1',
         contentHash: 'content1',
         targetId: 'target1',
@@ -167,7 +167,7 @@ describe('Verification Engine (integration)', () => {
       {
         tenantId: TEST_TENANT_ID,
         mappingId: TEST_MAPPING_ID,
-        itemType: 'mail' as const,
+        itemType: 'email' as const,
         naturalKeyHash: 'hash2',
         contentHash: 'content2',
         targetId: 'target2',
@@ -176,7 +176,7 @@ describe('Verification Engine (integration)', () => {
       {
         tenantId: TEST_TENANT_ID,
         mappingId: TEST_MAPPING_ID,
-        itemType: 'mail' as const,
+        itemType: 'email' as const,
         naturalKeyHash: 'hash3',
         contentHash: 'content3',
         targetId: 'target3',
@@ -232,7 +232,7 @@ describe('Verification Engine (integration)', () => {
       {
         tenantId: TEST_TENANT_ID,
         mappingId: TEST_MAPPING_ID,
-        itemType: 'mail' as const,
+        itemType: 'email' as const,
         naturalKeyHash: 'hash1',
         contentHash: 'content1',
         targetId: 'target1',
@@ -241,7 +241,7 @@ describe('Verification Engine (integration)', () => {
       {
         tenantId: TEST_TENANT_ID,
         mappingId: TEST_MAPPING_ID,
-        itemType: 'mail' as const,
+        itemType: 'email' as const,
         naturalKeyHash: 'hash2',
         contentHash: 'content2',
         targetId: 'target2',
@@ -250,7 +250,7 @@ describe('Verification Engine (integration)', () => {
       {
         tenantId: TEST_TENANT_ID,
         mappingId: TEST_MAPPING_ID,
-        itemType: 'mail' as const,
+        itemType: 'email' as const,
         naturalKeyHash: 'hash3',
         contentHash: 'content3',
         targetId: 'target3',
@@ -310,7 +310,7 @@ describe('Verification Engine (integration)', () => {
       {
         tenantId: TEST_TENANT_ID,
         mappingId: TEST_MAPPING_ID,
-        itemType: 'mail' as const,
+        itemType: 'email' as const,
         naturalKeyHash: 'hash1',
         contentHash: 'content1',
         targetId: 'target1',
@@ -319,7 +319,7 @@ describe('Verification Engine (integration)', () => {
       {
         tenantId: TEST_TENANT_ID,
         mappingId: TEST_MAPPING_ID,
-        itemType: 'mail' as const,
+        itemType: 'email' as const,
         naturalKeyHash: 'hash2',
         contentHash: 'content2',
         targetId: 'target2',
@@ -328,7 +328,7 @@ describe('Verification Engine (integration)', () => {
       {
         tenantId: TEST_TENANT_ID,
         mappingId: TEST_MAPPING_ID,
-        itemType: 'mail' as const,
+        itemType: 'email' as const,
         naturalKeyHash: 'hash3',
         contentHash: 'content3',
         targetId: 'target3',
@@ -380,7 +380,7 @@ describe('Verification Engine (integration)', () => {
     await ledger.recordIfAbsent({
       tenantId: TEST_TENANT_ID,
       mappingId: TEST_MAPPING_ID,
-      itemType: 'mail' as const,
+      itemType: 'email' as const,
       naturalKeyHash: 'hash1',
       contentHash: 'content1',
       targetId: 'target1',
@@ -428,7 +428,7 @@ describe('Verification Engine (integration)', () => {
     await ledger.recordIfAbsent({
       tenantId: TEST_TENANT_ID,
       mappingId: TEST_MAPPING_ID,
-      itemType: 'mail' as const,
+      itemType: 'email' as const,
       naturalKeyHash: 'hash1',
       contentHash: 'content1-original',
       targetId: 'target1',
@@ -438,7 +438,7 @@ describe('Verification Engine (integration)', () => {
     await ledger.recordIfAbsent({
       tenantId: TEST_TENANT_ID,
       mappingId: TEST_MAPPING_ID,
-      itemType: 'mail' as const,
+      itemType: 'email' as const,
       naturalKeyHash: 'hash2',
       contentHash: 'content2-original',
       targetId: 'target2',

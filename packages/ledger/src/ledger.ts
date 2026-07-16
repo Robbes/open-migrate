@@ -29,7 +29,7 @@ export class PgLedger implements Ledger {
   async find(
     tenantId: TenantId,
     mappingId: MappingId,
-    itemType: 'mail' | 'calendar' | 'contact' | 'file',
+    itemType: 'email' | 'calendar' | 'contact' | 'file',
     naturalKeyHash: string,
   ): Promise<LedgerRecord | undefined> {
     const result = await this.db
@@ -40,7 +40,7 @@ export class PgLedger implements Ledger {
           eq(schemaPg.item.tenantId, tenantId),
           eq(schemaPg.item.mappingId, mappingId),
           eq(schemaPg.item.naturalKeyHash, naturalKeyHash),
-          eq(schemaPg.item.domain, itemType === 'mail' ? 'email' : itemType),
+          eq(schemaPg.item.domain, itemType),
         ),
       )
       .limit(1);
@@ -61,12 +61,13 @@ export class PgLedger implements Ledger {
         id: sql`gen_random_uuid()`,
         tenantId: record.tenantId,
         mappingId: record.mappingId,
-        domain: record.itemType === 'mail' ? 'email' : record.itemType,
+        domain: record.itemType,
         collection: '', // Default for now
         naturalKey: '', // Will be set by caller if needed
         naturalKeyHash: record.naturalKeyHash,
         contentHash: record.contentHash,
-        status: 'copied',
+        sizeBytes: record.sizeBytes !== undefined ? BigInt(record.sizeBytes) : null,
+        status: record.status ?? 'copied',
         targetRef: JSON.stringify({ id: record.targetId }),
         firstSeenAt: sql`now()`,
         updatedAt: sql`now()`,
@@ -91,7 +92,7 @@ export class PgLedger implements Ledger {
   private mapRowToRecord(row: typeof schemaPg.item.$inferSelect): LedgerRecord {
     return {
       tenantId: row.tenantId as TenantId,
-      itemType: row.domain === 'email' ? 'mail' : (row.domain as 'calendar' | 'contact' | 'file'),
+      itemType: row.domain as 'email' | 'calendar' | 'contact' | 'file',
       mappingId: row.mappingId as MappingId,
       naturalKeyHash: row.naturalKeyHash,
       contentHash: row.contentHash ?? '',
@@ -99,6 +100,8 @@ export class PgLedger implements Ledger {
       createdAt: row.firstSeenAt instanceof Date 
         ? row.firstSeenAt.toISOString() 
         : (row.firstSeenAt ?? ''),
+      sizeBytes: row.sizeBytes !== null && row.sizeBytes !== undefined ? Number(row.sizeBytes) : undefined,
+      status: row.status as LedgerRecord['status'],
     };
   }
 }

@@ -10,3 +10,5 @@ export * from './cutover';
 export * from './dns-manager';
 export * from './dns-verify-only';
 export * from './dns-provider-desec';
+export * from './domain-sync';
+export * from './dav-sync';
