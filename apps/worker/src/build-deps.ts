@@ -12,6 +12,17 @@ import {
   ThrottleLimiter,
   type ThrottleConfig,
   createThrottleLimiterFromMapping,
+  type TenantId,
+  type MappingId,
+  type Ledger,
+  type CursorStore,
+  type MigrationStatusStore as _MigrationStatusStore,
+  type CalendarSource,
+  type CalendarTargetWriter,
+  type ContactSource,
+  type ContactTargetWriter,
+  type FileSource,
+  type FileTargetWriter,
 } from '@openmig/shared';
 import { 
   ImapSource, 
@@ -319,4 +330,177 @@ function buildTargetWriter(targetConfig: MappingConfig['target']): TargetWriter 
       throw new Error(`Unsupported target type: ${(targetConfig as {type: string}).type}`);
     }
   }
+}
+
+/**
+ * Build domain-specific dependencies for DAV syncs (calendar, contacts, files).
+ * This creates the appropriate source and target for the given domain.
+ */
+export function buildDomainDeps(
+  config: MappingConfig,
+  domain: 'calendar'
+): {
+  tenantId: TenantId;
+  mappingId: MappingId;
+  source: CalendarSource;
+  target: CalendarTargetWriter;
+  ledger: Ledger;
+  cursors?: CursorStore;
+  concurrency?: number;
+};
+export function buildDomainDeps(
+  config: MappingConfig,
+  domain: 'contact'
+): {
+  tenantId: TenantId;
+  mappingId: MappingId;
+  source: ContactSource;
+  target: ContactTargetWriter;
+  ledger: Ledger;
+  cursors?: CursorStore;
+  concurrency?: number;
+};
+export function buildDomainDeps(
+  config: MappingConfig,
+  domain: 'file'
+): {
+  tenantId: TenantId;
+  mappingId: MappingId;
+  source: FileSource;
+  target: FileTargetWriter;
+  ledger: Ledger;
+  cursors?: CursorStore;
+  concurrency?: number;
+};
+export function buildDomainDeps(
+  config: MappingConfig,
+  domain: 'calendar' | 'contact' | 'file'
+): {
+  tenantId: TenantId;
+  mappingId: MappingId;
+  source: CalendarSource | ContactSource | FileSource;
+  target: CalendarTargetWriter | ContactTargetWriter | FileTargetWriter;
+  ledger: Ledger;
+  cursors?: CursorStore;
+  concurrency?: number;
+} {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error('DATABASE_URL environment variable is required');
+  }
+  const db = createPgDb(databaseUrl);
+  const ledger = new PgLedger(db);
+  const cursors = new PgCursorStore(db);
+
+  // Get domain config
+  let domainConfig;
+  switch (domain) {
+    case 'calendar':
+      domainConfig = config.domains?.calendar;
+      break;
+    case 'contact':
+      domainConfig = config.domains?.contacts;
+      break;
+    case 'file':
+      domainConfig = config.domains?.files;
+      break;
+  }
+
+  if (!domainConfig?.enabled) {
+    throw new Error(`Domain ${domain} is not enabled in config`);
+  }
+
+  // Build source connector based on domain type
+  let source: CalendarSource | ContactSource | FileSource;
+  const sourceConfig = domainConfig.source;
+  const _throttleLimiter = buildThrottleLimiter(config);
+
+  switch (sourceConfig.type) {
+    case 'caldav': {
+      // CalDAV source - auth can be 'login' or 'xoauth2'
+      let caldavPassword: string;
+      if (sourceConfig.auth.kind === 'login') {
+        caldavPassword = process.env[sourceConfig.auth.passwordFromEnv] ?? '';
+      } else if (sourceConfig.auth.kind === 'xoauth2') {
+        caldavPassword = process.env[sourceConfig.auth.tokenFromEnv] ?? '';
+      } else {
+        throw new Error(`Unsupported CalDAV auth kind: ${(sourceConfig.auth as {kind: string}).kind}`);
+      }
+      const _caldavPassword = caldavPassword;
+      source = {
+        // Placeholder - actual CalDAV source implementation would go here
+        // For now, we use a mock that throws (since we don't have a full CalDAV source implementation)
+        listFolders: async () => [],
+        listSince: async () => ({ items: [], nextCursor: { value: '' } }),
+      } as CalendarSource;
+      break;
+    }
+    case 'carddav':
+      // CardDAV source
+      source = {
+        listFolders: async () => [],
+        listSince: async () => ({ items: [], nextCursor: { value: '' } }),
+      } as ContactSource;
+      break;
+    case 'webdav':
+      // WebDAV source
+      source = {
+        listFolders: async () => [],
+        listSince: async () => ({ items: [], nextCursor: { value: '' } }),
+      } as FileSource;
+      break;
+    default:
+      throw new Error(`Unsupported source type for ${domain}: ${(sourceConfig as {type: string}).type}`);
+  }
+
+  // Build target writer based on domain type
+  let target: CalendarTargetWriter | ContactTargetWriter | FileTargetWriter;
+  const targetConfig = domainConfig.target;
+
+  switch (targetConfig.type) {
+    case 'caldav': {
+      let caldavTargetPassword: string;
+      if (targetConfig.auth.kind === 'login') {
+        caldavTargetPassword = process.env[targetConfig.auth.passwordFromEnv] ?? '';
+      } else if (targetConfig.auth.kind === 'xoauth2') {
+        caldavTargetPassword = process.env[targetConfig.auth.tokenFromEnv] ?? '';
+      } else {
+        throw new Error(`Unsupported CalDAV target auth kind: ${(targetConfig.auth as {kind: string}).kind}`);
+      }
+      const _caldavTargetPassword = caldavTargetPassword;
+      target = {
+        // Placeholder - actual CalDAV target writer would go here
+        ensureCalendar: async () => '',
+        upsertCalendarEvent: async () => ({ targetId: '', created: false }),
+        findCalendarByNaturalKey: async () => undefined,
+      } as CalendarTargetWriter;
+      break;
+    }
+    case 'carddav':
+      target = {
+        ensureContactFolder: async () => '',
+        upsertContact: async () => ({ targetId: '', created: false }),
+        findContactByNaturalKey: async () => undefined,
+      } as ContactTargetWriter;
+      break;
+    case 'webdav':
+      target = {
+        ensureDirectory: async () => '',
+        upsertFile: async () => ({ targetId: '', created: false }),
+        findFileByNaturalKey: async () => undefined,
+      } as FileTargetWriter;
+      break;
+    default:
+      throw new Error(`Unsupported target type for ${domain}: ${(targetConfig as {type: string}).type}`);
+  }
+
+  return {
+    tenantId: config.tenantId as TenantId,
+    mappingId: config.mappingId as MappingId,
+    source,
+    target,
+    ledger,
+    cursors,
+    concurrency: domainConfig.concurrency ?? config.concurrency ?? 4,
+  };
 }

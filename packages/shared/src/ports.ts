@@ -210,6 +210,10 @@ export interface LedgerRecord {
   readonly targetId: string;
   /** ISO 8601 timestamp the row was first recorded. */
   readonly createdAt: string;
+  /** Size in bytes of the item (optional for backward compatibility). */
+  readonly sizeBytes?: number;
+  /** Status of the item sync (copied, updated, skipped, failed, etc.). */
+  readonly status?: 'pending' | 'copied' | 'updated' | 'skipped' | 'failed' | 'deleted_source' | 'tombstoned';
 }
 
 /** Idempotency ledger. UNIQUE(tenantId, mappingId, itemType, naturalKeyHash). Non-destructive. */

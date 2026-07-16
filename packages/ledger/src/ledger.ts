@@ -66,7 +66,8 @@ export class PgLedger implements Ledger {
         naturalKey: '', // Will be set by caller if needed
         naturalKeyHash: record.naturalKeyHash,
         contentHash: record.contentHash,
-        status: 'copied',
+        sizeBytes: record.sizeBytes !== undefined ? BigInt(record.sizeBytes) : null,
+        status: record.status ?? 'copied',
         targetRef: JSON.stringify({ id: record.targetId }),
         firstSeenAt: sql`now()`,
         updatedAt: sql`now()`,
@@ -99,6 +100,8 @@ export class PgLedger implements Ledger {
       createdAt: row.firstSeenAt instanceof Date 
         ? row.firstSeenAt.toISOString() 
         : (row.firstSeenAt ?? ''),
+      sizeBytes: row.sizeBytes !== null && row.sizeBytes !== undefined ? Number(row.sizeBytes) : undefined,
+      status: row.status as LedgerRecord['status'],
     };
   }
 }

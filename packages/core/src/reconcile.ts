@@ -1,9 +1,21 @@
+// Copyright 2026 OpenHands Agent (Apache-2.0)
 import {
   contentHash,
-  mapWithConcurrency,
+  mapWithConcurrency as _mapWithConcurrency,
   naturalKeyForItem,
   type RunShadowPass,
+  type SourceConnector,
+  type TargetWriter,
+  type Ledger,
+  type CursorStore,
+  type TenantId,
+  type MappingId,
+  type ReconcileResult as _ReconcileResult,
+  type MailItem,
+  type MailFolder,
+  type RawMessage,
 } from '@openmig/shared';
+import { runDomainSync, type DomainSyncDeps as _DomainSyncDeps } from './domain-sync';
 
 const DEFAULT_CONCURRENCY = 4;
 
@@ -27,50 +39,55 @@ const DEFAULT_CONCURRENCY = 4;
 export const runShadowPass: RunShadowPass = async (deps) => {
   const { tenantId, mappingId, source, target, ledger, cursors } = deps;
   const concurrency = deps.concurrency ?? DEFAULT_CONCURRENCY;
-  let scanned = 0;
-  let created = 0;
-  let skipped = 0;
 
-  const folders = await source.listFolders();
-  for (const folder of folders) {
-    const mailboxId = await target.ensureMailbox(folder);
-    const prev = cursors ? await cursors.get(tenantId, mappingId, folder.path) : undefined;
-    const { items, nextCursor } = await source.listSince(folder, prev);
-
-    await mapWithConcurrency(items, concurrency, async (item) => {
-      scanned += 1;
-      const naturalKeyHash = naturalKeyForItem(item);
-
-      // Ledger fast-path: already migrated -> skip without fetching the body.
-      const known = await ledger.find(tenantId, mappingId, 'mail', naturalKeyHash);
-      if (known) {
-        skipped += 1;
-        return;
-      }
-
-      // Create-if-absent on the target (handles a wiped ledger without duplicating).
+  // Delegate to generalized runDomainSync with mail-specific injections
+  const result = await runDomainSync<SourceConnector, TargetWriter, MailItem, MailFolder>({
+    tenantId,
+    mappingId,
+    domain: 'mail',
+    source,
+    target,
+    ledger,
+    cursors,
+    concurrency,
+    listFolders: () => source.listFolders(),
+    listSince: (folder, cursor) => source.listSince(folder, cursor),
+    fetchRaw: async (item) => {
       const raw = await source.fetch(item);
-      const ch = contentHash(raw.rfc822);
-      const result = await target.upsertEmail(mailboxId, raw, item.keywords);
+      return { raw, sizeBytes: item.size ?? 0 };
+    },
+    upsert: async (mailboxId, raw, item) => 
+      target.upsertEmail(mailboxId, raw as RawMessage, (item as MailItem).keywords),
+    naturalKey: (item) => naturalKeyForItem(item),
+    contentHash: (raw) => contentHash((raw as RawMessage).rfc822),
+    ensureCollection: (folder) => target.ensureMailbox(folder),
+  });
 
-      await ledger.recordIfAbsent({
-        tenantId,
-        itemType: 'mail',
-        mappingId,
-        naturalKeyHash,
-        contentHash: ch,
-        targetId: result.targetId,
-        createdAt: new Date().toISOString(),
-      });
-
-      if (result.created) created += 1;
-      else skipped += 1;
-    });
-
-    // Persist the cursor only after the whole folder succeeded (fail-fast above throws first).
-    if (cursors) await cursors.set(tenantId, mappingId, folder.path, nextCursor);
-  }
-
-  // Drift (source items absent on a later pass) is logged, never propagated; deferred to a later slice.
-  return { scanned, created, skipped, drift: 0 };
+  // Return compatible ReconcileResult (map failed to 0 for backward compatibility)
+  return {
+    scanned: result.scanned,
+    created: result.created,
+    skipped: result.skipped,
+    drift: result.drift,
+  };
 };
+
+/**
+ * Dependency bundle for a shadow pass (DI for the T4 reconcile loop).
+ * This is the original type for backward compatibility.
+ */
+export interface ReconcileDeps {
+  readonly tenantId: TenantId;
+  readonly mappingId: MappingId;
+  readonly source: SourceConnector;
+  readonly target: TargetWriter;
+  readonly ledger: Ledger;
+  /**
+   * Optional cursor persistence: when provided, each folder pass lists only items changed since
+   * the stored cursor and persists the new cursor after the folder completes. Absent -> full scan
+   * (always correct via the ledger, just more work).
+   */
+  readonly cursors?: CursorStore;
+  /** Max messages processed in parallel per folder (default 4). Bounds throughput and peak memory. */
+  readonly concurrency?: number;
+}
