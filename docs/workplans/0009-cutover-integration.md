@@ -1,13 +1,17 @@
 # Workplan 0009 — Cutover made real: verification gate, DNS, rollback — integrated & tested
 
-## Status — 2026-07-12 (update this block at the end of every session)
+## Status — 2026-07-16 (update this block at the end of every session)
+
+> **Near-complete.** T1/T2/T5/T6 done and integration-tested. **Owner decision 2026-07-16:
+> verify-only DNS** — T4 (automated provider writes) is deferred; the only remaining work is the
+> T3 DoH-resolver upgrade + verify-only tests. After that, 0009 is done.
 
 | Task | Status | Evidence |
 |---|---|---|
 | T1 verification engine on real ledger/targets | ✅ Done | PR #31 merged (56f4a50); commits: 7d15237 (verification logic + RLS), 60a9337 (force RLS + verification fix), 321b2f0 (verification + state machine), 04ba8ab (LedgerVerificationReader interface), eopba8ab (discrepancy detection), c340a65 (ledger queries), 6d9ecd4 (persistence to ledger); integration test: `packages/core/src/verification.integration.test.ts` |
 | T2 cutover state machine persisted + driven by worker | ✅ Done | PR #31 merged (56f4a50); commits: ffde0c9, 8672893, 37f500c (state machine fixes), 96c6249 (state-machine tests), 34dbb0a (complete cutover), 765abc7 (foundation), 35956b0 (integration tests Steps 8-10); persistence via `packages/ledger/src/cutover-store.ts`; CLI via `apps/worker/src/cli/cutover-commands.ts` |
-| T3 DNS: verify-only resolver checks + guided runbook | ⚠️ Partial | `packages/core/src/dns-verify-only.ts` implements verifyMX/SPF/DKIM/DMARC/autodiscover + checkPropagation; wired into cutover CLI (line 245 of cutover-commands.ts); **ISSUE**: uses Node built-in `dns` module (system resolver), NOT public DoH resolvers (1.1.1.1/8.8.8.8/9.9.9.9) as required by PropagationChecker split principle; no dedicated tests for verify-only functions (dns-manager.unit.test.ts uses mock provider only) |
-| T4 DNS provider adapter (one real provider) | ⚠️ Implemented without approval | `packages/core/src/dns-provider-desec.ts` implements deSEC adapter (expects `DESEC_TOKEN` env); **NOT wired** into production (commented out in `run-cutover.ts:128`, `run-rollback.ts:77`); per ADR-0002/review finding C2, first provider choice is owner decision — this was implemented unilaterally |
+| T3 DNS: verify-only resolver checks + guided runbook | ⚠️ Partial — **now the primary DNS path** | `packages/core/src/dns-verify-only.ts` implements verifyMX/SPF/DKIM/DMARC/autodiscover + checkPropagation; wired into cutover CLI (`cutover-commands.ts:245`). **Open (finish this):** uses Node's system resolver, not public DoH resolvers (1.1.1.1/8.8.8.8/9.9.9.9) — propagation checks can't confirm global visibility from one vantage point; add DoH-based `PropagationChecker` + dedicated unit tests for the verify-only functions. Owner chose **verify-only** (2026-07-16), so this path *is* the cutover DNS story — its quality matters. |
+| T4 DNS provider adapter (one real provider) | ⏸️ **Deferred by owner (2026-07-16)** | Owner decided: **keep verify-only, defer automated DNS writes**. `packages/core/src/dns-provider-desec.ts` (deSEC adapter) **stays as an unwired template only** — leave it commented out in `run-cutover.ts`/`run-rollback.ts`; do **not** wire any provider write-path. Cutover DNS remains guided/manual via the runbook (T6) + verify checks (T3). Revisit provider automation in a later slice if demanded. |
 | T5 rollback path integration test | ✅ Done | PR #31 merged (56f4a50); commit 35956b0 "Add cutover integration tests (Steps 8-10)"; `packages/core/src/rollback.integration.test.ts` tests gate-fail and grace-window rollback paths |
 | T6 cutover runbook + user comms templates | ✅ Done | PR #31 merged (56f4a50); commit c96ae51 "Add cutover runbook and communication templates (Steps 11-12)"; `docs/cutover-runbook.md` (283 lines) + `docs/cutover-communication-templates.md` (368 lines) contain runbook + comms templates |
 

@@ -25,7 +25,7 @@ Nextcloud) — both in MVP (ADR-0018). The **O365 source stays IMAP+OAuth2/Graph
 ## Decided stack (details in the ADRs — follow them, don't re-decide)
 - TypeScript, Node 24, pnpm workspaces monorepo (ADR-0002); Apache-2.0 (ADR-0001).
 - `Scheduler` interface: in-process croner (self-host) / Trigger.dev (managed) (ADR-0004).
-- Ledger: Postgres+RLS (managed) or SQLite/small Postgres (self-host), one schema (ADR-0010/0016); migrations via Drizzle Kit + Atlas lint (ADR-0017).
+- Ledger: **Postgres everywhere** — managed Postgres+RLS (managed) / bundled small Postgres (self-host), one schema (ADR-0016, **ADR-0023** supersedes the SQLite option in ADR-0010); migrations via Drizzle Kit + Atlas lint (ADR-0017). **No SQLite** — do not reintroduce a second dialect.
 - Engines: JMAP writer (jmap-jam) for JMAP targets; imapsync/vdirsyncer/rclone shell-outs for IMAP/DAV; prefer JS-native where fidelity is equal (ADR-0007/0018/0019).
 - O365: one multi-tenant Entra app; IMAP+OAuth2 primary, Graph fallback (ADR-0006).
 - Target provisioning behind `TargetProvisioner` (manual + API) (ADR-0008).

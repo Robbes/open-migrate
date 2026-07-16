@@ -5,15 +5,23 @@
 | Task | Status | Evidence |
 |---|---|---|
 | T1 ledger item-type support | ✅ Done | Migration 0003_item_type.sql exists and tested |
-| T2 generalize the reconcile seam | ✅ Done | GenericSyncEngine implemented in `packages/core/src/generic-sync.ts` |
-| T3 CalDAV/CardDAV source connectors | ✅ Done | `CalDAVSource` and `CarddavSource` in `packages/connectors/src/` |
-| T4 calendar/contact writers wired + integration-tested | ✅ Done | Integration tests in `packages/connectors/src/*.integration.test.ts` |
+| T2 generalize the reconcile seam | ✅ Done | Per-domain functions `runCalendarSync`/`runContactSync`/`runFileSync` in `packages/core/src/domain-sync.ts` (+ `dav-sync.ts`); `runShadowPass` stays mail |
+| T3 CalDAV/CardDAV source connectors | ✅ Done | `CaldavSource`/`CarddavSource` in `packages/connectors/src/caldav-source.ts` / `carddav-source.ts` (+ unit & integration tests) |
+| T4 calendar/contact writers wired + integration-tested | ✅ Done | Integration tests in `packages/connectors/src/*.integration.test.ts` (DAV suites green per PR #35) |
 | T5 files: WebDAV source + writer against Nextcloud | ✅ Done | `WebdavFileSource` in `packages/connectors/src/webdav-source.ts` |
-| T6 unified sync orchestration (replace the stub) | ✅ Done | `runUnifiedSync` fully implemented with real connectors |
-| T7 worker CLI + config for domains | ✅ Done | `domains` block added to config.ts, mapping.example.json updated |
-| T8 docs + honest status correction of 0003 | ✅ Done | All docs updated to reflect native implementations |
+| T6 domain orchestration wired into worker | ✅ Done | `apps/worker/src/index.ts` `runAllDomains` runs all enabled domains independently with `MigrationStatusStore` tracking (PR #40); per-domain failures don't block others |
+| T7 worker CLI + config for domains | ✅ Done | `domains` block in `packages/shared/src/config.ts`; `buildDomainDeps` in `apps/worker/src/build-deps.ts`; `mapping.example.json` updated |
+| T8 docs + honest status correction of 0003 | ✅ Done | 0003 superseded banner; `docs/design/domain-sync.md` records the chosen approach |
 
-> **Summary**: Workplan 0007 is **complete**. All native source connectors (CalDAV, CardDAV, WebDAV) have been implemented with RFC compliance, the GenericSyncEngine is fully functional, unified sync orchestration wires everything together, comprehensive integration tests prove idempotency/delta/reindex properties, and documentation has been updated to reflect the real implementations. All gates green: lint, typecheck, unit tests, and integration tests pass.
+> **Summary (corrected 2026-07-16)**: Workplan 0007 is **complete in substance**, but the
+> approach changed after the first pass and this block previously cited files that no longer
+> exist. The abandoned `GenericSyncEngine` (`generic-sync.ts`) and `runUnifiedSync`
+> (`unified-sync.ts`) were **removed** (PR #38, "Remove generic orchestrator (Option 3 from #36)").
+> The **actual** implementation is per-domain sync functions in `packages/core/src/domain-sync.ts`
+> (design: `docs/design/domain-sync.md`, Option (i)), the DAV source connectors, and the worker's
+> `runAllDomains` orchestration with `MigrationStatusStore` status tracking. Native CalDAV/CardDAV/
+> WebDAV sources are RFC-compliant and integration-tested; idempotency/delta/reindex hold per
+> domain. Do not look for `generic-sync.ts`/`unified-sync.ts` — they are gone.
 
 > Read `AGENTS.md` and `docs/architecture/solution-architecture.md` (source of truth) first, and
 > `docs/stalwart-integration-fix.md` before touching integration tests. **Depends on:** workplan
