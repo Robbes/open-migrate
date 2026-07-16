@@ -14,6 +14,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import * as schema from './schema-pg';
+import { withTenant } from './db';
+import { eq } from 'drizzle-orm';
 
 // Connection string from Testcontainers (set by vitest.global-setup.ts)
 // Fails loudly if TEST_DATABASE_URL is not set, rather than silently using wrong defaults.
@@ -186,5 +188,145 @@ describe('RLS Policies', () => {
     
     // Counts should differ if data exists
     // (This test assumes there's actual data in the item table)
+  });
+});
+
+/**
+ * Tests for the withTenant helper function
+ * These tests verify that the application-layer tenant context is properly enforced
+ */
+describe('withTenant helper', () => {
+  let superuserPool: Pool;
+  
+  beforeAll(() => {
+    superuserPool = new Pool({
+      connectionString: PG_CONNECTION_STRING,
+    });
+  });
+  
+  afterAll(async () => {
+    await superuserPool.end();
+  });
+  
+  it('should isolate tenant A from tenant B using withTenant', async () => {
+    // Use withTenant for Tenant A
+    const resultA = await withTenant(appPool, TENANT_RLS_A, async (db) => {
+      return await db.select().from(schema.connection);
+    });
+    
+    // Should only see Tenant A's connections
+    expect(resultA).toHaveLength(1);
+    expect(resultA[0].tenant_id).toBe(TENANT_RLS_A);
+    
+    // Use withTenant for Tenant B
+    const resultB = await withTenant(appPool, TENANT_RLS_B, async (db) => {
+      return await db.select().from(schema.connection);
+    });
+    
+    // Should only see Tenant B's connections
+    expect(resultB).toHaveLength(1);
+    expect(resultB[0].tenant_id).toBe(TENANT_RLS_B);
+  });
+  
+  it('should prevent cross-tenant INSERT with foreign tenant_id', async () => {
+    // Try to insert with Tenant A context but with Tenant B's ID
+    const foreignId = '950e8400-e29b-41d4-a716-446655441401';
+    
+    // This should fail because the RLS policy prevents inserting with a tenant_id
+    // that doesn't match the current_tenant context
+    await expect(
+      withTenant(appPool, TENANT_RLS_A, async (db) => {
+        return await db.insert(schema.connection).values({
+          id: foreignId,
+          tenantId: TENANT_RLS_B, // Foreign tenant ID
+          role: 'target' as const,
+          kind: 'imap' as const,
+          displayName: 'Hacked connection',
+          config: {},
+        });
+      })
+    ).rejects.toThrow();
+  });
+  
+  it('should fail-closed when no tenant context is set', async () => {
+    // Create a new pool that has NOT set the tenant context
+    const unscopedPool = new Pool({
+      connectionString: getAppUserConnectionString(PG_CONNECTION_STRING),
+    });
+    
+    try {
+      // Without setting current_tenant, queries should return empty or error
+      // (RLS policy requires current_setting('app.current_tenant') to be set)
+      const result = await withTenant(unscopedPool, '', async (db) => {
+        return await db.select().from(schema.connection);
+      });
+      
+      // Empty context should return no rows (fail-closed)
+      expect(result).toHaveLength(0);
+    } finally {
+      await unscopedPool.end();
+    }
+  });
+  
+  it('should prevent cross-tenant UPDATE', async () => {
+    // Try to update Tenant B's connection while in Tenant A context
+    const result = await withTenant(appPool, TENANT_RLS_A, async (db) => {
+      // Try to update Tenant B's connection
+      return await db
+        .update(schema.connection)
+        .set({ displayName: 'Hacked!' })
+        .where(eq(schema.connection.tenantId, TENANT_RLS_B))
+        .returning();
+    });
+    
+    // Should affect 0 rows (RLS prevents cross-tenant updates)
+    expect(result).toHaveLength(0);
+  });
+  
+  it('should prevent cross-tenant DELETE', async () => {
+    // Try to delete Tenant B's connection while in Tenant A context
+    const result = await withTenant(appPool, TENANT_RLS_A, async (db) => {
+      return await db
+        .delete(schema.connection)
+        .where(eq(schema.connection.tenantId, TENANT_RLS_B))
+        .returning();
+    });
+    
+    // Should affect 0 rows (RLS prevents cross-tenant deletes)
+    expect(result).toHaveLength(0);
+    
+    // Verify Tenant B's connection still exists
+    const checkB = await withTenant(appPool, TENANT_RLS_B, async (db) => {
+      return await db.select().from(schema.connection).where(eq(schema.connection.id, CONNECTION_RLS_B));
+    });
+    expect(checkB).toHaveLength(1);
+  });
+  
+  it('should rollback on error', async () => {
+    const insertId = '950e8400-e29b-41d4-a716-446655441501';
+    
+    // Try to insert and throw an error mid-transaction
+    await expect(
+      withTenant(appPool, TENANT_RLS_A, async (db) => {
+        await db.insert(schema.connection).values({
+          id: insertId,
+          tenantId: TENANT_RLS_A,
+          role: 'target' as const,
+          kind: 'imap' as const,
+          displayName: 'Test rollback',
+          config: {},
+        });
+        
+        // Throw an error to trigger rollback
+        throw new Error('Intentional error for rollback test');
+      })
+    ).rejects.toThrow('Intentional error for rollback test');
+    
+    // Verify the insert was rolled back
+    const result = await withTenant(appPool, TENANT_RLS_A, async (db) => {
+      return await db.select().from(schema.connection).where(eq(schema.connection.id, insertId));
+    });
+    
+    expect(result).toHaveLength(0);
   });
 });

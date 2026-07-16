@@ -8,6 +8,8 @@
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import type { AuthenticatedRequest } from '../types/api';
+import { type Pool } from 'pg';
+import { withTenant as ledgerWithTenant } from '@openmig/ledger';
 
 export interface JwtPayload {
   sub: string;
@@ -16,6 +18,40 @@ export interface JwtPayload {
   role: string;
   iat?: number;
   exp?: number;
+}
+
+/**
+ * Get the database pool from environment.
+ * For managed mode, this should be the APP_DATABASE_URL (app_user role).
+ * For self-host mode, this can be the standard DATABASE_URL.
+ */
+export function getDbPool(): Pool {
+  // Prefer APP_DATABASE_URL for managed mode (non-owner app_user role)
+  // Fall back to DATABASE_URL for self-host mode
+  const connectionString = process.env.APP_DATABASE_URL || process.env.DATABASE_URL;
+  
+  if (!connectionString) {
+    throw new Error('DATABASE_URL or APP_DATABASE_URL environment variable not set');
+  }
+  
+  return new Pool({ connectionString });
+}
+
+/**
+ * Execute a function within a tenant-scoped transaction.
+ * This is the critical security gate - all tenant-specific queries must go through this.
+ * 
+ * @param tenantId - The tenant ID to scope the query to
+ * @param pool - The database pool (from getDbPool())
+ * @param fn - The function to execute with a tenant-scoped db handle
+ * @returns The result of the function
+ */
+export function withTenantDb<T>(
+  tenantId: string,
+  pool: Pool,
+  fn: (db: Parameters<typeof ledgerWithTenant>[2]) => Promise<T>
+): Promise<T> {
+  return ledgerWithTenant(pool, tenantId, fn);
 }
 
 /**

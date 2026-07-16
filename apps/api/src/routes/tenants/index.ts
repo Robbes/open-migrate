@@ -8,10 +8,22 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import { z } from 'zod';
-import { authenticate, requireRole } from '../../middleware/auth';
+import { authenticate, requireRole, getDbPool, withTenantDb } from '../../middleware/auth';
 import type { AuthenticatedRequest } from '../../types/api';
+import { eq } from 'drizzle-orm';
+import * as schema from '@openmig/ledger';
 
 const router = Router();
+
+// Global pool - created once and reused
+// In production, this should be a singleton or dependency-injected
+let _dbPool: ReturnType<typeof getDbPool> | null = null;
+function getSharedPool() {
+  if (!_dbPool) {
+    _dbPool = getDbPool();
+  }
+  return _dbPool;
+}
 
 // Schema validation
 const CreateTenantSchema = z.object({
@@ -47,22 +59,20 @@ const _UpdateMemberRoleSchema = z.object({
  */
 router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // TODO: Query database for user's tenants
-    // This would use the ledger with RLS
-    // const tenants = await db.query.tenant.findMany({
-    //   where: eq(tenant.ownerId, req.userId),
-    // });
+    const pool = getSharedPool();
+    
+    // Use withTenant to enforce RLS - tenant context is set automatically
+    const tenants = await withTenantDb(req.tenantId, pool, async (db) => {
+      return await db.select().from(schema.tenant);
+    });
 
-    // Mock response for now
     res.json({
-      tenants: [
-        {
-          id: 'demo-tenant',
-          name: 'Demo Tenant',
-          slug: 'demo',
-          createdAt: new Date().toISOString(),
-        },
-      ],
+      tenants: tenants.map((t) => ({
+        id: t.id,
+        name: t.name,
+        slug: t.settings?.slug || t.name.toLowerCase().replace(/\s+/g, '-'),
+        createdAt: t.createdAt,
+      })),
     });
   } catch (error) {
     console.error('Error listing tenants:', error);
@@ -125,22 +135,28 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res: Response) 
 router.get('/:tenantId', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { tenantId } = req.params;
+    const pool = getSharedPool();
 
-    // TODO: Query database
-    // const tenant = await db.query.tenant.findFirst({
-    //   where: eq(tenant.id, tenantId),
-    // });
+    // Use withTenant to enforce RLS - this proves tenant isolation end-to-end
+    const tenants = await withTenantDb(req.tenantId, pool, async (db) => {
+      return await db.select().from(schema.tenant).where(eq(schema.tenant.id, tenantId));
+    });
 
-    // Mock response
+    if (tenants.length === 0) {
+      res.status(404).json({
+        error: 'Not found',
+        message: 'Tenant not found',
+      });
+      return;
+    }
+
+    const tenant = tenants[0];
     res.json({
-      id: tenantId,
-      name: 'Demo Tenant',
-      slug: 'demo',
-      settings: {
-        maxMappings: 10,
-        maxUsers: 5,
-      },
-      createdAt: new Date().toISOString(),
+      id: tenant.id,
+      name: tenant.name,
+      slug: tenant.settings?.slug || tenant.name.toLowerCase().replace(/\s+/g, '-'),
+      settings: tenant.settings,
+      createdAt: tenant.createdAt,
     });
   } catch (error) {
     console.error('Error getting tenant:', error);
