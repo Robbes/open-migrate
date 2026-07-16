@@ -32,7 +32,7 @@ export interface FolderLike {
 export interface DomainSyncDeps<Source, Target, Item, Folder extends FolderLike = FolderLike> {
   readonly tenantId: TenantId;
   readonly mappingId: MappingId;
-  readonly domain: 'mail' | 'calendar' | 'contact' | 'file';
+  readonly domain: 'email' | 'calendar' | 'contact' | 'file';
   readonly source: Source;
   readonly target: Target;
   readonly ledger: Ledger;

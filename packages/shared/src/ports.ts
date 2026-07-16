@@ -204,7 +204,7 @@ export interface TargetReindexer {
 export interface LedgerRecord {
   readonly tenantId: TenantId;
   readonly mappingId: MappingId;
-  readonly itemType: 'mail' | 'calendar' | 'contact' | 'file';
+  readonly itemType: 'email' | 'calendar' | 'contact' | 'file';
   readonly naturalKeyHash: string;
   readonly contentHash: string;
   readonly targetId: string;
@@ -222,7 +222,7 @@ export interface Ledger {
   find(
     tenantId: TenantId,
     mappingId: MappingId,
-    itemType: 'mail' | 'calendar' | 'contact' | 'file',
+    itemType: 'email' | 'calendar' | 'contact' | 'file',
     naturalKeyHash: string,
   ): Promise<LedgerRecord | undefined>;
   /**

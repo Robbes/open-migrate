@@ -44,7 +44,7 @@ export const runShadowPass: RunShadowPass = async (deps) => {
   const result = await runDomainSync<SourceConnector, TargetWriter, MailItem, MailFolder>({
     tenantId,
     mappingId,
-    domain: 'mail',
+    domain: 'email',
     source,
     target,
     ledger,
