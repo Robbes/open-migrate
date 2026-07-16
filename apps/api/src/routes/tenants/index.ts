@@ -8,8 +8,11 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import { z } from 'zod';
-import { authenticate, requireRole } from '../../middleware/auth';
+import { authenticate, requireRole, withTenantDb } from '../../middleware/auth';
+import { getDbPool } from '../../db';
 import type { AuthenticatedRequest } from '../../types/api';
+import { eq } from 'drizzle-orm';
+import * as schema from '@openmig/ledger';
 
 const router = Router();
 
@@ -47,22 +50,30 @@ const _UpdateMemberRoleSchema = z.object({
  */
 router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // TODO: Query database for user's tenants
-    // This would use the ledger with RLS
-    // const tenants = await db.query.tenant.findMany({
-    //   where: eq(tenant.ownerId, req.userId),
-    // });
+    const pool = getDbPool();
+    const tenantId = req.tenantId;
 
-    // Mock response for now
+    if (!tenantId) {
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Authentication required',
+      });
+      return;
+    }
+
+    // Use withTenantDb to enforce RLS
+    const tenants = await withTenantDb(pool, tenantId, async (db) => {
+      // This query will be automatically filtered by RLS policies
+      return await db.select().from(schema.tenant);
+    });
+
     res.json({
-      tenants: [
-        {
-          id: 'demo-tenant',
-          name: 'Demo Tenant',
-          slug: 'demo',
-          createdAt: new Date().toISOString(),
-        },
-      ],
+      tenants: tenants.map((t) => ({
+        id: t.id,
+        name: t.name,
+        status: t.status,
+        createdAt: t.createdAt,
+      })),
     });
   } catch (error) {
     console.error('Error listing tenants:', error);
@@ -125,22 +136,38 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res: Response) 
 router.get('/:tenantId', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { tenantId } = req.params;
+    const pool = getDbPool();
+    const authTenantId = req.tenantId;
 
-    // TODO: Query database
-    // const tenant = await db.query.tenant.findFirst({
-    //   where: eq(tenant.id, tenantId),
-    // });
+    if (!authTenantId) {
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Authentication required',
+      });
+      return;
+    }
 
-    // Mock response
+    // Use withTenantDb to enforce RLS
+    const tenants = await withTenantDb(pool, authTenantId, async (db) => {
+      // RLS will filter to only show the authenticated tenant's data
+      return await db.select().from(schema.tenant).where(eq(schema.tenant.id, tenantId as string));
+    });
+
+    if (tenants.length === 0) {
+      res.status(404).json({
+        error: 'Not found',
+        message: 'Tenant not found',
+      });
+      return;
+    }
+
+    const tenant = tenants[0]!;
     res.json({
-      id: tenantId,
-      name: 'Demo Tenant',
-      slug: 'demo',
-      settings: {
-        maxMappings: 10,
-        maxUsers: 5,
-      },
-      createdAt: new Date().toISOString(),
+      id: tenant.id,
+      name: tenant.name,
+      status: tenant.status,
+      settings: tenant.settings,
+      createdAt: tenant.createdAt,
     });
   } catch (error) {
     console.error('Error getting tenant:', error);

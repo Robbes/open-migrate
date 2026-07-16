@@ -7,7 +7,10 @@
 
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import type { Pool } from 'pg';
 import type { AuthenticatedRequest } from '../types/api';
+import { withTenant } from '@openmig/ledger';
+import type { PgDatabase } from '@openmig/ledger';
 
 export interface JwtPayload {
   sub: string;
@@ -217,4 +220,31 @@ export function requireTenantMatch(paramName: string = 'tenantId') {
 
     next();
   };
+}
+
+/**
+ * Creates a tenant-scoped database wrapper that sets the tenant context
+ * for all queries within the callback.
+ * 
+ * This is the primary way to access the database in a multi-tenant context.
+ * It ensures RLS policies are enforced by setting app.current_tenant.
+ * 
+ * @param pool - The pg pool to use for connections
+ * @param tenantId - The tenant ID to set as the current context
+ * @param fn - Callback function that receives a tenant-scoped db handle
+ * @returns Promise resolving to the callback result
+ * 
+ * @example
+ * ```typescript
+ * const result = await withTenantDb(dbPool, req.tenantId, async (txDb) => {
+ *   return await txDb.select().from(connection).where(eq(connection.status, 'active'));
+ * });
+ * ```
+ */
+export async function withTenantDb<T>(
+  pool: Pool,
+  tenantId: string,
+  fn: (db: PgDatabase) => Promise<T>
+): Promise<T> {
+  return withTenant(pool, tenantId, fn);
 }
