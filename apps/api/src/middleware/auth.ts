@@ -8,8 +8,8 @@
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import type { AuthenticatedRequest } from '../types/api';
-import { type Pool } from 'pg';
-import { withTenant as ledgerWithTenant } from '@openmig/ledger';
+import { Pool } from 'pg';
+import { withTenant as ledgerWithTenant, type PgDatabase } from '@openmig/ledger';
 
 export interface JwtPayload {
   sub: string;
@@ -49,7 +49,7 @@ export function getDbPool(): Pool {
 export function withTenantDb<T>(
   tenantId: string,
   pool: Pool,
-  fn: (db: Parameters<typeof ledgerWithTenant>[2]) => Promise<T>
+  fn: (db: PgDatabase) => Promise<T>
 ): Promise<T> {
   return ledgerWithTenant(pool, tenantId, fn);
 }

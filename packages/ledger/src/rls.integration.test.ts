@@ -49,7 +49,7 @@ function getAppUserConnectionString(originalUrl: string): string {
 
 describe('RLS Policies', () => {
   let superuserPool: Pool;  // For setup/cleanup (superuser)
-  let appPool: Pool;        // For testing RLS (non-superuser)
+  let appPool: Pool | null; // For testing RLS (non-superuser) - initialized in beforeAll
   let _db: ReturnType<typeof drizzle<typeof schema>>;
   
   beforeAll(async () => {
@@ -71,7 +71,7 @@ describe('RLS Policies', () => {
   afterAll(async () => {
     await cleanupTestData();
     await superuserPool.end();
-    await appPool.end();
+    await appPool!.end();
   });
   
   async function setupTestData() {
@@ -110,45 +110,45 @@ describe('RLS Policies', () => {
   
   it('should prevent cross-tenant data access', async () => {
     // Set current_tenant to Tenant A (using template literal for SET command)
-    await appPool.query(`SET app.current_tenant = '${TENANT_RLS_A}'`);
+    await appPool!.query(`SET app.current_tenant = '${TENANT_RLS_A}'`);
     
     // Query connections - should only return Tenant A's connection
-    const result = await appPool.query('SELECT * FROM connection');
+    const result = await appPool!.query('SELECT * FROM connection');
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0].tenant_id).toBe(TENANT_RLS_A);
     
     // Try to access Tenant B's data - should return empty
-    const resultB = await appPool.query('SELECT * FROM connection WHERE tenant_id = $1', [TENANT_RLS_B]);
+    const resultB = await appPool!.query('SELECT * FROM connection WHERE tenant_id = $1', [TENANT_RLS_B]);
     expect(resultB.rows).toHaveLength(0);
   });
   
   it('should allow tenant-specific inserts', async () => {
     // Set current_tenant to Tenant A
-    await appPool.query(`SET app.current_tenant = '${TENANT_RLS_A}'`);
+    await appPool!.query(`SET app.current_tenant = '${TENANT_RLS_A}'`);
     
     // Insert a new connection (use unique ID to avoid collision)
     const newId = '950e8400-e29b-41d4-a716-446655441301';
-    await appPool.query(`
+    await appPool!.query(`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config)
       VALUES ($1, $2, 'target', 'imap', 'Tenant A RLS Target', '{}')
       ON CONFLICT (id) DO NOTHING
     `, [newId, TENANT_RLS_A]);
     
     // Verify it was created
-    const result = await appPool.query('SELECT * FROM connection WHERE id = $1', [newId]);
+    const result = await appPool!.query('SELECT * FROM connection WHERE id = $1', [newId]);
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0].tenant_id).toBe(TENANT_RLS_A);
     
     // Clean up
-    await appPool.query('DELETE FROM connection WHERE id = $1', [newId]);
+    await appPool!.query('DELETE FROM connection WHERE id = $1', [newId]);
   });
   
   it('should prevent cross-tenant updates', async () => {
     // Set current_tenant to Tenant A
-    await appPool.query(`SET app.current_tenant = '${TENANT_RLS_A}'`);
+    await appPool!.query(`SET app.current_tenant = '${TENANT_RLS_A}'`);
     
     // Try to update Tenant B's connection - should affect 0 rows
-    const result = await appPool.query(`
+    const result = await appPool!.query(`
       UPDATE connection SET display_name = 'Hacked!' WHERE tenant_id = $1
     `, [TENANT_RLS_B]);
     
@@ -156,7 +156,7 @@ describe('RLS Policies', () => {
   });
   it('should prevent cross-tenant deletes', async () => {
     // Use a client to ensure SET and DELETE are on the same connection
-    const client = await appPool.connect();
+    const client = await appPool!.connect();
     try {
       await client.query(`SET app.current_tenant = '${TENANT_RLS_A}'`);
 
@@ -176,14 +176,14 @@ describe('RLS Policies', () => {
   
   it('should work with multiple table types', async () => {
     // Test with item table
-    await appPool.query(`SET app.current_tenant = '${TENANT_RLS_A}'`);
+    await appPool!.query(`SET app.current_tenant = '${TENANT_RLS_A}'`);
     
-    const result = await appPool.query('SELECT COUNT(*) FROM item');
+    const result = await appPool!.query('SELECT COUNT(*) FROM item');
     expect(parseInt(result.rows[0].count)).toBeGreaterThanOrEqual(0);
     
     // Should not see Tenant B's items
-    await appPool.query(`SET app.current_tenant = '${TENANT_RLS_B}'`);
-    const resultB = await appPool.query('SELECT COUNT(*) FROM item');
+    await appPool!.query(`SET app.current_tenant = '${TENANT_RLS_B}'`);
+    const resultB = await appPool!.query('SELECT COUNT(*) FROM item');
     expect(parseInt(resultB.rows[0].count)).toBeGreaterThanOrEqual(0);
     
     // Counts should differ if data exists
@@ -197,18 +197,63 @@ describe('RLS Policies', () => {
  */
 describe('withTenant helper', () => {
   let superuserPool: Pool;
+  let appPool: Pool | null; // For testing withTenant as non-superuser
   
-  beforeAll(() => {
+  beforeAll(async () => {
     superuserPool = new Pool({
       connectionString: PG_CONNECTION_STRING,
     });
+    
+    // Connect as app_user (non-superuser) to ensure RLS is enforced
+    appPool = new Pool({
+      connectionString: getAppUserConnectionString(PG_CONNECTION_STRING),
+    });
+    
+    // Setup test data (same as first describe block - idempotent)
+    await setupTestDataForWithTenant();
   });
   
   afterAll(async () => {
     await superuserPool.end();
+    if (appPool) {
+      await appPool.end();
+    }
   });
   
+  async function setupTestDataForWithTenant() {
+    // Create test tenants (idempotent)
+    await superuserPool.query(`
+      INSERT INTO tenant (id, name, status)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (id) DO NOTHING
+    `, [TENANT_RLS_A, 'Tenant A RLS', 'active']);
+    
+    await superuserPool.query(`
+      INSERT INTO tenant (id, name, status)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (id) DO NOTHING
+    `, [TENANT_RLS_B, 'Tenant B RLS', 'active']);
+    
+    // Create connections for each tenant (idempotent)
+    await superuserPool.query(`
+      INSERT INTO connection (id, tenant_id, role, kind, display_name, config)
+      VALUES ($1, $2, 'source', 'o365', 'Tenant A RLS Source', '{}')
+      ON CONFLICT (id) DO NOTHING
+    `, [CONNECTION_RLS_A, TENANT_RLS_A]);
+    
+    await superuserPool.query(`
+      INSERT INTO connection (id, tenant_id, role, kind, display_name, config)
+      VALUES ($1, $2, 'source', 'o365', 'Tenant B RLS Source', '{}')
+      ON CONFLICT (id) DO NOTHING
+    `, [CONNECTION_RLS_B, TENANT_RLS_B]);
+  }
+  
   it('should isolate tenant A from tenant B using withTenant', async () => {
+    // Ensure appPool is initialized (runtime check for safety)
+    if (!appPool) {
+      throw new Error('appPool not initialized - beforeAll may not have run');
+    }
+    
     // Use withTenant for Tenant A
     const resultA = await withTenant(appPool, TENANT_RLS_A, async (db) => {
       return await db.select().from(schema.connection);
@@ -216,7 +261,7 @@ describe('withTenant helper', () => {
     
     // Should only see Tenant A's connections
     expect(resultA).toHaveLength(1);
-    expect(resultA[0].tenant_id).toBe(TENANT_RLS_A);
+    expect((resultA[0] as any).tenantId).toBe(TENANT_RLS_A);
     
     // Use withTenant for Tenant B
     const resultB = await withTenant(appPool, TENANT_RLS_B, async (db) => {
@@ -225,10 +270,15 @@ describe('withTenant helper', () => {
     
     // Should only see Tenant B's connections
     expect(resultB).toHaveLength(1);
-    expect(resultB[0].tenant_id).toBe(TENANT_RLS_B);
+    expect((resultB[0] as any).tenantId).toBe(TENANT_RLS_B);
   });
   
   it('should prevent cross-tenant INSERT with foreign tenant_id', async () => {
+    // Ensure appPool is initialized
+    if (!appPool) {
+      throw new Error('appPool not initialized');
+    }
+    
     // Try to insert with Tenant A context but with Tenant B's ID
     const foreignId = '950e8400-e29b-41d4-a716-446655441401';
     
@@ -255,20 +305,26 @@ describe('withTenant helper', () => {
     });
     
     try {
-      // Without setting current_tenant, queries should return empty or error
-      // (RLS policy requires current_setting('app.current_tenant') to be set)
-      const result = await withTenant(unscopedPool, '', async (db) => {
-        return await db.select().from(schema.connection);
-      });
-      
-      // Empty context should return no rows (fail-closed)
-      expect(result).toHaveLength(0);
+      // Without setting current_tenant, queries should error (fail-closed)
+      // The RLS policy tries to cast '' to uuid which fails - this is correct
+      // It's better to error than to silently return all rows (fail-open)
+      // The error message may vary depending on how it's wrapped by drizzle/pg
+      await expect(
+        withTenant(unscopedPool, '', async (db) => {
+          return await db.select().from(schema.connection);
+        })
+      ).rejects.toThrow(/Failed query|invalid input syntax|current_setting|uuid/);
     } finally {
       await unscopedPool.end();
     }
   });
   
   it('should prevent cross-tenant UPDATE', async () => {
+    // Ensure appPool is initialized
+    if (!appPool) {
+      throw new Error('appPool not initialized');
+    }
+    
     // Try to update Tenant B's connection while in Tenant A context
     const result = await withTenant(appPool, TENANT_RLS_A, async (db) => {
       // Try to update Tenant B's connection
@@ -284,6 +340,11 @@ describe('withTenant helper', () => {
   });
   
   it('should prevent cross-tenant DELETE', async () => {
+    // Ensure appPool is initialized
+    if (!appPool) {
+      throw new Error('appPool not initialized');
+    }
+    
     // Try to delete Tenant B's connection while in Tenant A context
     const result = await withTenant(appPool, TENANT_RLS_A, async (db) => {
       return await db
@@ -303,6 +364,11 @@ describe('withTenant helper', () => {
   });
   
   it('should rollback on error', async () => {
+    // Ensure appPool is initialized
+    if (!appPool) {
+      throw new Error('appPool not initialized');
+    }
+    
     const insertId = '950e8400-e29b-41d4-a716-446655441501';
     
     // Try to insert and throw an error mid-transaction
