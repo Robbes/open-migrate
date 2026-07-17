@@ -8,7 +8,7 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import { z } from 'zod';
-import { authenticate, requireRole, getDbPool, withTenantDb } from '../../middleware/auth';
+import { authenticate, getDbPool, withTenantDb } from '../../middleware/auth';
 import type { AuthenticatedRequest } from '../../types/api';
 import { eq, and } from 'drizzle-orm';
 import * as schema from '@openmig/ledger';
@@ -193,6 +193,10 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res: Response) 
 router.get('/:mappingId', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const mappingId = req.params.mappingId;
+    if (!mappingId) {
+      res.status(400).json({ error: "mappingId is required" });
+      return;
+    }
     const tenantId = req.tenantId;
 
     if (!tenantId) {
@@ -293,6 +297,10 @@ router.put(
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       const mappingId = req.params.mappingId;
+      if (!mappingId) {
+        res.status(400).json({ error: "mappingId is required" });
+        return;
+      }
       const body = UpdateMappingSchema.parse(req.body);
       const tenantId = req.tenantId;
 
@@ -390,6 +398,10 @@ router.delete(
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       const mappingId = req.params.mappingId;
+      if (!mappingId) {
+        res.status(400).json({ error: "mappingId is required" });
+        return;
+      }
       const tenantId = req.tenantId;
 
       if (!tenantId) {
@@ -456,6 +468,10 @@ router.post(
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { mappingId } = req.params;
+      if (!mappingId) {
+        res.status(400).json({ error: "mappingId is required" });
+        return;
+      }
       const body = TriggerSyncSchema.parse(req.body);
       const tenantId = req.tenantId;
 
@@ -529,6 +545,10 @@ router.post(
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { mappingId } = req.params;
+      if (!mappingId) {
+        res.status(400).json({ error: "mappingId is required" });
+        return;
+      }
       const body = TriggerCutoverSchema.parse(req.body);
       const tenantId = req.tenantId;
 
@@ -602,6 +622,10 @@ router.get(
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       const mappingId = req.params.mappingId;
+      if (!mappingId) {
+        res.status(400).json({ error: "mappingId is required" });
+        return;
+      }
       const tenantId = req.tenantId;
 
       if (!tenantId) {
@@ -686,6 +710,10 @@ router.get(
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       const mappingId = req.params.mappingId;
+      if (!mappingId) {
+        res.status(400).json({ error: "mappingId is required" });
+        return;
+      }
       const runId = req.params.runId;
       const tenantId = req.tenantId;
 
