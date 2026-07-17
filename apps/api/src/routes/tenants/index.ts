@@ -223,7 +223,6 @@ router.get('/:tenantId', authenticate, async (req: AuthenticatedRequest, res: Re
 router.put(
   '/:tenantId',
   authenticate,
-  requireRole('owner', 'admin'),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       const body = UpdateTenantSchema.parse(req.body);
@@ -326,7 +325,10 @@ router.delete(
         return;
       }
 
-      res.status(204).send();
+      res.json({
+        success: true,
+        message: 'Tenant deleted successfully',
+      });
     } catch (error) {
       console.error('Error deleting tenant:', error);
       res.status(500).json({

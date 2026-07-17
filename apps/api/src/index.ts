@@ -45,7 +45,7 @@ app.get('/health', (req: Request, res: Response) => {
 // API Routes
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/tenants', tenantRoutes);
-app.use('/api/mappings', mappingRoutes);
+app.use('/api/migrations', mappingRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/billing', billingWebhookRoutes);
 

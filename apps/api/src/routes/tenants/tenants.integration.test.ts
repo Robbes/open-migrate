@@ -28,7 +28,14 @@ if (!PG_CONNECTION_STRING) {
 }
 
 // Set APP_DATABASE_URL so the API can connect
-process.env.APP_DATABASE_URL = PG_CONNECTION_STRING;
+// Use app_user role to ensure RLS is enforced (superusers bypass RLS)
+const getAppUserConnectionString = (originalUrl: string): string => {
+  const url = new URL(originalUrl);
+  url.username = 'app_user';
+  url.password = 'app_password';
+  return url.toString();
+};
+process.env.APP_DATABASE_URL = getAppUserConnectionString(PG_CONNECTION_STRING);
 
 import app from '../../index.js';
 
