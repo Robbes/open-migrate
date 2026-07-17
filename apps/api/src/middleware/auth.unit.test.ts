@@ -57,7 +57,7 @@ describe('JWT Authentication - Managed Path', () => {
   describe('Forged token rejection', () => {
     it('should reject a token signed with wrong key', async () => {
       // Generate a different keypair
-      const { privateKey: wrongKey, publicKey: wrongPublicKey } = crypto.generateKeyPairSync('rsa', {
+      const { privateKey: wrongKey } = crypto.generateKeyPairSync('rsa', {
         modulusLength: 2048,
         publicKeyEncoding: {
           type: 'spki',
@@ -69,7 +69,6 @@ describe('JWT Authentication - Managed Path', () => {
         },
       });
       const wrongKeyObj = crypto.createPrivateKey(wrongKey);
-      const wrongPublicKeyObj = crypto.createPublicKey(wrongPublicKey);
 
       const forgedToken = await new SignJWT({
         tenantId: 'attacker-tenant',

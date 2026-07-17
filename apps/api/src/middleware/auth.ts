@@ -98,7 +98,7 @@ async function getJWKS(): Promise<ReturnType<typeof createRemoteJWKSet>> {
     return jwksCache;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    throw new Error(`Failed to fetch JWKS from ${jwksUrl}: ${errorMessage}`);
+    throw new Error(`Failed to fetch JWKS from ${jwksUrl}: ${errorMessage}`, { cause: error });
   }
 }
 
@@ -133,7 +133,7 @@ async function verifyManagedToken(token: string): Promise<JwtPayload> {
       throw error;
     }
     if (error instanceof Error) {
-      throw new Error(`Token verification failed: ${error.message}`);
+      throw new Error(`Token verification failed: ${error.message}`, { cause: error });
     }
     throw new Error('Token verification failed');
   }
