@@ -135,7 +135,7 @@ async function verifyManagedToken(token: string): Promise<JwtPayload> {
     if (error instanceof Error) {
       throw new Error(`Token verification failed: ${error.message}`, { cause: error });
     }
-    throw new Error('Token verification failed');
+    throw new Error('Token verification failed', { cause: error });
   }
 }
 
