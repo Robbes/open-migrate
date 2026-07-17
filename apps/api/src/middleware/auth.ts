@@ -91,9 +91,7 @@ async function getJWKS(): Promise<ReturnType<typeof createRemoteJWKSet>> {
   }
 
   try {
-    jwksCache = createRemoteJWKSet(new URL(jwksUrl), {
-      maxAge: 3600000, // Cache for 1 hour
-    });
+    jwksCache = createRemoteJWKSet(new URL(jwksUrl));
     return jwksCache;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
