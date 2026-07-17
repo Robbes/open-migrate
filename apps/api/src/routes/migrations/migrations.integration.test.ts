@@ -25,7 +25,7 @@ if (!PG_CONNECTION_STRING) {
 process.env.APP_DATABASE_URL = PG_CONNECTION_STRING;
 
 import app from '../../index.js';
-import * as schema from '@open-migrate/ledger';
+// import * as schema from '@open-migrate/ledger'; // Not needed - using raw SQL queries
 
 // UUIDs for migration tests
 const MIG_TENANT_A = '950e8400-e29b-41d4-a716-446655443101';
