@@ -100,26 +100,46 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
 router.post('/', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const body = CreateTenantSchema.parse(req.body);
+    const tenantId = req.tenantId;
 
-    // TODO: Create tenant in database
-    // const tenant = await db.insert(tenant).values({
-    //   name: body.name,
-    //   slug: body.slug,
-    //   ownerId: req.userId,
-    //   settings: body.settings,
-    // }).returning();
+    if (!tenantId) {
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Tenant ID not found in authentication context',
+      });
+      return;
+    }
 
-    // Mock response for now
-    const newTenant = {
-      id: `tenant-${Date.now()}`,
-      name: body.name,
-      slug: body.slug,
+    const pool = getSharedPool();
+
+    // Create tenant in database with RLS enforcement via withTenantDb
+    const [newTenant] = await withTenantDb(tenantId, pool, async (db) => {
+      return await db.insert(schema.tenant).values({
+        name: body.name,
+        status: 'active',
+        settings: body.settings || {
+          maxMappings: 10,
+          maxUsers: 5,
+        },
+      }).returning();
+    });
+
+    if (!newTenant) {
+      res.status(500).json({
+        error: 'Database error',
+        message: 'Failed to create tenant',
+      });
+      return;
+    }
+
+    res.status(201).json({
+      id: newTenant.id,
+      name: newTenant.name,
+      slug: (newTenant.settings as Record<string, unknown>)?.slug || body.slug,
       ownerId: req.userId,
-      settings: body.settings,
-      createdAt: new Date().toISOString(),
-    };
-
-    res.status(201).json(newTenant);
+      settings: newTenant.settings,
+      createdAt: newTenant.createdAt,
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       res.status(400).json({
@@ -203,21 +223,52 @@ router.get('/:tenantId', authenticate, async (req: AuthenticatedRequest, res: Re
 router.put(
   '/:tenantId',
   authenticate,
-  requireRole('owner', 'admin'),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { tenantId } = req.params;
       const body = UpdateTenantSchema.parse(req.body);
+      
+      if (!req.tenantId) {
+        res.status(401).json({
+          error: 'Unauthorized',
+          message: 'Tenant ID not found in authentication context',
+        });
+        return;
+      }
 
-      // TODO: Update tenant in database
-      // await db.update(tenant)
-      //   .set(body)
-      //   .where(eq(tenant.id, tenantId));
+      const tenantId = req.tenantId;
+      const pool = getSharedPool();
+
+      // Update tenant in database with RLS enforcement via withTenantDb
+      const [updatedTenant] = await withTenantDb(tenantId, pool, async (db) => {
+        const updateData: Partial<typeof schema.tenant.$inferInsert> = {};
+        if (body.name) {
+          updateData.name = body.name;
+        }
+        if (body.settings) {
+          updateData.settings = body.settings;
+        }
+        
+        return await db
+          .update(schema.tenant)
+          .set(updateData)
+          .where(eq(schema.tenant.id, tenantId))
+          .returning();
+      });
+
+      if (!updatedTenant) {
+        res.status(404).json({
+          error: 'Not found',
+          message: 'Tenant not found',
+        });
+        return;
+      }
 
       res.json({
-        id: tenantId,
-        ...body,
-        updatedAt: new Date().toISOString(),
+        id: updatedTenant.id,
+        name: updatedTenant.name,
+        slug: (updatedTenant.settings as Record<string, unknown>)?.slug || updatedTenant.name.toLowerCase().replace(/\s+/g, '-'),
+        settings: updatedTenant.settings,
+        updatedAt: updatedTenant.createdAt, // Note: schema doesn't have updatedAt yet
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -247,12 +298,37 @@ router.delete(
   requireRole('owner'),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { tenantId: _tenantId } = req.params;
+      if (!req.tenantId) {
+        res.status(401).json({
+          error: 'Unauthorized',
+          message: 'Tenant ID not found in authentication context',
+        });
+        return;
+      }
 
-      // TODO: Delete tenant from database
-      // await db.delete(tenant).where(eq(tenant.id, tenantId));
+      const tenantId = req.tenantId;
+      const pool = getSharedPool();
 
-      res.status(204).send();
+      // Delete tenant from database with RLS enforcement via withTenantDb
+      const [deleted] = await withTenantDb(tenantId, pool, async (db) => {
+        return await db
+          .delete(schema.tenant)
+          .where(eq(schema.tenant.id, tenantId))
+          .returning();
+      });
+
+      if (!deleted) {
+        res.status(404).json({
+          error: 'Not found',
+          message: 'Tenant not found',
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
+        message: 'Tenant deleted successfully',
+      });
     } catch (error) {
       console.error('Error deleting tenant:', error);
       res.status(500).json({
