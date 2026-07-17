@@ -92,7 +92,6 @@ async function getJWKS(): Promise<ReturnType<typeof createRemoteJWKSet>> {
 
   try {
     jwksCache = createRemoteJWKSet(new URL(jwksUrl), {
-      timeout: 10000, // 10 second timeout
       maxAge: 3600000, // Cache for 1 hour
     });
     return jwksCache;
@@ -127,7 +126,7 @@ async function verifyManagedToken(token: string): Promise<JwtPayload> {
       throw new Error('Missing required claims in token payload');
     }
 
-    return payload as JwtPayload;
+    return payload as unknown as JwtPayload;
   } catch (error) {
     if (error instanceof jwt.JsonWebTokenError) {
       throw error;
@@ -198,7 +197,7 @@ export async function authenticate(
       }
       
       // Validate required claims exist even in dev mode
-      const decodedPayload = decoded as JwtPayload;
+      const decodedPayload = decoded as unknown as JwtPayload;
       if (!decodedPayload.sub || !decodedPayload.tenantId || !decodedPayload.role || !decodedPayload.email) {
         throw new Error('Missing required claims in token payload');
       }
