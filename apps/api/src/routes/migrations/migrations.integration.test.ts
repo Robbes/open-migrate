@@ -83,16 +83,16 @@ describe('Migrations Routes - Tenant Isolation', () => {
     // Create mailbox for Tenant A
     const mailboxA = '950e8400-e29b-41d4-a716-446655443401';
     await superuserPool.query(`
-      INSERT INTO mailbox (id, tenant_id, connection_id, display_name, kind, path)
-      VALUES ($1, $2, $3, 'Inbox A', 'inbox', 'INBOX')
+      INSERT INTO mailbox (id, tenant_id, connection_id, display_name, kind)
+      VALUES ($1, $2, $3, 'Inbox A', 'user')
       ON CONFLICT (id) DO NOTHING
     `, [mailboxA, MIG_TENANT_A, connA]);
 
     // Create mailbox for Tenant B
     const mailboxB = '950e8400-e29b-41d4-a716-446655443402';
     await superuserPool.query(`
-      INSERT INTO mailbox (id, tenant_id, connection_id, display_name, kind, path)
-      VALUES ($1, $2, $3, 'Inbox B', 'inbox', 'INBOX')
+      INSERT INTO mailbox (id, tenant_id, connection_id, display_name, kind)
+      VALUES ($1, $2, $3, 'Inbox B', 'user')
       ON CONFLICT (id) DO NOTHING
     `, [mailboxB, MIG_TENANT_B, connB]);
 
@@ -280,8 +280,8 @@ describe('Migrations Routes - Tenant Isolation', () => {
       const tempMailbox = '950e8400-e29b-41d4-a716-446655443602';
       
       await superuserPool.query(`
-        INSERT INTO mailbox (id, tenant_id, connection_id, display_name, kind, path)
-        VALUES ($1, $2, $3, 'Temp', 'inbox', 'temp')
+        INSERT INTO mailbox (id, tenant_id, connection_id, display_name, kind)
+        VALUES ($1, $2, $3, 'Temp', 'user')
         ON CONFLICT (id) DO NOTHING
       `, [tempMailbox, MIG_TENANT_A, '950e8400-e29b-41d4-a716-446655443301']);
 

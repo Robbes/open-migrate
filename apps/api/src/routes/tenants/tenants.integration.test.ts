@@ -123,11 +123,15 @@ describe('API Tenant Isolation', () => {
         .get(`/api/tenants/${API_TENANT_A}`)
         .set('Authorization', `Bearer ${TOKEN_TENANT_B}`);
 
-      // Should either return 404 or not return tenant A's actual data
+      // Note: In dev mode, the mock JWT accepts any token, so tenant context is set from the token.
+      // The actual RLS-based isolation happens at the database level in managed deployments.
+      // In this test, tenant B's token sets context to tenant B, so the query for tenant A
+      // should return nothing (RLS filters out tenant A's rows when context is tenant B).
+      // The test passes if we don't get tenant A's actual data back.
       expect([200, 404]).toContain(response.status);
       
-      if (response.status === 200) {
-        // If it returns 200, verify it's not tenant A's data
+      if (response.status === 200 && response.body.id) {
+        // If it returns 200 with a body, it should NOT be tenant A's data
         expect(response.body.id).not.toBe(API_TENANT_A);
       }
     });
@@ -181,14 +185,23 @@ describe('API Tenant Isolation', () => {
         .set('Authorization', `Bearer ${TOKEN_TENANT_A}`)
         .send(updateData);
 
-      // Server should ignore client-provided tenantId
+      // Server should ignore client-provided tenantId and use auth context
+      // The route should either accept it (ignoring tenantId) or reject it
+      // Either way, the tenant should remain API_TENANT_A
       expect([200, 400]).toContain(response.status);
+      
+      // Verify the tenant wasn't changed to tenant B
+      const check = await superuserPool.query(
+        'SELECT id FROM tenant WHERE id = $1',
+        [API_TENANT_A]
+      );
+      expect(check.rows.length).toBe(1); // Tenant A still exists
     });
   });
 
   describe('DELETE /api/tenants/:id', () => {
     it('should allow owner to delete their own tenant', async () => {
-      // Create a temporary tenant for deletion test
+      // Create a temporary tenant for deletion test with owner role token
       const tempId = '950e8400-e29b-41d4-a716-446655442301';
       await superuserPool.query(`
         INSERT INTO tenant (id, name, status)
@@ -196,9 +209,12 @@ describe('API Tenant Isolation', () => {
         ON CONFLICT (id) DO NOTHING
       `, [tempId, 'Temp Tenant', 'active']);
 
+      // Create owner token for temp tenant
+      const tokenOwnerTemp = createTestToken(tempId, 'owner');
+
       const response = await request
         .delete(`/api/tenants/${tempId}`)
-        .set('Authorization', `Bearer ${TOKEN_TENANT_A}`);
+        .set('Authorization', `Bearer ${tokenOwnerTemp}`);
 
       expect(response.status).toBe(200);
       
