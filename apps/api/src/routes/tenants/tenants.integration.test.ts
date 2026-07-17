@@ -7,15 +7,18 @@
  * UUID Family: 950e8400-e29b-41d4-a716-44665544xxxx (same as RLS tests)
  */
 
+
+// Set JWT_SECRET before importing app so auth middleware uses it
+process.env.JWT_SECRET = 'test-secret-for-integration-tests';
+
+// Set APP_DATABASE_URL so the API routes can connect to the test database
+// This must be set before the app is imported
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Pool } from 'pg';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import * as schema from '@openmig/ledger/src/schema-pg';
-import { eq } from 'drizzle-orm';
 import supertest from 'supertest';
-import app from '../../index.js';
+import jwt from 'jsonwebtoken';
 
-// Connection string from Testcontainers
+// Connection string from Testcontainers - set BEFORE importing app
 const PG_CONNECTION_STRING = process.env.TEST_DATABASE_URL;
 if (!PG_CONNECTION_STRING) {
   throw new Error(
@@ -24,18 +27,33 @@ if (!PG_CONNECTION_STRING) {
   );
 }
 
+// Set APP_DATABASE_URL so the API can connect
+process.env.APP_DATABASE_URL = PG_CONNECTION_STRING;
+
+import app from '../../index.js';
+
 // UUIDs for API isolation tests (950e8400-e29b-41d4-a716-44665544xxxx)
 const API_TENANT_A = '950e8400-e29b-41d4-a716-446655442101';
 const API_TENANT_B = '950e8400-e29b-41d4-a716-446655442102';
 
-// Mock JWT tokens for each tenant
-// In a real scenario, these would be signed JWTs
-const TOKEN_TENANT_A = `mock-jwt-token-for-${API_TENANT_A}`;
-const TOKEN_TENANT_B = `mock-jwt-token-for-${API_TENANT_B}`;
+// Generate valid JWT tokens for each tenant
+function createTestToken(tenantId: string): string {
+  return jwt.sign(
+    {
+      sub: `user-${tenantId}`,
+      tenantId,
+      role: 'member',
+      email: `user@${tenantId}.test`,
+    },
+    process.env.JWT_SECRET!
+  );
+}
+
+const TOKEN_TENANT_A = createTestToken(API_TENANT_A);
+const TOKEN_TENANT_B = createTestToken(API_TENANT_B);
 
 describe('API Tenant Isolation', () => {
   let superuserPool: Pool;
-  let appDb: ReturnType<typeof drizzle<typeof schema>>;
   let request: ReturnType<typeof supertest>;
 
   beforeAll(async () => {
@@ -43,7 +61,6 @@ describe('API Tenant Isolation', () => {
     superuserPool = new Pool({
       connectionString: PG_CONNECTION_STRING,
     });
-    appDb = drizzle(superuserPool, { schema });
 
     // Create test tenants
     await superuserPool.query(`
@@ -68,7 +85,6 @@ describe('API Tenant Isolation', () => {
     ]);
 
     // Build the Express app
-    const app = await buildApp();
     request = supertest(app);
   });
 

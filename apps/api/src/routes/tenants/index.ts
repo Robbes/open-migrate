@@ -59,10 +59,19 @@ const _UpdateMemberRoleSchema = z.object({
  */
 router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Tenant ID not found in authentication context',
+      });
+      return;
+    }
+    
     const pool = getSharedPool();
     
     // Use withTenant to enforce RLS - tenant context is set automatically
-    const tenants = await withTenantDb(req.tenantId, pool, async (db) => {
+    const tenants = await withTenantDb(tenantId, pool, async (db) => {
       return await db.select().from(schema.tenant);
     });
 
@@ -70,7 +79,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
       tenants: tenants.map((t) => ({
         id: t.id,
         name: t.name,
-        slug: t.settings?.slug || t.name.toLowerCase().replace(/\s+/g, '-'),
+        slug: (t.settings as Record<string, unknown>)?.slug || t.name.toLowerCase().replace(/\s+/g, '-'),
         createdAt: t.createdAt,
       })),
     });
@@ -135,11 +144,22 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res: Response) 
 router.get('/:tenantId', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { tenantId } = req.params;
+    
+    // Check that the authenticated user has a tenant context
+    if (!req.tenantId) {
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Tenant ID not found in authentication context',
+      });
+      return;
+    }
+    
     const pool = getSharedPool();
 
     // Use withTenant to enforce RLS - this proves tenant isolation end-to-end
+    // tenantId from params is guaranteed to be a string (it's a required path parameter)
     const tenants = await withTenantDb(req.tenantId, pool, async (db) => {
-      return await db.select().from(schema.tenant).where(eq(schema.tenant.id, tenantId));
+      return await db.select().from(schema.tenant).where(eq(schema.tenant.id, tenantId!));
     });
 
     if (tenants.length === 0) {
@@ -151,10 +171,18 @@ router.get('/:tenantId', authenticate, async (req: AuthenticatedRequest, res: Re
     }
 
     const tenant = tenants[0];
+    if (!tenant) {
+      res.status(404).json({
+        error: 'Not found',
+        message: 'Tenant not found',
+      });
+      return;
+    }
+    
     res.json({
       id: tenant.id,
       name: tenant.name,
-      slug: tenant.settings?.slug || tenant.name.toLowerCase().replace(/\s+/g, '-'),
+      slug: (tenant.settings as Record<string, unknown>)?.slug || tenant.name.toLowerCase().replace(/\s+/g, '-'),
       settings: tenant.settings,
       createdAt: tenant.createdAt,
     });

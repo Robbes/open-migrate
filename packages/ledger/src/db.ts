@@ -2,9 +2,8 @@
 // PostgreSQL only (see ADR-0010, ADR-0016, ADR-0023).
 // Uses the `pg` driver (node-postgres) with drizzle-orm/node-postgres.
 
-import { drizzle as drizzlePg, type PgTransaction } from 'drizzle-orm/node-postgres';
-import type { PgTable } from 'drizzle-orm/pg-core';
-import { Pool, type PoolClient } from 'pg';
+import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
 
 import * as schemaPg from './schema-pg';
 
@@ -38,7 +37,7 @@ export type PgDatabase = ReturnType<typeof drizzlePg<typeof schemaPg>>;
 export async function withTenant<T>(
   pool: Pool,
   tenantId: string,
-  fn: (db: PgDatabase & PgTransaction<PgTable[]>) => Promise<T>
+  fn: (db: PgDatabase) => Promise<T>
 ): Promise<T> {
   const client = await pool.connect();
   
@@ -54,7 +53,7 @@ export async function withTenant<T>(
     await client.query("SELECT set_config('app.current_tenant', $1, true)", [tenantId]);
     
     // Run the function with the transaction-scoped db
-    const result = await fn(txDb as PgDatabase & PgTransaction<PgTable[]>);
+    const result = await fn(txDb as unknown as PgDatabase);
     
     // Commit transaction
     await client.query('COMMIT');
