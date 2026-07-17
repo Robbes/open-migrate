@@ -3,10 +3,13 @@
  * 
  * Validates JWT tokens and extracts tenant context for RLS.
  * Supports both self-hosted (local JWT) and managed (Auth0/Clerk) providers.
+ * 
+ * SECURITY: Managed path uses jose with remote JWKS verification. Never decodes without verification.
  */
 
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { jwtVerify, createRemoteJWKSet, decodeJwt } from 'jose';
 import type { AuthenticatedRequest } from '../types/api';
 import { Pool } from 'pg';
 import { withTenant as ledgerWithTenant, type PgDatabase } from '@openmig/ledger';
@@ -18,6 +21,8 @@ export interface JwtPayload {
   role: string;
   iat?: number;
   exp?: number;
+  iss?: string;
+  aud?: string | string[];
 }
 
 /**
@@ -55,10 +60,95 @@ export function withTenantDb<T>(
 }
 
 /**
+ * JWKS cache for managed mode - initialized once and reused
+ */
+let jwksCache: ReturnType<typeof createRemoteJWKSet> | null = null;
+
+/**
+ * Get or create the JWKS cache for the configured issuer
+ */
+async function getJWKS(): Promise<ReturnType<typeof createRemoteJWKSet>> {
+  if (jwksCache) {
+    return jwksCache;
+  }
+
+  const jwtIssuer = process.env.JWT_ISSUER;
+  if (!jwtIssuer) {
+    throw new Error('JWT_ISSUER not configured');
+  }
+
+  // Construct JWKS URL from issuer
+  // For Auth0: https://<domain>/.well-known/jwks.json
+  // For Clerk: https://<domain>/.well-known/jwks.json
+  // For other issuers, they should provide the JWKS endpoint
+  let jwksUrl: string;
+  if (jwtIssuer.endsWith('/.well-known/jwks.json')) {
+    jwksUrl = jwtIssuer;
+  } else if (jwtIssuer.endsWith('/')) {
+    jwksUrl = `${jwtIssuer}.well-known/jwks.json`;
+  } else {
+    jwksUrl = `${jwtIssuer}/.well-known/jwks.json`;
+  }
+
+  try {
+    jwksCache = createRemoteJWKSet(new URL(jwksUrl), {
+      timeout: 10000, // 10 second timeout
+      maxAge: 3600000, // Cache for 1 hour
+    });
+    return jwksCache;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    throw new Error(`Failed to fetch JWKS from ${jwksUrl}: ${errorMessage}`);
+  }
+}
+
+/**
+ * Verify a token using the managed (JWKS) path
+ */
+async function verifyManagedToken(token: string): Promise<JwtPayload> {
+  const jwtIssuer = process.env.JWT_ISSUER;
+  const jwtAudience = process.env.JWT_AUDIENCE;
+
+  if (!jwtIssuer) {
+    throw new Error('JWT_ISSUER not configured for managed mode');
+  }
+
+  const jwks = await getJWKS();
+
+  try {
+    const { payload } = await jwtVerify(token, jwks, {
+      issuer: jwtIssuer,
+      audience: jwtAudience,
+      requiredClaims: ['sub', 'tenantId', 'role', 'email'],
+    });
+
+    // Validate required claims exist
+    if (!payload.sub || !payload.tenantId || !payload.role || !payload.email) {
+      throw new Error('Missing required claims in token payload');
+    }
+
+    return payload as JwtPayload;
+  } catch (error) {
+    if (error instanceof jwt.JsonWebTokenError) {
+      throw error;
+    }
+    if (error instanceof Error) {
+      throw new Error(`Token verification failed: ${error.message}`);
+    }
+    throw new Error('Token verification failed');
+  }
+}
+
+/**
  * Authentication middleware
  * 
  * Validates JWT token from Authorization header and attaches
  * user context to the request object.
+ * 
+ * Security: 
+ * - Self-hosted: Verifies signature with JWT_SECRET
+ * - Managed: Verifies signature with remote JWKS, validates iss/aud/exp
+ * - Dev: Only in non-production, logs warning
  */
 export async function authenticate(
   req: Request,
@@ -88,22 +178,32 @@ export async function authenticate(
       // Self-hosted: Verify with local secret
       payload = jwt.verify(token, jwtSecret) as JwtPayload;
     } else if (jwtIssuer) {
-      // Managed: Verify with issuer (e.g., Auth0, Clerk)
-      // For now, we'll decode without verification
-      // In production, use jose or similar library for public key verification
-      const decoded = jwt.decode(token);
-      if (!decoded) {
-        throw new Error('Invalid token');
-      }
-      payload = decoded as JwtPayload;
+      // Managed: Verify with issuer JWKS - SIGNATURE VERIFICATION REQUIRED
+      payload = await verifyManagedToken(token);
     } else {
       // Development mode: Accept any valid-looking JWT
-      console.warn('JWT verification disabled - development mode');
-      const decoded = jwt.decode(token);
-      if (!decoded) {
-        throw new Error('Invalid token');
+      // NEVER allow this in production
+      if (process.env.NODE_ENV === 'production') {
+        res.status(500).json({
+          error: 'Server Configuration Error',
+          message: 'JWT verification not configured (JWT_SECRET or JWT_ISSUER required)',
+        });
+        return;
       }
-      payload = decoded as JwtPayload;
+      
+      console.warn('JWT verification disabled - development mode');
+      const decoded = decodeJwt(token);
+      if (!decoded || typeof decoded !== 'object') {
+        throw new Error('Invalid token format');
+      }
+      
+      // Validate required claims exist even in dev mode
+      const decodedPayload = decoded as JwtPayload;
+      if (!decodedPayload.sub || !decodedPayload.tenantId || !decodedPayload.role || !decodedPayload.email) {
+        throw new Error('Missing required claims in token payload');
+      }
+      
+      payload = decodedPayload;
     }
 
     // Attach user context to request
@@ -128,6 +228,22 @@ export async function authenticate(
         error: 'Unauthorized',
         message: 'Token expired',
       });
+    } else if (error instanceof Error) {
+      // Handle jose errors and other verification failures
+      if (error.message.includes('Token verification failed') || 
+          error.message.includes('Invalid token') ||
+          error.message.includes('Missing required claims')) {
+        res.status(401).json({
+          error: 'Unauthorized',
+          message: error.message,
+        });
+      } else {
+        console.error('Authentication error:', error);
+        res.status(500).json({
+          error: 'Internal server error',
+          message: 'Token verification failed',
+        });
+      }
     } else {
       console.error('Authentication error:', error);
       res.status(500).json({
