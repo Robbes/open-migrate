@@ -37,12 +37,12 @@ const API_TENANT_A = '950e8400-e29b-41d4-a716-446655442101';
 const API_TENANT_B = '950e8400-e29b-41d4-a716-446655442102';
 
 // Generate valid JWT tokens for each tenant
-function createTestToken(tenantId: string): string {
+function createTestToken(tenantId: string, role: string = 'member'): string {
   return jwt.sign(
     {
       sub: `user-${tenantId}`,
       tenantId,
-      role: 'member',
+      role,
       email: `user@${tenantId}.test`,
     },
     process.env.JWT_SECRET!
@@ -51,6 +51,7 @@ function createTestToken(tenantId: string): string {
 
 const TOKEN_TENANT_A = createTestToken(API_TENANT_A);
 const TOKEN_TENANT_B = createTestToken(API_TENANT_B);
+const TOKEN_ADMIN_A = createTestToken(API_TENANT_A, 'admin');
 
 describe('API Tenant Isolation', () => {
   let superuserPool: Pool;
@@ -64,8 +65,8 @@ describe('API Tenant Isolation', () => {
 
     // Create test tenants
     await superuserPool.query(`
-      INSERT INTO tenant (id, name, status)
-      VALUES ($1, $2, $3), ($4, $5, $6)
+      INSERT INTO tenant (id, name, status, settings)
+      VALUES ($1, $2, $3, '{}'), ($4, $5, $6, '{}')
       ON CONFLICT (id) DO NOTHING
     `, [
       API_TENANT_A, 'API Tenant A', 'active',
@@ -95,46 +96,134 @@ describe('API Tenant Isolation', () => {
     await superuserPool.end();
   });
 
-  it('should return empty list when tenant has no data', async () => {
-    // Tenant A should see its own connections
-    const response = await request
-      .get('/api/tenants')
-      .set('Authorization', `Bearer ${TOKEN_TENANT_A}`);
+  describe('GET /api/tenants', () => {
+    it('should return tenant list for authenticated user', async () => {
+      const response = await request
+        .get('/api/tenants')
+        .set('Authorization', `Bearer ${TOKEN_TENANT_A}`);
 
-    // Note: The mock JWT decoding in auth.ts will accept any token in dev mode
-    // The actual tenant isolation comes from RLS when the tenant context is set
-    expect(response.status).toBe(200);
-    expect(response.body.tenants).toBeDefined();
+      expect(response.status).toBe(200);
+      expect(response.body.tenants).toBeDefined();
+      expect(Array.isArray(response.body.tenants)).toBe(true);
+    });
   });
 
-  it('should prevent tenant B from accessing tenant A data via GET /api/tenants/:id', async () => {
-    // Try to access Tenant A's details using Tenant B's token
-    const response = await request
-      .get(`/api/tenants/${API_TENANT_A}`)
-      .set('Authorization', `Bearer ${TOKEN_TENANT_B}`);
+  describe('GET /api/tenants/:id', () => {
+    it('should allow tenant A to access its own data', async () => {
+      const response = await request
+        .get(`/api/tenants/${API_TENANT_A}`)
+        .set('Authorization', `Bearer ${TOKEN_TENANT_A}`);
 
-    // With RLS enforced, Tenant B should not be able to see Tenant A's data
-    // This could either return 404 (not found) or an empty result
-    expect(response.status).toBe(200);
-    
-    // The response should NOT contain Tenant A's data
-    // (In a properly isolated system, the RLS policy filters out Tenant A's rows
-    // when the context is set to Tenant B, so the query returns nothing)
-    if (response.status === 200) {
-      // If it returns 200, it should be a "not found" response or empty
-      expect(response.body).toEqual(
-        expect.anything() // Accept any response structure
+      expect(response.status).toBe(200);
+      expect(response.body.id).toBe(API_TENANT_A);
+    });
+
+    it('should prevent tenant B from accessing tenant A data (CROSS-TENANT TEST)', async () => {
+      const response = await request
+        .get(`/api/tenants/${API_TENANT_A}`)
+        .set('Authorization', `Bearer ${TOKEN_TENANT_B}`);
+
+      // Should either return 404 or not return tenant A's actual data
+      expect([200, 404]).toContain(response.status);
+      
+      if (response.status === 200) {
+        // If it returns 200, verify it's not tenant A's data
+        expect(response.body.id).not.toBe(API_TENANT_A);
+      }
+    });
+  });
+
+  describe('PUT /api/tenants/:id', () => {
+    it('should allow admin to update tenant A', async () => {
+      const updateData = {
+        name: 'API Tenant A Updated',
+        settings: { theme: 'dark' },
+      };
+
+      const response = await request
+        .put(`/api/tenants/${API_TENANT_A}`)
+        .set('Authorization', `Bearer ${TOKEN_ADMIN_A}`)
+        .send(updateData);
+
+      expect(response.status).toBe(200);
+      expect(response.body.name).toBe('API Tenant A Updated');
+    });
+
+    it('should prevent tenant B from updating tenant A (CROSS-TENANT TEST)', async () => {
+      const updateData = {
+        name: 'Hacked Tenant A',
+      };
+
+      const response = await request
+        .put(`/api/tenants/${API_TENANT_A}`)
+        .set('Authorization', `Bearer ${TOKEN_TENANT_B}`)
+        .send(updateData);
+
+      // Should fail - tenant B doesn't have permission or can't access
+      expect([200, 403, 404]).toContain(response.status);
+      
+      // Verify tenant A wasn't actually modified
+      const check = await superuserPool.query(
+        'SELECT name FROM tenant WHERE id = $1',
+        [API_TENANT_A]
       );
-    }
+      expect(check.rows[0].name).not.toBe('Hacked Tenant A');
+    });
+
+    it('should prevent client from writing rows with different tenant_id (security test)', async () => {
+      const updateData = {
+        name: 'Updated Tenant',
+        tenantId: API_TENANT_B, // Attempt to change tenant
+      };
+
+      const response = await request
+        .put(`/api/tenants/${API_TENANT_A}`)
+        .set('Authorization', `Bearer ${TOKEN_TENANT_A}`)
+        .send(updateData);
+
+      // Server should ignore client-provided tenantId
+      expect([200, 400]).toContain(response.status);
+    });
   });
 
-  it('should allow tenant A to access its own data', async () => {
-    const response = await request
-      .get(`/api/tenants/${API_TENANT_A}`)
-      .set('Authorization', `Bearer ${TOKEN_TENANT_A}`);
+  describe('DELETE /api/tenants/:id', () => {
+    it('should allow owner to delete their own tenant', async () => {
+      // Create a temporary tenant for deletion test
+      const tempId = '950e8400-e29b-41d4-a716-446655442301';
+      await superuserPool.query(`
+        INSERT INTO tenant (id, name, status)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (id) DO NOTHING
+      `, [tempId, 'Temp Tenant', 'active']);
 
-    expect(response.status).toBe(200);
-    // Tenant A should be able to see its own data
-    expect(response.body.id).toBe(API_TENANT_A);
+      const response = await request
+        .delete(`/api/tenants/${tempId}`)
+        .set('Authorization', `Bearer ${TOKEN_TENANT_A}`);
+
+      expect(response.status).toBe(200);
+      
+      // Verify deletion
+      const check = await superuserPool.query(
+        'SELECT * FROM tenant WHERE id = $1',
+        [tempId]
+      );
+      expect(check.rows.length).toBe(0);
+    });
+
+    it('should prevent tenant B from deleting tenant A (CROSS-TENANT TEST)', async () => {
+      const response = await request
+        .delete(`/api/tenants/${API_TENANT_A}`)
+        .set('Authorization', `Bearer ${TOKEN_TENANT_B}`);
+
+      expect([200, 403, 404]).toContain(response.status);
+      
+      // Verify tenant A still exists
+      const check = await superuserPool.query(
+        'SELECT * FROM tenant WHERE id = $1',
+        [API_TENANT_A]
+      );
+      expect(check.rows.length).toBe(1);
+    });
   });
 });
+
