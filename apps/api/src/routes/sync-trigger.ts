@@ -6,14 +6,14 @@
  */
 
 import { Router } from 'express';
-import type { Request, Response } from 'express';
+import type { Response } from 'express';
 import { eq } from 'drizzle-orm';
 import { Pool } from 'pg';
 
-import { withTenantDb } from '@openmig/ledger';
+import { withTenantDb } from '../middleware/auth';
+import type { AuthenticatedRequest } from '../types/api';
 import * as schema from '@openmig/ledger/src/schema-pg';
-import { getTriggerClient } from '@openmig/worker/trigger-client';
-import type { AuthenticatedRequest } from '../middleware/auth';
+import { getTriggerClient } from '@openmig/scheduler';
 
 const router = Router();
 
@@ -47,7 +47,7 @@ const router = Router();
 router.post('/mappings/:mappingId/sync', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const mappingId = req.params.mappingId;
-    const tenantId = req.user?.tenantId;
+    const tenantId = req.tenantId;
 
     // Validate inputs
     if (!tenantId) {
@@ -82,7 +82,9 @@ router.post('/mappings/:mappingId/sync', async (req: AuthenticatedRequest, res: 
       return;
     }
 
-    const mapping = mappings[0]!;
+    // Mapping verified to exist and belong to this tenant
+    // (We use mappingId directly, no need to destructure)
+    const _mapping = mappings[0]!;
 
     // Trigger the job via Trigger.dev
     const triggerClient = getTriggerClient();
@@ -97,21 +99,19 @@ router.post('/mappings/:mappingId/sync', async (req: AuthenticatedRequest, res: 
 
     // Enqueue the job with tenant-scoped payload
     // The job will use tenantId to enforce RLS
-    const run = await triggerClient.trigger({
-      id: 'run-full-sync',
-      payload: {
+    const run = await triggerClient.tasks.trigger(
+      'run-full-sync',
+      {
         tenantId,           // From authenticated context - cannot be spoofed
         mappingId,          // Verified above to belong to this tenant
         options: {
           forceFullScan: true,
         },
       },
-      tags: {
-        tenantId,
-        mappingId,
-        domain: 'email',
-      },
-    });
+      {
+        tags: [`tenant:${tenantId}`, `mapping:${mappingId}`, 'domain:email'],
+      }
+    );
 
     console.log('Full sync triggered:', {
       runId: run.id,
@@ -148,7 +148,7 @@ router.post('/mappings/:mappingId/sync', async (req: AuthenticatedRequest, res: 
 router.post('/mappings/:mappingId/delta-sync', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const mappingId = req.params.mappingId;
-    const tenantId = req.user?.tenantId;
+    const tenantId = req.tenantId;
 
     // Validate inputs
     if (!tenantId) {
@@ -181,7 +181,8 @@ router.post('/mappings/:mappingId/delta-sync', async (req: AuthenticatedRequest,
       return;
     }
 
-    const mapping = mappings[0]!;
+    // Mapping verified to exist and belong to this tenant
+    const _mapping = mappings[0]!;
 
     // Trigger the job via Trigger.dev
     const triggerClient = getTriggerClient();
@@ -195,20 +196,17 @@ router.post('/mappings/:mappingId/delta-sync', async (req: AuthenticatedRequest,
     }
 
     // Enqueue the job with tenant-scoped payload
-    const run = await triggerClient.trigger({
-      id: 'run-delta-sync',
-      payload: {
+    const run = await triggerClient.tasks.trigger(
+      'run-delta-sync',
+      {
         tenantId,           // From authenticated context - cannot be spoofed
         mappingId,          // Verified above to belong to this tenant
         domains: ['email'], // Default to email domain
       },
-      tags: {
-        tenantId,
-        mappingId,
-        domain: 'email',
-        type: 'delta',
-      },
-    });
+      {
+        tags: [`tenant:${tenantId}`, `mapping:${mappingId}`, 'domain:email', 'type:delta'],
+      }
+    );
 
     console.log('Delta sync triggered:', {
       runId: run.id,

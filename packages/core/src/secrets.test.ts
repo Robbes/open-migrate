@@ -146,7 +146,7 @@ describe('Secret Encryption', () => {
 
     it('should throw on missing fields', () => {
       expect(() => decryptSecret({ v: 1, n: '', t: '', c: '' })).toThrow(/missing nonce, tag, or ciphertext/i);
-      expect(() => decryptSecret({ v: 1 })).toThrow(/missing nonce, tag, or ciphertext/i);
+      expect(() => decryptSecret({ v: 1, n: 'test', t: '', c: '' } as EncryptedSecret)).toThrow(/missing nonce, tag, or ciphertext/i);
       expect(() => decryptSecret({} as EncryptedSecret)).toThrow(/missing version/i);
     });
   });

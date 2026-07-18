@@ -50,7 +50,6 @@ import {
   decryptSecret as doDecrypt,
   validateSecretKey,
   parseEncryptedSecret,
-  serializeEncryptedSecret,
   EncryptedSecret,
 } from '@openmig/core/secrets';
 

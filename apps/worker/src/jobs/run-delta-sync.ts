@@ -10,7 +10,6 @@
 import { z } from 'zod';
 import { schemaTask } from '@trigger.dev/sdk/v3';
 import { Pool } from 'pg';
-import { PgMigrationStatusStore } from '@openmig/ledger';
 import { runShadowPass } from '@openmig/core';
 import type { TenantId, MappingId } from '@openmig/shared';
 import { buildDepsFromMapping } from '../build-deps-from-mapping';

@@ -3,3 +3,4 @@ export const packageName = '@openmig/scheduler';
 
 export * from './single-flight';
 export * from './scheduler';
+export * from './trigger-client';

@@ -86,7 +86,7 @@ describe('SecretStore', () => {
     it('should handle complex credential structures', () => {
       const credentials = {
         imap_host: 'imap.example.com',
-        imap_port: 993,
+        imap_port: '993',
         oauth2_token: 'ya29.a0AfH6SMB...',
         oauth2_refresh_token: '1//0g...',
         expires_at: '2024-12-31T23:59:59Z',

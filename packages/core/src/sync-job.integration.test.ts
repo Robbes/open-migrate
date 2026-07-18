@@ -15,11 +15,11 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { Pool } from 'pg';
-import { createPgDb, withTenant, PgLedger, PgCursorStore, PgMigrationStatusStore } from '@openmig/ledger';
+import { createPgDb, PgLedger, PgCursorStore, PgMigrationStatusStore } from '@openmig/ledger';
 import { runShadowPass } from '@openmig/core';
-import { SecretStore } from '@openmig/core/secret-store';
+import { SecretStore, initSecretStore } from '@openmig/core/secret-store';
 import { buildDepsFromMapping } from '../../../apps/worker/src/build-deps-from-mapping';
-import { asTenantId, asMappingId, type TenantId, type MappingId } from '@openmig/shared';
+import { asTenantId, asMappingId } from '@openmig/shared';
 
 // Test database from environment
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
@@ -42,16 +42,15 @@ const TEST_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef'; // 32 bytes = 64
 describe('Sync Jobs with Encrypted Credentials (integration)', () => {
   let db: ReturnType<typeof createPgDb>;
   let pool: Pool;
-  let migrationStatus: PgMigrationStatusStore;
+  const _migrationStatus = new PgMigrationStatusStore(createPgDb(TEST_DATABASE_URL));
 
   beforeAll(async () => {
     db = createPgDb(TEST_DATABASE_URL);
     pool = new Pool({ connectionString: TEST_DATABASE_URL });
-    migrationStatus = new PgMigrationStatusStore(db);
 
     // Initialize secret store with test key
     process.env.SECRET_ENCRYPTION_KEY = TEST_ENCRYPTION_KEY;
-    SecretStore.init();
+    initSecretStore();
 
     // Setup tenant A
     await db.execute(sql`
@@ -317,12 +316,12 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
       await depsA.ledger.recordIfAbsent({
         tenantId: TENANT_A_ID,
         mappingId: MAPPING_A_ID,
-        domain: 'email',
+        itemType: 'email',
         naturalKeyHash: 'test-natural-key-hash',
         contentHash: 'test-content-hash',
-        status: 'synced',
-        sourceRef: 'test-source-ref',
-        targetRef: 'test-target-ref',
+        targetId: 'test-target-id',
+        status: 'copied',
+        createdAt: new Date().toISOString(),
       });
 
       // Query for tenant A's ledger items
@@ -338,7 +337,7 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
       expect(tenantBItems.rowCount).toBe(0);
 
       // Now build deps for tenant B and verify they can't see tenant A's data
-      const depsB = await buildDepsFromMapping(pool, TENANT_B_ID, MAPPING_B_ID);
+      const _depsB = await buildDepsFromMapping(pool, TENANT_B_ID, MAPPING_B_ID);
 
       const tenantBItemsAfter = await db.execute(sql`
         SELECT * FROM ledger WHERE tenant_id = ${TENANT_B_ID}
@@ -430,14 +429,14 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
       const encrypted = SecretStore.encryptCredentials(originalCreds);
 
       // Verify encryption produces a blob with expected structure
-      expect(encrypted.v).toBeDefined();
-      expect(encrypted.n).toBeDefined(); // nonce
-      expect(encrypted.t).toBeDefined(); // auth tag
-      expect(encrypted.c).toBeDefined(); // ciphertext
+      expect(encrypted.encrypted.v).toBeDefined();
+      expect(encrypted.encrypted.n).toBeDefined(); // nonce
+      expect(encrypted.encrypted.t).toBeDefined(); // auth tag
+      expect(encrypted.encrypted.c).toBeDefined(); // ciphertext
 
       // Verify nonce is unique (encrypt again, should be different)
       const encrypted2 = SecretStore.encryptCredentials(originalCreds);
-      expect(encrypted.n).not.toBe(encrypted2.n);
+      expect(encrypted.encrypted.n).not.toBe(encrypted2.encrypted.n);
 
       // Decrypt
       const decrypted = SecretStore.decryptCredentials(encrypted);
@@ -452,7 +451,7 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
       // Tamper with the ciphertext
       const tampered = {
         ...encrypted,
-        c: encrypted.c + 'tampered',
+        encrypted: { ...encrypted.encrypted, c: encrypted.encrypted.c + 'tampered' },
       };
 
       // Decryption should fail
