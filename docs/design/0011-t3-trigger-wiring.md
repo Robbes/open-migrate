@@ -23,9 +23,11 @@ The Trigger.dev jobs in `apps/worker/src/jobs/` are currently **placeholders** t
 | Job File | Payload Schema | Current Behavior | Should Call |
 |----------|---------------|------------------|-------------|
 | **run-full-sync.ts** | `tenantId`, `mappingId`, `options.maxItems`, `options.forceFullScan` | Logs "Starting full sync", loops through domains but does NOT call any core function. Code for `syncFullData` is commented out. | `runDomainSync` for each enabled domain (email, calendar, contact, file) |
-| **run-delta-sync.ts** | `tenantId`, `mappingId`, `domains[]` | Initializes DB, status store, ledger, cursors. For 'email': calls `runShadowPass` with `null as unknown as SourceConnector` and `null as unknown as TargetWriter` — will fail or do nothing. For other domains: logs "not yet implemented", marks skipped. | `runShadowPass` with REAL source/target from credentials; `runCalendarSync`, `runContactSync`, `runFileSync` for other domains |
+| **run-delta-sync.ts** | `tenantId`, `mappingId`, `domains[]` | Initializes DB, status store, ledger, cursors. For 'email': **THROWS ERROR** (previously had `null as unknown as SourceConnector` which was removed). For other domains: logs "not yet implemented", marks skipped. | `runShadowPass` with REAL source/target from credentials; `runCalendarSync`, `runContactSync`, `runFileSync` for other domains |
 | **run-cutover.ts** | `tenantId`, `mappingId`, `options.skipFinalSync`, `options.skipVerification`, `options.gracePeriodHours`, `options.dnsDomain`, `options.targetMailServer` | Initializes cutover state via `CutoverStore`. Steps 1 (delta sync) and 2 (verification) are TODOs/placeholders. Steps 3-7 (state transitions, DNS update, grace period) work but DNS is TODO. | Final delta sync via `runShadowPass`; verification with real ledger/target checks; DNS update via DesecProvider |
 | **run-rollback.ts** | `tenantId`, `mappingId`, `reason`, `options.restoreDns`, `options.notifyUsers`, `options.dnsDomain` | Loads cutover state. Steps 1 (DNS restore) and 2 (data source restoration) are TODOs. Step 3 (state transition) works. Step 4 (notification) is TODO. | DNS rollback via DesecProvider; data source restoration; user notification |
+
+**Key Fix:** The `null as unknown as SourceConnector` forbidden type-cast in `run-delta-sync.ts` has been **removed**. It now throws a clear error explaining that secret storage must be implemented first.
 
 **Summary:** Jobs have the right structure but are mostly placeholders. None call the real core engine with actual source/target connectors.
 
@@ -189,49 +191,115 @@ The cutover job uses `CutoverStore` for cutover state:
 
 ---
 
-### A(f) Secrets Handling
+## Part A: Ground-Truth Report
+
+### A(f) Secrets Handling — CRITICAL FINDING: NO SECRET STORE EXISTS
 
 **Current mechanism:**
-- Secrets are stored in environment variables
+- Secrets are stored in **global environment variables only**
 - Mapping config references env var names via `passwordFromEnv` or `tokenFromEnv` fields
 - Example: `sourceConfig.auth.tokenFromEnv = 'OAUTH2_ACCESS_TOKEN'` → code reads `process.env.OAUTH2_ACCESS_TOKEN`
+- `buildDeps()` in `apps/worker/src/build-deps.ts` reads directly from `process.env`
 
-**Problem for jobs:** The standalone worker uses global environment variables. Jobs need **per-mapping secrets** that:
-1. Are stored securely (connection table with `secretRef`, or external secret manager)
-2. Are loaded by the job based on `mappingId`
-3. Are NEVER logged
+**Schema has `secretRef` field but NO implementation:**
+- The `connection` table has a `secret_ref` column (text)
+- **There is NO code to resolve or store secrets via this field**
+- No SecretManager, Vault integration, or secret resolution logic exists anywhere in the codebase
 
-**Proposed mechanism:**
-1. Store credentials in the `connection` table (already has `secretRef` field)
-2. Job loads connection row via `withTenant(tenantId, ...)`
-3. Decrypt/resolve `secretRef` to get actual credentials
-4. Pass credentials to source/target builders
-5. **Never log secrets** — only log metadata (e.g., "connected to imap.example.com", not the password)
+**This is a PREREQUISITE BLOCKER for T3:**
+- Jobs cannot run without credentials
+- Jobs cannot read from global `process.env` (that would be shared across all tenants)
+- **T3 cannot proceed without a secret storage/resolution mechanism**
+
+**Proposed minimal secret mechanism for T3:**
+
+Since a full secret manager doesn't exist, propose a **simple encrypted JSON storage** in the `connection` table:
+
+1. **Store credentials encrypted in the `connection` table:**
+   ```typescript
+   // connection.config or a dedicated encrypted_credentials column
+   {
+     "source": {
+       "imap_host": "imap.example.com",
+       "imap_port": 993,
+       "user": "user@example.com",
+       "oauth2_token": "<encrypted>",
+       "oauth2_refresh_token": "<encrypted>"
+     }
+   }
+   ```
+
+2. **Add a simple encryption layer:**
+   ```typescript
+   // packages/core/src/secrets.ts (new file)
+   const ENCRYPTION_KEY = process.env.SECRET_ENCRYPTION_KEY; // 32-byte key from env
+   
+   export function encryptSecrets(secrets: Record<string, string>): string {
+     const crypto = require('crypto');
+     const iv = crypto.randomBytes(16);
+     const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(ENCRYPTION_KEY, 'hex'), iv);
+     const encrypted = Buffer.concat([iv, cipher.update(JSON.stringify(secrets)), cipher.final()]);
+     return encrypted.toString('base64');
+   }
+   
+   export function decryptSecrets(encrypted: string): Record<string, string> {
+     const crypto = require('crypto');
+     const data = Buffer.from(encrypted, 'base64');
+     const iv = data.slice(0, 16);
+     const encryptedData = data.slice(16);
+     const decipher = crypto.createDecipheriv('aes-256-gcm', Buffer.from(ENCRYPTION_KEY, 'hex'), iv);
+     const decrypted = Buffer.concat([decipher.update(encryptedData), decipher.final()]);
+     return JSON.parse(decrypted.toString());
+   }
+   ```
+
+3. **Jobs load and decrypt credentials:**
+   ```typescript
+   await withTenant(pool, tenantId, async (db) => {
+     const [connection] = await db.select()
+       .from(connection)
+       .where(eq(connection.id, mapping.connectionId));
+     
+     const secrets = decryptSecrets(connection.encryptedCredentials);
+     const source = new ImapSource({
+       host: secrets.imap_host,
+       auth: { accessToken: secrets.oauth2_token },
+     });
+   });
+   ```
+
+**Alternative (simpler for MVP):** Store credentials unencrypted in `connection.config` JSONB (same as current env var approach but per-mapping). **Not recommended for production** but works for testing/MVP.
+
+**Recommendation:** Implement the encrypted storage approach above as part of T3. This is minimal and self-contained — no external secret manager needed.
 
 ---
 
 ## Part B: Design Proposal
 
-### B1. Job Implementation Strategy
+### B1. Job Implementation Strategy — Scoped to SYNC Jobs Only
 
-For each job, the implementation should:
+**Scope for T3:**
+- **IN SCOPE:** `run-full-sync.ts`, `run-delta-sync.ts` (sync jobs)
+- **OUT OF SCOPE:** `run-cutover.ts`, `run-rollback.ts` (these have DNS/verification TODOs and touch human-gated runbook steps)
+
+**Cutover/rollback handling:**
+- The cutover process follows **runbook 0009** which has a **DELIBERATE human gate** before DNS changes
+- **DO NOT auto-run DNS cutover from a job** — this must remain manual
+- Cutover/rollback jobs will be wired in a SEPARATE later step after the sync engine is proven
+
+For each **SYNC job**, the implementation:
 
 1. **Validate payload** (already done via Zod schema)
 2. **Check tenant_id presence** — fail closed if missing
 3. **Initialize DB pool** from `DATABASE_URL`
 4. **Wrap ALL DB operations in `withTenant(tenantId, ...)`**
 5. **Load mapping and connection credentials** from DB (via `withTenant`)
-6. **Build source/target connectors** using loaded credentials
-7. **Call the real core engine** (`runShadowPass`, `runDomainSync`, cutover machine)
-8. **Update status** via `PgMigrationStatusStore` or `CutoverStore`
+6. **Decrypt credentials** using the secret mechanism
+7. **Build source/target connectors** using decrypted credentials
+8. **Call the real core engine** (`runShadowPass`, `runCalendarSync`, etc.)
+9. **Update status** via `PgMigrationStatusStore`
 
-**Code reuse:** The jobs should reuse the `buildDeps()` and `buildDomainDeps()` functions from `apps/worker/src/build-deps.ts`. However, these functions currently read from global `process.env`. We need to:
-
-**Option A:** Factor out a shared `buildDepsFromMapping()` that takes mapping/connection rows as input instead of reading from env
-
-**Option B:** Pass credentials directly to the jobs via the payload (encrypted)
-
-**Recommendation:** Option A — create `buildDepsFromMapping(config, credentials, db)` that wires the same components but uses provided credentials instead of env vars.
+**Code reuse:** Create `buildDepsFromMapping()` that takes mapping/connection rows as input instead of reading from global env. This factors out the same dependency construction logic from `apps/worker/src/build-deps.ts` but accepts credentials as parameters.
 
 ---
 
@@ -431,27 +499,39 @@ try {
 
 ---
 
-### B6. Test Plan
+### B6. Test Plan — Direct Invocation (No Trigger.dev Infra Required)
+
+**Critical:** Tests must prove the job's core-calling logic WITHOUT requiring Trigger.dev infrastructure in CI.
+
+**Approach:** Invoke the task's `run()` function directly with a mock payload — bypasses the Trigger.dev scheduler entirely.
 
 **Integration Test 1: Sync Job Actually Runs Core**
 
 ```typescript
+import { runDeltaSync } from '@openmig/worker/jobs'; // Export run function for testing
+import { createTestContainer } from './test-helpers';
+
 it('should run shadow pass and create ledger items', async () => {
-  // Setup: Create tenant, mapping, connections with test credentials
-  const tenantId = createTestTenant();
-  const mappingId = createMapping(tenantId, ...);
+  // Setup: Create test container with Postgres
+  const { pool, tenantId, mappingId, credentials } = await createTestContainer();
   
-  // Enqueue job
-  await client.trigger({
-    job: 'run-delta-sync',
-    payload: { tenantId, mappingId, domains: ['email'] },
-  });
+  // Insert connection with encrypted credentials
+  await insertConnection(pool, tenantId, 'source', credentials);
   
-  // Wait for job completion (poll Trigger.dev API or use test hook)
-  await waitForJobCompletion(...);
+  // Directly invoke the job's run() function (bypasses Trigger.dev scheduler)
+  const mockContext = {
+    logger: { log: console.log },
+    schedule: () => {},
+    cancel: () => {},
+  };
+  
+  await runDeltaSync.run(
+    { tenantId, mappingId, domains: ['email'] },
+    mockContext
+  );
   
   // Assert: migration_status shows completed
-  const status = await getStatus(tenantId, mappingId, 'email');
+  const status = await getStatus(pool, tenantId, mappingId, 'email');
   expect(status).toBe('completed');
   
   // Assert: ledger items were created
@@ -466,31 +546,27 @@ it('should run shadow pass and create ledger items', async () => {
 ```typescript
 it('should NOT access tenant A data when running job for tenant B', async () => {
   // Setup: Create tenant A with mapping and data
-  const tenantA = createTestTenant();
-  const mappingA = createMapping(tenantA, ...);
-  await createLedgerItems(tenantA, mappingA, ...);
+  const { pool, tenantA, mappingA } = await createTestContainer('tenant-a');
+  await createLedgerItems(pool, tenantA, mappingA, ...);
   
   // Setup: Create tenant B with different mapping
-  const tenantB = createTestTenant();
-  const mappingB = createMapping(tenantB, ...);
+  const { tenantB, mappingB } = await createTestContainer('tenant-b');
   
-  // Enqueue job for tenant B
-  await client.trigger({
-    job: 'run-delta-sync',
-    payload: { tenantId: tenantB, mappingId: mappingB, domains: ['email'] },
-  });
-  
-  await waitForJobCompletion(...);
+  // Invoke job for tenant B
+  await runDeltaSync.run(
+    { tenantId: tenantB, mappingId: mappingB, domains: ['email'] },
+    mockContext
+  );
   
   // Assert: tenant B's job could NOT see tenant A's data
-  const tenantBItems = await db.select().from(ledgerItem)
-    .where(eq(ledgerItem.mappingId, mappingB));
-  expect(tenantBItems.length).toBe(0); // Or whatever tenant B created
-  
-  // Assert: tenant A's data is unchanged
   const tenantAItems = await db.select().from(ledgerItem)
-    .where(eq(ledgerItem.mappingId, mappingA));
-  expect(tenantAItems.length).toBe(originalCount);
+    .where(eq(ledgerItem.tenantId, tenantA));
+  expect(tenantAItems.length).toBe(originalCount); // Unchanged
+  
+  // Assert: tenant B has its own isolated data
+  const tenantBItems = await db.select().from(ledgerItem)
+    .where(eq(ledgerItem.tenantId, tenantB));
+  expect(tenantBItems.length).toBeGreaterThan(0);
 });
 ```
 
@@ -506,36 +582,34 @@ it('standalone worker should still work unchanged', async () => {
 });
 ```
 
-**Testing without Trigger.dev Infrastructure:**
+**Test Infrastructure:**
+- Use **Testcontainers** for Postgres (same as existing integration tests)
+- **No Trigger.dev server needed** — we call `run()` directly
+- Mock external services (IMAP, JMAP) or use test fixtures
+- Encryption key for secrets can be a test constant
 
-If Trigger.dev self-hosted is not available in CI:
-
-1. **Unit test the job's `run()` function directly:**
-   ```typescript
-   import { runDeltaSync } from '../../worker/src/jobs/run-delta-sync';
-   
-   it('should call runShadowPass with correct deps', async () => {
-     // Mock the database and credentials
-     const mockPayload = { tenantId, mappingId, domains: ['email'] };
-     
-     // Call run() directly (bypassing Trigger.dev scheduler)
-     await runDeltaSync.run(mockPayload, { ctx: mockContext });
-     
-     // Assert: runShadowPass was called with correct deps
-   });
-   ```
-
-2. **Use Testcontainers for DB:** Same as existing integration tests
-
-3. **Mock external services:** IMAP, JMAP, secret manager
+**Why this works:**
+- The job's `run()` function is a normal async function — it doesn't require Trigger.dev runtime
+- We provide the same context object that Trigger.dev would provide
+- Tests exercise the actual DB and core engine code paths
+- CI can run these tests without any Trigger.dev infrastructure
 
 ---
 
 ## Dependencies & Blockers
 
-1. **Trigger.dev self-hosted infrastructure** — Jobs need a running Trigger.dev instance to execute
-2. **Secret management mechanism** — Need to decide on vault/secret manager integration
-3. **`buildDepsFromMapping()` refactoring** — Current `buildDeps()` reads from global env; need version that accepts credentials as input
+**CRITICAL BLOCKER: Secret Storage Mechanism Does Not Exist**
+
+1. **Secret Store (PREREQUISITE):** The `secretRef` field in the `connection` table has NO implementation. There is no SecretManager, Vault integration, or secret resolution logic. 
+   - **Option A (Recommended):** Implement the encrypted JSON storage mechanism proposed in Section A(f) — AES-256-GCM encryption with a key from `SECRET_ENCRYPTION_KEY` env var
+   - **Option B (MVP):** Store credentials unencrypted in `connection.config` JSONB (works for testing, not production)
+   - **Decision needed:** Which approach to take before T3 implementation can proceed
+
+2. **`buildDepsFromMapping()` refactoring:** Current `buildDeps()` reads from global env; need version that accepts credentials as input and doesn't use `null as unknown as SourceConnector`
+
+3. **Trigger.dev infrastructure:** For actual job execution (not needed for testing — see B6)
+
+**T3 cannot proceed without resolving the secret storage issue.** The minimal encrypted storage approach is recommended to unblock implementation.
 
 ---
 

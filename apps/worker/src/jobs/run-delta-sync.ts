@@ -65,20 +65,15 @@ export const runDeltaSync = schemaTask({
         try {
           if (domain === 'email') {
             // Mail sync using runShadowPass
-            // Note: This is a placeholder - actual source/target creation needs proper config
-            const source = null as unknown as SourceConnector;
-            const target = null as unknown as TargetWriter;
-            const result = await runShadowPass({
-              tenantId,
-              mappingId,
-              source,
-              target,
-              ledger,
-              cursors,
-            } as ReconcileDeps);
-
-            console.log(`Mail sync completed: ${result.created} created, ${result.skipped} skipped`);
-            await statusStore.markCompleted(tenantId, mappingId, domain);
+            // TODO: Build real source/target from connection credentials
+            // This requires the secret storage mechanism to be implemented first
+            throw new Error(
+              'Email sync requires credentials from connection table. ' +
+              'Secret storage mechanism must be implemented before this job can run.'
+            );
+            // Once secrets are available:
+            // const deps = await buildDepsFromMapping(mapping, credentials, { ledger, cursors });
+            // const result = await runShadowPass(deps);
           } else {
             // Other domains (calendar, contact, file) - stub for now
             console.log(`Domain ${domain} not yet implemented`);
