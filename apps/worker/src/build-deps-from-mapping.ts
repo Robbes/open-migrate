@@ -4,6 +4,7 @@
 
 import { Pool } from 'pg';
 import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
+import { eq, and } from 'drizzle-orm';
 
 import {
   type ReconcileDeps,
@@ -75,10 +76,7 @@ export async function buildDepsFromMapping(
     // Load the mapping (RLS-enforced)
     const mappings = await drizzleDb.select()
       .from(mappingTable)
-      .where(
-        // @ts-expect-error - drizzle type issue with eq
-        mappingTable.id === mappingId
-      );
+      .where(eq(mappingTable.id, mappingId));
     
     if (mappings.length === 0) {
       throw new Error(`Mapping not found or access denied: ${mappingId}`);
@@ -90,10 +88,10 @@ export async function buildDepsFromMapping(
     const sourceConnections = await drizzleDb.select()
       .from(connectionTable)
       .where(
-        // @ts-expect-error
-        connectionTable.tenantId === tenantId &&
-        // @ts-expect-error
-        connectionTable.role === 'source'
+        and(
+          eq(connectionTable.tenantId, tenantId),
+          eq(connectionTable.role, 'source')
+        )
       );
     
     if (sourceConnections.length === 0) {
@@ -106,10 +104,10 @@ export async function buildDepsFromMapping(
     const targetConnections = await drizzleDb.select()
       .from(connectionTable)
       .where(
-        // @ts-expect-error
-        connectionTable.tenantId === tenantId &&
-        // @ts-expect-error
-        connectionTable.role === 'target'
+        and(
+          eq(connectionTable.tenantId, tenantId),
+          eq(connectionTable.role, 'target')
+        )
       );
     
     if (targetConnections.length === 0) {
@@ -207,10 +205,7 @@ export async function buildDomainDepsFromMapping(
     // Load the mapping
     const mappings = await drizzleDb.select()
       .from(mappingTable)
-      .where(
-        // @ts-expect-error
-        mappingTable.id === mappingId
-      );
+      .where(eq(mappingTable.id, mappingId));
     
     if (mappings.length === 0) {
       throw new Error(`Mapping not found or access denied: ${mappingId}`);
@@ -239,10 +234,7 @@ export async function buildDomainDepsFromMapping(
     // Load connection for this domain
     const connections = await drizzleDb.select()
       .from(connectionTable)
-      .where(
-        // @ts-expect-error
-        connectionTable.tenantId === tenantId
-      );
+      .where(eq(connectionTable.tenantId, tenantId));
     
     if (connections.length === 0) {
       throw new Error(`No connections found for tenant: ${tenantId}`);
