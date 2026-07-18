@@ -15,6 +15,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Pool } from 'pg';
 import supertest from 'supertest';
 import jwt from 'jsonwebtoken';
+import { randomUUID } from 'crypto';
 
 const PG_CONNECTION_STRING = process.env.TEST_DATABASE_URL;
 if (!PG_CONNECTION_STRING) {
@@ -100,11 +101,12 @@ describe('Billing Route Isolation', () => {
   describe('GET /api/billing/usage', () => {
     it('should return usage for authenticated tenant', async () => {
       // First record some usage for tenant A
+      const usageId = randomUUID();
       await superuserPool.query(`
         INSERT INTO usage_metric (id, tenant_id, period_start, period_end, metric_type, resource, quantity, unit, unit_price, total_cost, metadata)
         VALUES ($1, $2, $3, $4, 'storage', 'storage', $5, 'GB', $6, $7, '{}')
       `, [
-        'usage-test-001',
+        usageId,
         API_TENANT_A,
         new Date().toISOString().slice(0, 7) + '-01',
         new Date().toISOString().slice(0, 7) + '-28',
@@ -144,7 +146,7 @@ describe('Billing Route Isolation', () => {
         .post('/api/billing/usage')
         .set('Authorization', `Bearer ${TOKEN_TENANT_A}`)
         .send({
-          period: '2024-07',
+          period: new Date().toISOString().slice(0, 7),
           storageUsedGB: 5,
           egressGB: 2,
           computeHours: 10,
@@ -163,7 +165,7 @@ describe('Billing Route Isolation', () => {
         .post('/api/billing/usage')
         .set('Authorization', `Bearer ${TOKEN_TENANT_B}`)
         .send({
-          period: '2024-07',
+          period: new Date().toISOString().slice(0, 7),
           storageUsedGB: 999,
           egressGB: 999,
           computeHours: 999,
@@ -244,14 +246,13 @@ describe('Billing Route Isolation', () => {
 
     it('should prevent tenant B from accessing tenant A invoices', async () => {
       // Create an invoice for tenant A
+      const invoiceId = randomUUID();
       await superuserPool.query(`
         INSERT INTO invoice (id, tenant_id, period_start, period_end, status, subtotal, tax_rate, tax_amount, total, currency)
-        VALUES ($1, $2, $3, $4, 'draft', '1000', '210', '210', '1210', 'EUR')
+        VALUES ($1, $2, '2024-06-01', '2024-06-30', 'draft', '1000', '210', '210', '1210', 'EUR')
       `, [
-        'invoice-test-001',
+        invoiceId,
         API_TENANT_A,
-        '2024-07-01',
-        '2024-07-31',
       ]);
 
       const response = await request
@@ -265,28 +266,39 @@ describe('Billing Route Isolation', () => {
 
   describe('GET /api/billing/invoices/:invoiceId', () => {
     it('should return invoice for authenticated tenant', async () => {
-      const [result] = await superuserPool.query(`
+      const invoiceId = randomUUID();
+      const result = await superuserPool.query(`
         INSERT INTO invoice (id, tenant_id, period_start, period_end, status, subtotal, tax_rate, tax_amount, total, currency)
-        VALUES ($1, $2, $3, $4, 'draft', '1000', '210', '210', '1210', 'EUR')
+        VALUES ($1, $2, '2024-07-01', '2024-07-31', 'draft', '1000', '210', '210', '1210', 'EUR')
         RETURNING id
       `, [
-        'invoice-test-002',
+        invoiceId,
         API_TENANT_A,
-        '2024-07-01',
-        '2024-07-31',
       ]);
 
+      const invoiceIdFromDb = result.rows[0].id;
+
       const response = await request
-        .get(`/api/billing/invoices/${result.id}`)
+        .get(`/api/billing/invoices/${invoiceIdFromDb}`)
         .set('Authorization', `Bearer ${TOKEN_TENANT_A}`);
 
       expect(response.status).toBe(200);
-      expect(response.body.invoice.id).toBe(result.id);
+      expect(response.body.invoice.id).toBe(invoiceIdFromDb);
     });
 
     it('should return 404 for tenant B trying to access tenant A invoice', async () => {
+      // Create an invoice for tenant A with a different period
+      const invoiceId = randomUUID();
+      await superuserPool.query(`
+        INSERT INTO invoice (id, tenant_id, period_start, period_end, status, subtotal, tax_rate, tax_amount, total, currency)
+        VALUES ($1, $2, '2024-08-01', '2024-08-31', 'draft', '1000', '210', '210', '1210', 'EUR')
+      `, [
+        invoiceId,
+        API_TENANT_A,
+      ]);
+
       const response = await request
-        .get('/api/billing/invoices/invoice-test-002')
+        .get(`/api/billing/invoices/${invoiceId}`)
         .set('Authorization', `Bearer ${TOKEN_TENANT_B}`);
 
       // Should return 404 because RLS filters out tenant A's invoice
@@ -325,8 +337,7 @@ describe('Billing Route Isolation', () => {
 
       expect(response.status).toBe(200);
       // Should not see tenant A's payment methods
-      const pmIds = response.body.paymentMethods.map((pm: any) => pm.id);
-      expect(pmIds).not.toContain('invoice-test-002');
+      expect(response.body.paymentMethods).toEqual([]);
     });
   });
 });

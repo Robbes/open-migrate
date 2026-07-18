@@ -15,6 +15,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Pool } from 'pg';
 import supertest from 'supertest';
 import jwt from 'jsonwebtoken';
+import { randomUUID } from 'crypto';
 
 const PG_CONNECTION_STRING = process.env.TEST_DATABASE_URL;
 if (!PG_CONNECTION_STRING) {
@@ -60,6 +61,7 @@ describe('Members Route Isolation', () => {
   let superuserPool: Pool;
   let request: ReturnType<typeof supertest>;
   let memberAId: string;
+  let ownerAId: string;
 
   beforeAll(async () => {
     superuserPool = new Pool({
@@ -77,19 +79,35 @@ describe('Members Route Isolation', () => {
     ]);
 
     // Create members for tenant A
-    const [result] = await superuserPool.query(`
+    const memberId = randomUUID();
+    const result = await superuserPool.query(`
       INSERT INTO tenant_member (id, tenant_id, user_id, email, role, status)
       VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING id
     `, [
-      'member-test-001',
+      memberId,
       API_TENANT_A,
       'user-member-001',
       'member@example.com',
       'member',
       'active',
     ]);
-    memberAId = result.id;
+    memberAId = result.rows[0].id;
+
+    // Create an owner for tenant A (needed for "prevent removing last owner" test)
+    const ownerId = randomUUID();
+    await superuserPool.query(`
+      INSERT INTO tenant_member (id, tenant_id, user_id, email, role, status)
+      VALUES ($1, $2, $3, $4, $5, $6)
+    `, [
+      ownerId,
+      API_TENANT_A,
+      'user-owner-001',
+      'owner@example.com',
+      'owner',
+      'active',
+    ]);
+    ownerAId = ownerId;
 
     request = supertest(app);
   });
@@ -241,12 +259,12 @@ describe('Members Route Isolation', () => {
   describe('DELETE /api/tenants/:tenantId/members/:memberId', () => {
     it('should remove member as admin', async () => {
       // Create a new member to delete
-      const [newMember] = await superuserPool.query(`
+      const newMember = await superuserPool.query(`
         INSERT INTO tenant_member (id, tenant_id, user_id, email, role, status)
         VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id
       `, [
-        'member-to-delete',
+        randomUUID(),
         API_TENANT_A,
         'user-to-delete',
         'todelete@example.com',
@@ -254,27 +272,29 @@ describe('Members Route Isolation', () => {
         'active',
       ]);
 
+      const memberId = newMember.rows[0].id;
+
       const response = await request
-        .delete(`/api/tenants/${API_TENANT_A}/members/${newMember.id}`)
+        .delete(`/api/tenants/${API_TENANT_A}/members/${memberId}`)
         .set('Authorization', `Bearer ${TOKEN_OWNER_A}`);
 
       expect(response.status).toBe(204);
 
       // Verify member is deleted
       const verifyResponse = await request
-        .get(`/api/tenants/${API_TENANT_A}/members/${newMember.id}`)
+        .get(`/api/tenants/${API_TENANT_A}/members/${memberId}`)
         .set('Authorization', `Bearer ${TOKEN_TENANT_A}`);
       
       expect(verifyResponse.status).toBe(404);
     });
 
     it('should prevent removing the last owner', async () => {
-      // Try to delete the last owner (which would be the test user themselves in this context)
+      // Try to delete the only owner (ownerAId is the sole owner)
       const response = await request
-        .delete(`/api/tenants/${API_TENANT_A}/members/${memberAId}`)
+        .delete(`/api/tenants/${API_TENANT_A}/members/${ownerAId}`)
         .set('Authorization', `Bearer ${TOKEN_OWNER_A}`);
 
-      // Should fail because it's the last owner or it's the user themselves
+      // Should fail because it's the last owner
       expect(response.status).toBe(400);
     });
 

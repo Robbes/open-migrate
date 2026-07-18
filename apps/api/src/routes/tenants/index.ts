@@ -10,6 +10,7 @@ import type { Response } from 'express';
 import { z } from 'zod';
 import { authenticate, requireRole, getDbPool, withTenantDb } from '../../middleware/auth';
 import type { AuthenticatedRequest } from '../../types/api';
+import membersRoutes from './members';
 import { eq } from 'drizzle-orm';
 import * as schema from '@openmig/ledger';
 
@@ -25,6 +26,8 @@ function getSharedPool() {
   return _dbPool;
 }
 
+// Mount members routes
+router.use('/:tenantId/members', membersRoutes);
 // Schema validation
 const CreateTenantSchema = z.object({
   name: z.string().min(1).max(255),

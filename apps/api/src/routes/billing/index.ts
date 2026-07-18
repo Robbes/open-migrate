@@ -15,12 +15,20 @@ import { authenticate, getDbPool, withTenantDb } from '../../middleware/auth';
 import type { AuthenticatedRequest } from '../../types/api';
 import { calculateCost } from '../../services/billing-service';
 import { getMollieService } from '../../services/mollie/index';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import * as schema from '@openmig/ledger';
 import type { PgDatabase } from '@openmig/ledger';
 
 const router = Router();
-const pool = getDbPool();
+
+// Lazy pool initialization - created on first use, not at module load
+let _dbPool: ReturnType<typeof getDbPool> | null = null;
+function getSharedPool() {
+  if (!_dbPool) {
+    _dbPool = getDbPool();
+  }
+  return _dbPool;
+}
 
 // Schema validation
 const EstimateCostSchema = z.object({
@@ -44,10 +52,10 @@ router.get('/usage', authenticate, async (req: AuthenticatedRequest, res: Respon
     }
     
     const periodStart = new Date().toISOString().slice(0, 7) + '-01'; // First day of current month
-    const periodEnd = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().slice(0, 10); // Last day of current month
+    const _periodEnd = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().slice(0, 10); // Last day of current month
 
     // Get all usage metrics for current period, grouped by metric_type
-    const metrics = await withTenantDb(tenantId, pool, async (db) => {
+    const metrics = await withTenantDb(tenantId, getSharedPool(), async (db) => {
       return await db.select({
         metricType: schema.usageMetric.metricType,
         quantity: schema.usageMetric.quantity,
@@ -131,9 +139,11 @@ router.post('/usage', authenticate, async (req: AuthenticatedRequest, res: Respo
     }).parse(req.body);
 
     // Convert period (YYYY-MM) to period_start and period_end dates
-    const [year, month] = body.period.split('-').map(Number);
+    const [yearStr, monthStr] = body.period.split('-');
+    const year = Number(yearStr);
+    const month = Number(monthStr);
     const periodStart = `${body.period}-01`;
-    const periodEnd = new Date(year, month, 0).toISOString().slice(0, 10); // Last day of month
+    const periodEnd = new Date(year, month - 1, 0).toISOString().slice(0, 10); // Last day of month
 
     // Use default pricing from billing service
     const defaultPricing = {
@@ -147,10 +157,10 @@ router.post('/usage', authenticate, async (req: AuthenticatedRequest, res: Respo
     const storageCost = Math.round(body.storageUsedGB * defaultPricing.storagePricePerGB);
     const egressCost = Math.round(body.egressGB * defaultPricing.egressPricePerGB);
     const computeCost = Math.round(body.computeHours * defaultPricing.computePricePerHour);
-    const syncCost = 0; // API calls are free for now
+    const _syncCost = 0; // API calls are free for now
 
     // Insert/update each metric type
-    await withTenantDb(tenantId, pool, async (db: PgDatabase) => {
+    await withTenantDb(tenantId, getSharedPool(), async (db: PgDatabase) => {
       // Storage metric
       await db.insert(schema.usageMetric)
         .values({
@@ -290,7 +300,7 @@ router.get('/usage/history', authenticate, async (req: AuthenticatedRequest, res
     }
 
     // Get all usage metrics grouped by period
-    const metrics = await withTenantDb(tenantId, pool, async (db) => {
+    const metrics = await withTenantDb(tenantId, getSharedPool(), async (db) => {
       return await db.select({
         periodStart: schema.usageMetric.periodStart,
         periodEnd: schema.usageMetric.periodEnd,
@@ -430,7 +440,7 @@ router.get('/invoices', authenticate, async (req: AuthenticatedRequest, res: Res
       return res.status(401).json({ error: 'Unauthorized', message: 'Tenant ID required' });
     }
 
-    const invoices = await withTenantDb(tenantId, pool, async (db) => {
+    const invoices = await withTenantDb(tenantId, getSharedPool(), async (db) => {
       return await db.select({
         id: schema.invoice.id,
         tenantId: schema.invoice.tenantId,
@@ -484,7 +494,7 @@ router.get('/invoices/:invoiceId', authenticate, async (req: AuthenticatedReques
       return res.status(401).json({ error: 'Unauthorized', message: 'Tenant ID required' });
     }
 
-    const invoices = await withTenantDb(tenantId, pool, async (db) => {
+    const invoices = await withTenantDb(tenantId, getSharedPool(), async (db) => {
       return await db.select({
         id: schema.invoice.id,
         tenantId: schema.invoice.tenantId,
@@ -549,7 +559,7 @@ router.post('/invoices/:invoiceId/pay', authenticate, async (req: AuthenticatedR
     }
 
     // Get invoice from database
-    const invoices = await withTenantDb(tenantId, pool, async (db) => {
+    const invoices = await withTenantDb(tenantId, getSharedPool(), async (db) => {
       return await db.select({
         id: schema.invoice.id,
         tenantId: schema.invoice.tenantId,
@@ -576,6 +586,13 @@ router.post('/invoices/:invoiceId/pay', authenticate, async (req: AuthenticatedR
     }
 
     const invoice = invoices[0];
+    if (!invoice) {
+      res.status(404).json({
+        error: 'Not found',
+        message: 'Invoice not found',
+      });
+      return;
+    }
 
     // Get Mollie service
     const mollieService = getMollieService();
@@ -590,7 +607,7 @@ router.post('/invoices/:invoiceId/pay', authenticate, async (req: AuthenticatedR
     });
 
     // Update invoice status in database
-    await withTenantDb(tenantId, pool, async (db) => {
+    await withTenantDb(tenantId, getSharedPool(), async (db) => {
       await db.update(schema.invoice)
         .set({
           status: 'sent',
@@ -642,7 +659,7 @@ router.get('/payment-methods', authenticate, async (req: AuthenticatedRequest, r
       return res.status(401).json({ error: 'Unauthorized', message: 'Tenant ID required' });
     }
 
-    const paymentMethods = await withTenantDb(tenantId, pool, async (db) => {
+    const paymentMethods = await withTenantDb(tenantId, getSharedPool(), async (db) => {
       return await db.select({
         id: schema.paymentMethod.id,
         tenantId: schema.paymentMethod.tenantId,
@@ -693,7 +710,7 @@ router.post('/payment-methods', authenticate, async (req: AuthenticatedRequest, 
       mollieId: z.string().optional(),
     }).parse(req.body);
 
-    const [paymentMethod] = await withTenantDb(tenantId, pool, async (db) => {
+    const [paymentMethod] = await withTenantDb(tenantId, getSharedPool(), async (db) => {
       return await db.insert(schema.paymentMethod).values({
         tenantId,
         mollieId: body.mollieId || `pm-${Date.now()}`,
@@ -746,14 +763,14 @@ router.patch(
       }
 
       // First, unset all default payment methods for this tenant
-      await withTenantDb(tenantId, pool, async (db) => {
+      await withTenantDb(tenantId, getSharedPool(), async (db) => {
         await db.update(schema.paymentMethod)
           .set({ isDefault: false })
           .where(eq(schema.paymentMethod.tenantId, tenantId));
       });
 
       // Then set the requested payment method as default
-      const [paymentMethod] = await withTenantDb(tenantId, pool, async (db) => {
+      const [paymentMethod] = await withTenantDb(tenantId, getSharedPool(), async (db) => {
         return await db.update(schema.paymentMethod)
           .set({ isDefault: true, updatedAt: new Date() })
           .where(

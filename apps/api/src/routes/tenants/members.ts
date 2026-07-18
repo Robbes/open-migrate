@@ -17,7 +17,15 @@ import { eq, and, count } from 'drizzle-orm';
 import * as schema from '@openmig/ledger';
 
 const router = Router();
-const pool = getDbPool();
+
+// Lazy pool initialization - created on first use, not at module load
+let _dbPool: ReturnType<typeof getDbPool> | null = null;
+function getSharedPool() {
+  if (!_dbPool) {
+    _dbPool = getDbPool();
+  }
+  return _dbPool;
+}
 
 // Schema validation
 const InviteMemberSchema = z.object({
@@ -35,7 +43,7 @@ const UpdateMemberRoleSchema = z.object({
  * List all members of a tenant
  */
 router.get(
-  '/:tenantId/members',
+  '/',
   authenticate,
   async (req: AuthenticatedRequest, res: Response) => {
     try {
@@ -49,7 +57,7 @@ router.get(
         });
       }
 
-      const members = await withTenantDb(tenantId, pool, async (db) => {
+      const members = await withTenantDb(tenantId, getSharedPool(), async (db) => {
         return await db.select({
           id: schema.tenantMember.id,
           tenantId: schema.tenantMember.tenantId,
@@ -83,7 +91,7 @@ router.get(
  * Invite a new member to the tenant
  */
 router.post(
-  '/:tenantId/members',
+  '/',
   authenticate,
   requireRole('owner', 'admin'),
   async (req: AuthenticatedRequest, res: Response) => {
@@ -99,9 +107,10 @@ router.post(
         });
       }
 
-      const [newMember] = await withTenantDb(tenantId, pool, async (db) => {
+      const [newMember] = await withTenantDb(tenantId, getSharedPool(), async (db) => {
         return await db.insert(schema.tenantMember).values({
           tenantId,
+          userId: req.userId || 'pending-invite',
           email: body.email,
           role: body.role,
           status: 'invited',
@@ -133,21 +142,21 @@ router.post(
  * Get member details
  */
 router.get(
-  '/:tenantId/members/:memberId',
+  '/:memberId',
   authenticate,
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { tenantId: _tenantId, memberId } = req.params;
+      const { memberId } = req.params;
       const tenantId = req.tenantId;
       
-      if (!tenantId) {
-        return res.status(401).json({
-          error: 'Unauthorized',
-          message: 'Tenant ID not found in authentication context',
+      if (!tenantId || !memberId) {
+        return res.status(400).json({
+          error: 'Bad Request',
+          message: 'Tenant ID and member ID required',
         });
       }
 
-      const members = await withTenantDb(tenantId, pool, async (db) => {
+      const members = await withTenantDb(tenantId, getSharedPool(), async (db) => {
         return await db.select({
           id: schema.tenantMember.id,
           tenantId: schema.tenantMember.tenantId,
@@ -194,24 +203,24 @@ router.get(
  * Update member role
  */
 router.patch(
-  '/:tenantId/members/:memberId',
+  '/:memberId',
   authenticate,
   requireRole('owner', 'admin'),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { tenantId: _tenantId, memberId } = req.params;
+      const { memberId } = req.params;
       const tenantId = req.tenantId;
       const body = UpdateMemberRoleSchema.parse(req.body);
 
-      if (!tenantId) {
-        return res.status(401).json({
-          error: 'Unauthorized',
-          message: 'Tenant ID not found in authentication context',
+      if (!tenantId || !memberId) {
+        return res.status(400).json({
+          error: 'Bad Request',
+          message: 'Tenant ID and member ID required',
         });
       }
 
       // Prevent demoting the last owner
-      const ownerCount = await withTenantDb(tenantId, pool, async (db) => {
+      const ownerCount = await withTenantDb(tenantId, getSharedPool(), async (db) => {
         const result = await db.select({ count: count() })
           .from(schema.tenantMember)
           .where(
@@ -231,7 +240,7 @@ router.patch(
         return;
       }
 
-      const [updatedMember] = await withTenantDb(tenantId, pool, async (db) => {
+      const [updatedMember] = await withTenantDb(tenantId, getSharedPool(), async (db) => {
         return await db.update(schema.tenantMember)
           .set({ role: body.role, updatedAt: new Date() })
           .where(
@@ -280,40 +289,64 @@ router.patch(
  * Remove a member from the tenant
  */
 router.delete(
-  '/:tenantId/members/:memberId',
+  '/:memberId',
   authenticate,
   requireRole('owner', 'admin'),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { tenantId: _tenantId, memberId } = req.params;
+      const { memberId } = req.params;
       const tenantId = req.tenantId;
       
-      if (!tenantId) {
-        return res.status(401).json({
-          error: 'Unauthorized',
-          message: 'Tenant ID not found in authentication context',
+      if (!tenantId || !memberId) {
+        return res.status(400).json({
+          error: 'Bad Request',
+          message: 'Tenant ID and member ID required',
         });
       }
 
-      // Prevent removing the last owner
-      const ownerCount = await withTenantDb(tenantId, pool, async (db) => {
-        const result = await db.select({ count: count() })
+      // Get the member's role first
+      const memberData = await withTenantDb(tenantId, getSharedPool(), async (db) => {
+        return await db.select({ role: schema.tenantMember.role })
           .from(schema.tenantMember)
           .where(
             and(
+              eq(schema.tenantMember.id, memberId),
               eq(schema.tenantMember.tenantId, tenantId),
-              eq(schema.tenantMember.role, 'owner'),
             )
           );
-        return result[0]?.count ?? 0;
       });
 
-      if (ownerCount === 1) {
-        res.status(400).json({
-          error: 'Bad Request',
-          message: 'Cannot remove the last owner',
+      if (!memberData || memberData.length === 0) {
+        res.status(404).json({
+          error: 'Not found',
+          message: 'Member not found',
         });
         return;
+      }
+
+      const memberRole = memberData[0]!.role;
+
+      // Prevent removing the last owner
+      if (memberRole === 'owner') {
+        const ownerCount = await withTenantDb(tenantId, getSharedPool(), async (db) => {
+          const result = await db.select({ count: count() })
+            .from(schema.tenantMember)
+            .where(
+              and(
+                eq(schema.tenantMember.tenantId, tenantId),
+                eq(schema.tenantMember.role, 'owner'),
+              )
+            );
+          return result[0]?.count ?? 0;
+        });
+
+        if (ownerCount === 1) {
+          res.status(400).json({
+            error: 'Bad Request',
+            message: 'Cannot remove the last owner',
+          });
+          return;
+        }
       }
 
       // Prevent removing yourself
@@ -325,7 +358,7 @@ router.delete(
         return;
       }
 
-      await withTenantDb(tenantId, pool, async (db) => {
+      await withTenantDb(tenantId, getSharedPool(), async (db) => {
         await db.delete(schema.tenantMember)
           .where(
             and(
