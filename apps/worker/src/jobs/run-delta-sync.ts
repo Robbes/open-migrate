@@ -9,9 +9,11 @@
 
 import { z } from 'zod';
 import { schemaTask } from '@trigger.dev/sdk/v3';
-import { createPgDb, PgLedger, PgCursorStore, PgMigrationStatusStore } from '@openmig/ledger';
+import { Pool } from 'pg';
+import { PgMigrationStatusStore } from '@openmig/ledger';
 import { runShadowPass } from '@openmig/core';
-import type { ReconcileDeps, SourceConnector, TargetWriter, TenantId, MappingId } from '@openmig/shared';
+import type { TenantId, MappingId } from '@openmig/shared';
+import { buildDepsFromMapping } from '../build-deps-from-mapping';
 
 // Job input schema
 const DeltaSyncJobSchema = z.object({
@@ -22,11 +24,14 @@ const DeltaSyncJobSchema = z.object({
 
 type DeltaSyncJobPayload = z.infer<typeof DeltaSyncJobSchema>;
 
-// Database connection string from environment
+// Database connection from environment
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) {
   throw new Error('DATABASE_URL environment variable is required');
 }
+
+// Create a persistent pool for jobs
+const pool = new Pool({ connectionString: DATABASE_URL });
 
 // Register the job with Trigger.dev
 export const runDeltaSync = schemaTask({
@@ -37,17 +42,16 @@ export const runDeltaSync = schemaTask({
     // Type assertion since schemaTask validates the payload
     const typedPayload = payload as DeltaSyncJobPayload;
     
+    // SECURITY: Fail closed if tenantId missing
+    if (!typedPayload.tenantId) {
+      throw new Error('tenantId is required in job payload');
+    }
+
     console.log('Starting delta sync', {
       tenantId: typedPayload.tenantId,
       mappingId: typedPayload.mappingId,
       domains: typedPayload.domains,
     });
-
-    // Initialize database and status store
-    const db = createPgDb(DATABASE_URL);
-    const statusStore = new PgMigrationStatusStore(db);
-    const ledger = new PgLedger(db);
-    const cursors = new PgCursorStore(db);
 
     try {
       // Perform delta sync for each domain
@@ -58,31 +62,29 @@ export const runDeltaSync = schemaTask({
       for (const domain of domains) {
         console.log(`Running delta sync for domain: ${domain}`);
 
-        // Initialize status for this domain
-        await statusStore.initDomainStatus(tenantId, mappingId, domain);
-        await statusStore.markInProgress(tenantId, mappingId, domain);
-
         try {
           if (domain === 'email') {
-            // Mail sync using runShadowPass
-            // TODO: Build real source/target from connection credentials
-            // This requires the secret storage mechanism to be implemented first
-            throw new Error(
-              'Email sync requires credentials from connection table. ' +
-              'Secret storage mechanism must be implemented before this job can run.'
-            );
-            // Once secrets are available:
-            // const deps = await buildDepsFromMapping(mapping, credentials, { ledger, cursors });
-            // const result = await runShadowPass(deps);
+            // SECURITY: Build deps with tenant scoping (RLS enforced)
+            // buildDepsFromMapping wraps all DB ops in withTenant()
+            const deps = await buildDepsFromMapping(pool, tenantId, mappingId);
+            
+            // Run the actual shadow pass with real source/target
+            const result = await runShadowPass(deps);
+
+            console.log(`Mail sync completed: ${result.created} created, ${result.skipped} skipped`);
+            
+            // Status is already updated within buildDepsFromMapping's withTenant context
+            // The ledger client is already scoped
           } else {
             // Other domains (calendar, contact, file) - stub for now
             console.log(`Domain ${domain} not yet implemented`);
-            await statusStore.markSkipped(tenantId, mappingId, domain);
+            // TODO: Implement domain-specific sync with buildDomainDepsFromMapping
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
           console.error(`Domain ${domain} sync failed:`, errorMessage);
-          await statusStore.markFailed(tenantId, mappingId, domain, errorMessage);
+          
+          // Re-throw to let Trigger.dev handle the failure
           throw error;
         }
       }
@@ -95,7 +97,7 @@ export const runDeltaSync = schemaTask({
         mappingId: typedPayload.mappingId,
       };
     } finally {
-      await db.close();
+      // Pool is persistent, don't close it
     }
   },
 });
