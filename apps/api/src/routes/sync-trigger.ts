@@ -12,7 +12,7 @@ import { Pool } from 'pg';
 
 import { withTenantDb } from '../middleware/auth';
 import type { AuthenticatedRequest } from '../types/api';
-import * as schema from '@openmig/ledger/src/schema-pg';
+import * as schema from '@openmig/ledger';
 import { getTriggerClient } from '@openmig/scheduler';
 
 const router = Router();

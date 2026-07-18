@@ -132,7 +132,7 @@ export class SecretStore {
     try {
       return JSON.parse(plaintext);
     } catch (error) {
-      throw new Error(`Failed to parse decrypted credentials: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Failed to parse decrypted credentials: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
   }
 }

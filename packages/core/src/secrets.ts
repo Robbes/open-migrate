@@ -206,11 +206,12 @@ export function decryptSecret(encrypted: EncryptedSecret): string {
     // GCM authentication failure - likely tampering or wrong key
     if (error instanceof Error && error.message.includes('Unsupported state')) {
       throw new Error(
-        'Authentication failed: encrypted secret may be tampered or encrypted with different key'
+        'Authentication failed: encrypted secret may be tampered or encrypted with different key',
+        { cause: error }
       );
     }
     // Re-throw with context
-    throw new Error(`Decryption failed: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`Decryption failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
 }
 
@@ -241,7 +242,7 @@ export function parseEncryptedSecret(data: string | object): EncryptedSecret {
     try {
       parsed = JSON.parse(data);
     } catch (error) {
-      throw new Error(`Failed to parse encrypted secret JSON: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Failed to parse encrypted secret JSON: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
   } else {
     parsed = data;

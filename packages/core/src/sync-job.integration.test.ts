@@ -37,7 +37,7 @@ const MAPPING_A_ID = asMappingId('550e8400-e29b-41d4-a716-446655440101' as never
 const MAPPING_B_ID = asMappingId('550e8400-e29b-41d4-a716-446655440102' as never);
 
 // Encryption key for tests (same key used across all tests)
-const TEST_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef'; // 32 bytes = 64 hex chars
+const TEST_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'; // 32 bytes = 64 hex chars
 
 describe('Sync Jobs with Encrypted Credentials (integration)', () => {
   let db: ReturnType<typeof createPgDb>;
@@ -73,16 +73,25 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
     };
     const encryptedCredsA = SecretStore.encryptCredentials(sourceCredsA);
 
+    // Source config for O365 IMAP OAuth2
+    const sourceConfigA = {
+      type: 'imap-oauth2' as const,
+      host: 'outlook.office365.com',
+      port: 993,
+      user: 'user-a@source.com',
+      auth: { kind: 'xoauth2' as const, tokenFromEnv: 'OAUTH2_TOKEN' },
+    };
+
     await db.execute(sql`
-      INSERT INTO connection (id, tenant_id, role, kind, display_name, encrypted_credentials, config, status)
+      INSERT INTO connection (id, tenant_id, role, kind, display_name, secret_ref, config, status)
       VALUES (
         '650e8400-e29b-41d4-a716-446655440001',
         ${TENANT_A_ID},
         'source',
         'o365',
         'O365 Source A',
-        ${JSON.stringify(encryptedCredsA)},
-        '{}',
+        ${JSON.stringify(encryptedCredsA.encrypted)},
+        ${JSON.stringify(sourceConfigA)},
         'connected'
       )
       ON CONFLICT (id) DO NOTHING
@@ -95,33 +104,67 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
     };
     const encryptedTargetCredsA = SecretStore.encryptCredentials(targetCredsA);
 
+    // Target config for JMAP
+    const targetConfigA = {
+      type: 'jmap' as const,
+      baseUrl: 'https://jmap.target.com',
+      user: 'user-a@target.com',
+      auth: { kind: 'basic' as const, passwordFromEnv: 'JMAP_PASSWORD' },
+    };
+
     await db.execute(sql`
-      INSERT INTO connection (id, tenant_id, role, kind, display_name, encrypted_credentials, config, status)
+      INSERT INTO connection (id, tenant_id, role, kind, display_name, secret_ref, config, status)
       VALUES (
         '650e8400-e29b-41d4-a716-446655440002',
         ${TENANT_A_ID},
         'target',
         'jmap',
         'JMAP Target A',
-        ${JSON.stringify(encryptedTargetCredsA)},
-        '{}',
+        ${JSON.stringify(encryptedTargetCredsA.encrypted)},
+        ${JSON.stringify(targetConfigA)},
         'connected'
+      )
+      ON CONFLICT (id) DO NOTHING
+    `);
+
+    // Insert mailboxes for tenant A (required FK for mailbox_mapping)
+    await db.execute(sql`
+      INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, status)
+      VALUES (
+        '750e8400-e29b-41d4-a716-446655440001',
+        ${TENANT_A_ID},
+        '650e8400-e29b-41d4-a716-446655440001',
+        'user-a-source@source.com',
+        'user',
+        'active'
+      )
+      ON CONFLICT (id) DO NOTHING
+    `);
+
+    await db.execute(sql`
+      INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, status)
+      VALUES (
+        '750e8400-e29b-41d4-a716-446655440002',
+        ${TENANT_A_ID},
+        '650e8400-e29b-41d4-a716-446655440002',
+        'user-a-target@target.com',
+        'user',
+        'active'
       )
       ON CONFLICT (id) DO NOTHING
     `);
 
     // Setup mapping for tenant A
     await db.execute(sql`
-      INSERT INTO mailbox_mapping (id, tenant_id, source_mailbox_id, target_mailbox_id, status, source, target, domains)
+      INSERT INTO mailbox_mapping (id, tenant_id, source_mailbox_id, target_mailbox_id, status, pattern, mode)
       VALUES (
         ${MAPPING_A_ID},
         ${TENANT_A_ID},
         '750e8400-e29b-41d4-a716-446655440001',
         '750e8400-e29b-41d4-a716-446655440002',
-        'pending',
-        '{"type":"imap-oauth2","host":"imap.source.com","port":993,"user":"user-a@source.com"}',
-        '{"type":"jmap","baseUrl":"https://jmap.target.com","user":"user-a@target.com"}',
-        '{"email":{"enabled":true,"source":{"type":"imap-oauth2","host":"imap.source.com","port":993,"user":"user-a@source.com"},"target":{"type":"jmap","baseUrl":"https://jmap.target.com","user":"user-a@target.com"}}}'
+        'active',
+        'shared_s',
+        'mirror'
       )
       ON CONFLICT (id) DO NOTHING
     `);
@@ -133,16 +176,25 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
     };
     const encryptedCredsB = SecretStore.encryptCredentials(sourceCredsB);
 
+    // Source config for O365 IMAP OAuth2 (tenant B)
+    const sourceConfigB = {
+      type: 'imap-oauth2' as const,
+      host: 'outlook.office365.com',
+      port: 993,
+      user: 'user-b@source.com',
+      auth: { kind: 'xoauth2' as const, tokenFromEnv: 'OAUTH2_TOKEN_B' },
+    };
+
     await db.execute(sql`
-      INSERT INTO connection (id, tenant_id, role, kind, display_name, encrypted_credentials, config, status)
+      INSERT INTO connection (id, tenant_id, role, kind, display_name, secret_ref, config, status)
       VALUES (
         '650e8400-e29b-41d4-a716-446655440003',
         ${TENANT_B_ID},
         'source',
         'o365',
         'O365 Source B',
-        ${JSON.stringify(encryptedCredsB)},
-        '{}',
+        ${JSON.stringify(encryptedCredsB.encrypted)},
+        ${JSON.stringify(sourceConfigB)},
         'connected'
       )
       ON CONFLICT (id) DO NOTHING
@@ -155,33 +207,82 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
     };
     const encryptedTargetCredsB = SecretStore.encryptCredentials(targetCredsB);
 
+    // Target config for JMAP (tenant B)
+    const targetConfigB = {
+      type: 'jmap' as const,
+      baseUrl: 'https://jmap.target-b.com',
+      user: 'user-b@target.com',
+      auth: { kind: 'basic' as const, passwordFromEnv: 'JMAP_PASSWORD_B' },
+    };
+
     await db.execute(sql`
-      INSERT INTO connection (id, tenant_id, role, kind, display_name, encrypted_credentials, config, status)
+      INSERT INTO connection (id, tenant_id, role, kind, display_name, secret_ref, config, status)
       VALUES (
         '650e8400-e29b-41d4-a716-446655440004',
         ${TENANT_B_ID},
         'target',
         'jmap',
         'JMAP Target B',
-        ${JSON.stringify(encryptedTargetCredsB)},
+        ${JSON.stringify(encryptedTargetCredsB.encrypted)},
+        ${JSON.stringify(targetConfigB)},
+        'connected'
+      )
+      ON CONFLICT (id) DO NOTHING
+    `);
+
+    await db.execute(sql`
+      INSERT INTO connection (id, tenant_id, role, kind, display_name, secret_ref, config, status)
+      VALUES (
+        '650e8400-e29b-41d4-a716-446655440004',
+        ${TENANT_B_ID},
+        'target',
+        'jmap',
+        'JMAP Target B',
+        ${JSON.stringify(encryptedTargetCredsB.encrypted)},
         '{}',
         'connected'
       )
       ON CONFLICT (id) DO NOTHING
     `);
 
+    // Insert mailboxes for tenant B (required FK for mailbox_mapping)
+    await db.execute(sql`
+      INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, status)
+      VALUES (
+        '750e8400-e29b-41d4-a716-446655440003',
+        ${TENANT_B_ID},
+        '650e8400-e29b-41d4-a716-446655440003',
+        'user-b-source@source-b.com',
+        'user',
+        'active'
+      )
+      ON CONFLICT (id) DO NOTHING
+    `);
+
+    await db.execute(sql`
+      INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, status)
+      VALUES (
+        '750e8400-e29b-41d4-a716-446655440004',
+        ${TENANT_B_ID},
+        '650e8400-e29b-41d4-a716-446655440004',
+        'user-b-target@target-b.com',
+        'user',
+        'active'
+      )
+      ON CONFLICT (id) DO NOTHING
+    `);
+
     // Setup mapping for tenant B
     await db.execute(sql`
-      INSERT INTO mailbox_mapping (id, tenant_id, source_mailbox_id, target_mailbox_id, status, source, target, domains)
+      INSERT INTO mailbox_mapping (id, tenant_id, source_mailbox_id, target_mailbox_id, status, pattern, mode)
       VALUES (
         ${MAPPING_B_ID},
         ${TENANT_B_ID},
         '750e8400-e29b-41d4-a716-446655440003',
         '750e8400-e29b-41d4-a716-446655440004',
-        'pending',
-        '{"type":"imap-oauth2","host":"imap.source-b.com","port":993,"user":"user-b@source.com"}',
-        '{"type":"jmap","baseUrl":"https://jmap.target-b.com","user":"user-b@target.com"}',
-        '{"email":{"enabled":true,"source":{"type":"imap-oauth2","host":"imap.source-b.com","port":993,"user":"user-b@source.com"},"target":{"type":"jmap","baseUrl":"https://jmap.target-b.com","user":"user-b@target.com"}}}'
+        'active',
+        'shared_s',
+        'mirror'
       )
       ON CONFLICT (id) DO NOTHING
     `);
@@ -190,8 +291,8 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
   afterAll(async () => {
     // Cleanup test data
     await db.execute(sql`DELETE FROM migration_status WHERE tenant_id IN (${TENANT_A_ID}, ${TENANT_B_ID})`);
-    await db.execute(sql`DELETE FROM ledger WHERE tenant_id IN (${TENANT_A_ID}, ${TENANT_B_ID})`);
-    await db.execute(sql`DELETE FROM cursor_store WHERE tenant_id IN (${TENANT_A_ID}, ${TENANT_B_ID})`);
+    await db.execute(sql`DELETE FROM item WHERE tenant_id IN (${TENANT_A_ID}, ${TENANT_B_ID})`);
+    await db.execute(sql`DELETE FROM cursor WHERE tenant_id IN (${TENANT_A_ID}, ${TENANT_B_ID})`);
     await db.execute(sql`DELETE FROM mailbox_mapping WHERE id IN (${MAPPING_A_ID}, ${MAPPING_B_ID})`);
     await db.execute(sql`DELETE FROM mailbox WHERE tenant_id IN (${TENANT_A_ID}, ${TENANT_B_ID})`);
     await db.execute(sql`DELETE FROM connection WHERE tenant_id IN (${TENANT_A_ID}, ${TENANT_B_ID})`);
@@ -200,9 +301,9 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
   });
 
   beforeEach(async () => {
-    // Clear ledger and cursors before each test
-    await db.execute(sql`DELETE FROM ledger WHERE tenant_id IN (${TENANT_A_ID}, ${TENANT_B_ID})`);
-    await db.execute(sql`DELETE FROM cursor_store WHERE tenant_id IN (${TENANT_A_ID}, ${TENANT_B_ID})`);
+    // Clear item and cursors before each test
+    await db.execute(sql`DELETE FROM item WHERE tenant_id IN (${TENANT_A_ID}, ${TENANT_B_ID})`);
+    await db.execute(sql`DELETE FROM cursor WHERE tenant_id IN (${TENANT_A_ID}, ${TENANT_B_ID})`);
   });
 
   describe('buildDepsFromMapping - encrypted credential round-trip', () => {
@@ -247,19 +348,18 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
     });
 
     it('should fail when connection credentials are missing', async () => {
-      // Create a mapping without credentials
+      // Create a mapping (without source/target/domains columns - they don't exist in schema)
       const badMappingId = asMappingId('88888888-8888-8888-8888-888888888888' as never);
       await db.execute(sql`
-        INSERT INTO mailbox_mapping (id, tenant_id, source_mailbox_id, target_mailbox_id, status, source, target, domains)
+        INSERT INTO mailbox_mapping (id, tenant_id, source_mailbox_id, target_mailbox_id, status, pattern, mode)
         VALUES (
           ${badMappingId},
           ${TENANT_A_ID},
           '750e8400-e29b-41d4-a716-446655440001',
           '750e8400-e29b-41d4-a716-446655440002',
-          'pending',
-          '{"type":"imap-oauth2","host":"imap.source.com","port":993,"user":"user-a@source.com"}',
-          '{"type":"jmap","baseUrl":"https://jmap.target.com","user":"user-a@target.com"}',
-          '{"email":{"enabled":true}}'
+          'active',
+          'shared_s',
+          'mirror'
         )
         ON CONFLICT (id) DO NOTHING
       `);
@@ -324,15 +424,15 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
         createdAt: new Date().toISOString(),
       });
 
-      // Query for tenant A's ledger items
+      // Query for tenant A's item records
       const tenantAItems = await db.execute(sql`
-        SELECT * FROM ledger WHERE tenant_id = ${TENANT_A_ID}
+        SELECT * FROM item WHERE tenant_id = ${TENANT_A_ID}
       `);
       expect(tenantAItems.rowCount).toBe(1);
 
-      // Query for tenant B's ledger items (should be 0)
+      // Query for tenant B's item records (should be 0)
       const tenantBItems = await db.execute(sql`
-        SELECT * FROM ledger WHERE tenant_id = ${TENANT_B_ID}
+        SELECT * FROM item WHERE tenant_id = ${TENANT_B_ID}
       `);
       expect(tenantBItems.rowCount).toBe(0);
 
@@ -340,7 +440,7 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
       const _depsB = await buildDepsFromMapping(pool, TENANT_B_ID, MAPPING_B_ID);
 
       const tenantBItemsAfter = await db.execute(sql`
-        SELECT * FROM ledger WHERE tenant_id = ${TENANT_B_ID}
+        SELECT * FROM item WHERE tenant_id = ${TENANT_B_ID}
       `);
       expect(tenantBItemsAfter.rowCount).toBe(0); // Still 0, tenant B can't see tenant A's data
     });

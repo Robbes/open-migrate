@@ -113,6 +113,9 @@ importers:
       '@openmig/ledger':
         specifier: workspace:*
         version: link:../../packages/ledger
+      '@openmig/scheduler':
+        specifier: workspace:*
+        version: link:../../packages/scheduler
       '@openmig/shared':
         specifier: workspace:*
         version: link:../../packages/shared

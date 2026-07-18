@@ -29,6 +29,7 @@ import {
 import { JmapTargetWriter } from '@openmig/connectors';
 import { PgLedger, PgCursorStore, createPgDb, withTenant } from '@openmig/ledger';
 import { SecretStore } from '@openmig/core/secret-store';
+import { mailboxMapping } from '@openmig/ledger';
 
 /**
  * Build dependencies from database-stored connections with encrypted credentials.
@@ -55,6 +56,26 @@ export async function buildDepsFromMapping(
   // SECURITY: Fail closed if tenantId is missing or invalid
   if (!tenantId || typeof tenantId !== 'string') {
     throw new Error('tenantId is required and must be a valid UUID');
+  }
+
+  // Validate mapping exists and belongs to tenant (RLS-enforced)
+  // Use TEST_DATABASE_URL for integration tests, fall back to DATABASE_URL
+  const databaseUrl = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error('DATABASE_URL or TEST_DATABASE_URL must be set');
+  }
+  const db = createPgDb(databaseUrl);
+  const mappings = await db.select()
+    .from(mailboxMapping)
+    .where(
+      and(
+        eq(mailboxMapping.tenantId, tenantId),
+        eq(mailboxMapping.id, mappingId)
+      )
+    );
+
+  if (mappings.length === 0) {
+    throw new Error('Mapping not found or access denied');
   }
 
   // Load connections and credentials WITHIN tenant context (RLS enforced)
@@ -137,9 +158,6 @@ export async function buildDepsFromMapping(
     source: sourceConfig,
     target: targetConfig,
   };
-  
-  // Now build the actual dependencies OUTSIDE the transaction
-  const db = createPgDb(process.env.DATABASE_URL!);
   
   // Build throttle limiter from mapping config
   // Extract throttle configs from domains if present
