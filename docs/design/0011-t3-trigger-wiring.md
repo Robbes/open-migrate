@@ -598,18 +598,23 @@ it('standalone worker should still work unchanged', async () => {
 
 ## Dependencies & Blockers
 
-**CRITICAL BLOCKER: Secret Storage Mechanism Does Not Exist**
+**RESOLVED: Secret Store Implemented**
 
-1. **Secret Store (PREREQUISITE):** The `secretRef` field in the `connection` table has NO implementation. There is no SecretManager, Vault integration, or secret resolution logic. 
-   - **Option A (Recommended):** Implement the encrypted JSON storage mechanism proposed in Section A(f) — AES-256-GCM encryption with a key from `SECRET_ENCRYPTION_KEY` env var
-   - **Option B (MVP):** Store credentials unencrypted in `connection.config` JSONB (works for testing, not production)
-   - **Decision needed:** Which approach to take before T3 implementation can proceed
+The secret store has been implemented in `packages/core/src/secrets.ts` and `packages/core/src/secret-store.ts`:
 
-2. **`buildDepsFromMapping()` refactoring:** Current `buildDeps()` reads from global env; need version that accepts credentials as input and doesn't use `null as unknown as SourceConnector`
+1. **AES-256-GCM authenticated encryption** with fresh random nonce per encryption
+2. **Versioned blob format** (`{v, n, t, c}`) enables future key rotation
+3. **Key validation** at startup - fails loudly if `SECRET_ENCRYPTION_KEY` is missing or wrong size
+4. **Auth tag verification** on decrypt - throws on tampering
+5. **Comprehensive tests** proving round-trip, tamper detection, unique nonces, and key validation
 
-3. **Trigger.dev infrastructure:** For actual job execution (not needed for testing — see B6)
+**Status:** Phase 1 complete. Secret store is ready for use.
 
-**T3 cannot proceed without resolving the secret storage issue.** The minimal encrypted storage approach is recommended to unblock implementation.
+**Remaining:**
+1. **`buildDepsFromMapping()` refactoring:** Need to factor out dependency construction to accept credentials as input
+2. **Trigger.dev infrastructure:** For actual job execution (not needed for testing — see B6)
+
+---
 
 ---
 
