@@ -6,6 +6,7 @@
   "main": "src/index.ts",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "seed:managed": "tsx src/scripts/seed-managed.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "vitest",
