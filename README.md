@@ -85,7 +85,17 @@ Everything lives in [`docs/`](./docs/). Start with the source of truth: [`docs/a
 - **Decision Records**: [`docs/adr/`](./docs/adr/)
 
 ## Status
-Early development. License: Apache-2.0 (see `LICENSE`).
+Active development, pre-release. License: Apache-2.0 (see `LICENSE`).
+
+The **migration core** is done and property-tested for idempotency: O365 → JMAP/IMAP-DAV mail,
+plus calendar/contacts/files domains (worker `runAllDomains` orchestration) and the cutover
+machine. The **managed edition** control plane is well underway — tenant isolation is enforced at
+runtime (Postgres RLS with a non-owner role, proven cross-tenant at the SQL and HTTP layers), the
+API persists real data, Trigger.dev jobs run the real mail sync, and usage metering accrues from
+real runs. Still in flight for managed: billing/payment end-to-end, the web UI verified against the
+API, and the operator compose stack. The **self-host edition** (a single-tenant NAS/Pi appliance
+bundling Postgres) is planned next and not yet runnable. See
+[`docs/workplans/`](./docs/workplans/) for the per-slice Status blocks.
 
 ## Contributing
 See [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`AGENTS.md`](./AGENTS.md) (guidance for coding agents).
