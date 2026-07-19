@@ -51,7 +51,9 @@ app.use('/api/tenants', tenantRoutes);
 app.use('/api/migrations', mappingRoutes);
 app.use('/api', syncTriggerRoutes);
 app.use('/api/billing', billingRoutes);
-app.use('/api/billing', billingWebhookRoutes);
+// Mount at /webhooks so the route resolves to /api/billing/webhooks/mollie —
+// the exact URL advertised to Mollie in createPayment's webhookUrl.
+app.use('/api/billing/webhooks', billingWebhookRoutes);
 
 // Error handling middleware
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
