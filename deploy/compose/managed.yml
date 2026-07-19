@@ -61,6 +61,10 @@ services:
       - open-migrate-network
 
   trigger-api:
+    # NOTE: pin to a self-host release matching @trigger.dev/sdk (currently ^4.x in
+    # apps/worker) before any real deployment — `latest` is a placeholder (§22.1
+    # wants digest-pinned images). KNOWN GAP: the T3 jobs still import
+    # `@trigger.dev/sdk/v3` while the dep is v4; reconcile before wiring live tasks.
     image: ghcr.io/triggerdotdev/trigger.dev:latest
     container_name: trigger-api
     environment:
@@ -108,7 +112,11 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 3001
+      # DATABASE_URL = DB owner (migrations / seed). APP_DATABASE_URL = non-owner
+      # `app_user` role the request path connects through so RLS is ALWAYS enforced
+      # (a superuser/owner bypasses RLS even under FORCE — see workplan 0011 T1).
       DATABASE_URL: postgresql://${POSTGRES_USER:-openmigrate}:${POSTGRES_PASSWORD:-openmigrate_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
+      APP_DATABASE_URL: postgresql://${APP_DB_USER:-app_user}:${APP_DB_PASSWORD:-app_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
       JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
       JWT_EXPIRY: ${JWT_EXPIRY:-24h}
       TRIGGER_API_URL: http://trigger-api:3000
@@ -136,7 +144,10 @@ services:
     container_name: open-migrate-worker
     environment:
       NODE_ENV: ${NODE_ENV:-development}
+      # See the api service above: owner URL for migrations, app_user URL for the
+      # RLS-enforced tenant data path.
       DATABASE_URL: postgresql://${POSTGRES_USER:-openmigrate}:${POSTGRES_PASSWORD:-openmigrate_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
+      APP_DATABASE_URL: postgresql://${APP_DB_USER:-app_user}:${APP_DB_PASSWORD:-app_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
       TRIGGER_API_URL: http://trigger-api:3000
       TRIGGER_API_KEY: ${TRIGGER_API_KEY:-dev-api-key}
       IMAP_TIMEOUT: ${IMAP_TIMEOUT:-300}
