@@ -22,10 +22,6 @@ const Billing: React.FC = () => {
     );
   }
 
-  const _formatCurrency = (cents: number) => {
-    return `€${(cents / 100).toFixed(2)}`;
-  };
-
   return (
     <div className="space-y-6">
       <div>
