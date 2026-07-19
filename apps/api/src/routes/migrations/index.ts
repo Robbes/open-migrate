@@ -10,8 +10,43 @@ import type { Response } from 'express';
 import { z } from 'zod';
 import { authenticate, getDbPool, withTenantDb } from '../../middleware/auth';
 import type { AuthenticatedRequest } from '../../types/api';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import * as schema from '@openmig/ledger';
+
+/** Map a ledger `run` row to the API/web Run shape. */
+type LedgerRun = typeof schema.run.$inferSelect;
+function toApiRun(r: LedgerRun): {
+  id: string;
+  mappingId: string | null;
+  type: 'full' | 'delta';
+  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
+  startedAt: string | null;
+  finishedAt: string | null;
+  itemsProcessed: number;
+  errors: number;
+  createdAt: string;
+} {
+  const statusMap: Record<LedgerRun['status'], 'pending' | 'running' | 'success' | 'failed' | 'cancelled'> = {
+    queued: 'pending',
+    running: 'running',
+    succeeded: 'success',
+    failed: 'failed',
+    cancelled: 'cancelled',
+  };
+  const stats = (r.stats ?? {}) as { itemsProcessed?: number; errors?: number };
+  return {
+    id: r.id,
+    mappingId: r.mappingId,
+    // 'incremental' is the delta pass; everything else is a full-scan kind.
+    type: r.kind === 'incremental' ? 'delta' : 'full',
+    status: statusMap[r.status],
+    startedAt: r.startedAt ? r.startedAt.toISOString() : null,
+    finishedAt: r.finishedAt ? r.finishedAt.toISOString() : null,
+    itemsProcessed: Number(stats.itemsProcessed ?? 0),
+    errors: Number(stats.errors ?? 0),
+    createdAt: r.createdAt.toISOString(),
+  };
+}
 
 const router = Router();
 
@@ -646,49 +681,22 @@ router.get(
 
       const pool = getSharedPool();
 
-      // Query runs with RLS enforcement via withTenantDb
-      // Note: The actual table is sync_checkpoint, not run
-      // This returns mock data for now - full implementation would query the ledger
-      const _runs = await withTenantDb(tenantId, pool, async (db) => {
-        // For now, return empty array - the actual sync run tracking would need
-        // a dedicated runs table or use sync_checkpoint/migration_status
+      // Query the real run ledger, RLS-scoped, newest first.
+      const runs = await withTenantDb(tenantId, pool, async (db) => {
         return await db
           .select()
-          .from(schema.syncCheckpoint)
+          .from(schema.run)
           .where(
             and(
-              eq(schema.syncCheckpoint.mappingId, mappingId),
-              eq(schema.syncCheckpoint.tenantId, tenantId)
+              eq(schema.run.mappingId, mappingId),
+              eq(schema.run.tenantId, tenantId)
             )
           )
+          .orderBy(desc(schema.run.createdAt))
           .limit(50);
       });
 
-      // Return mock run data since we're using sync_checkpoint as placeholder
-      res.json({
-        runs: [
-          {
-            id: 'run-1',
-            mappingId,
-            type: 'full',
-            status: 'success',
-            startedAt: new Date(Date.now() - 3600000).toISOString(),
-            finishedAt: new Date(Date.now() - 3500000).toISOString(),
-            itemsProcessed: 1250,
-            errors: 0,
-          },
-          {
-            id: 'run-2',
-            mappingId,
-            type: 'delta',
-            status: 'success',
-            startedAt: new Date(Date.now() - 86400000).toISOString(),
-            finishedAt: new Date(Date.now() - 86300000).toISOString(),
-            itemsProcessed: 45,
-            errors: 0,
-          },
-        ],
-      });
+      res.json({ runs: runs.map(toApiRun) });
     } catch (error) {
       console.error('Error listing runs:', error);
       res.status(500).json({
@@ -735,48 +743,53 @@ router.get(
 
       const pool = getSharedPool();
 
-      // Verify the run belongs to this tenant via withTenantDb
-      // Note: This is a placeholder - actual run tracking would need a dedicated runs table
-      await withTenantDb(tenantId, pool, async (db) => {
-        return await db
+      const result = await withTenantDb(tenantId, pool, async (db) => {
+        const runs = await db
           .select()
-          .from(schema.syncCheckpoint)
+          .from(schema.run)
           .where(
             and(
-              eq(schema.syncCheckpoint.id, runId),
-              eq(schema.syncCheckpoint.mappingId, mappingId),
-              eq(schema.syncCheckpoint.tenantId, tenantId)
+              eq(schema.run.id, runId),
+              eq(schema.run.mappingId, mappingId),
+              eq(schema.run.tenantId, tenantId)
             )
           );
+        const runRow = runs[0];
+        if (!runRow) {
+          return null;
+        }
+        // Its event log (errors surfaced verbatim — hard rule 9 / §11.2).
+        const events = await db
+          .select({
+            level: schema.runEvent.level,
+            message: schema.runEvent.message,
+            detail: schema.runEvent.detail,
+            at: schema.runEvent.at,
+          })
+          .from(schema.runEvent)
+          .where(
+            and(
+              eq(schema.runEvent.runId, runId),
+              eq(schema.runEvent.tenantId, tenantId)
+            )
+          )
+          .orderBy(schema.runEvent.at);
+        return { runRow, events };
       });
 
-      // Mock response for run details
+      if (!result) {
+        res.status(404).json({ error: 'Not found', message: 'Run not found' });
+        return;
+      }
+
       res.json({
-        id: runId,
-        mappingId,
-        type: 'full',
-        status: 'success',
-        startedAt: new Date(Date.now() - 3600000).toISOString(),
-        finishedAt: new Date(Date.now() - 3500000).toISOString(),
-        itemsProcessed: 1250,
-        errors: 0,
-        events: [
-          {
-            level: 'info',
-            message: 'Starting full sync',
-            at: new Date(Date.now() - 3600000).toISOString(),
-          },
-          {
-            level: 'info',
-            message: 'Processed 1250 items',
-            at: new Date(Date.now() - 3550000).toISOString(),
-          },
-          {
-            level: 'info',
-            message: 'Sync completed successfully',
-            at: new Date(Date.now() - 3500000).toISOString(),
-          },
-        ],
+        ...toApiRun(result.runRow),
+        events: result.events.map((e) => ({
+          level: e.level,
+          message: e.message,
+          detail: e.detail ?? undefined,
+          at: e.at.toISOString(),
+        })),
       });
     } catch (error) {
       console.error('Error getting run:', error);
