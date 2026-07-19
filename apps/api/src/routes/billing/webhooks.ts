@@ -1,87 +1,123 @@
+// Copyright 2026 The Open Migration Stack authors (Apache-2.0)
+
 /**
- * Mollie Webhook Handler
- * 
- * Processes webhook events from Mollie payment gateway.
- * Updates invoice status based on payment events.
+ * Mollie webhook handler (workplan 0011 T5).
+ *
+ * Mollie POSTs `id=<paymentId>` when a payment's status changes. The body is
+ * untrusted, so we fetch the authoritative payment from Mollie (fetch-on-webhook
+ * pattern) and use its round-tripped metadata (tenantId, invoiceId) to drive the
+ * invoice/payment state machine under the correct RLS tenant context.
+ *
+ * Idempotent: Mollie may deliver the same event more than once. Re-applying a
+ * terminal transition is a no-op — once an invoice is `paid`/`void` we do not
+ * rewrite it, and we always answer 200 so Mollie stops retrying.
  */
 
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { getMollieService } from '../../services/mollie/index';
-import { billingApi as _billingApi } from '../../services/billing-service';
+import { and, eq } from 'drizzle-orm';
+import * as schema from '@openmig/ledger';
+import { getMollieService, type MolliePayment } from '../../services/mollie/index';
+import { getDbPool, withTenantDb } from '../../middleware/auth';
 
 const router = Router();
 
+/** Map a Mollie payment status to the invoice status it drives. */
+function invoiceStatusFor(paymentStatus: MolliePayment['status']): 'paid' | 'void' | null {
+  switch (paymentStatus) {
+    case 'paid':
+      return 'paid';
+    case 'failed':
+    case 'canceled':
+    case 'expired':
+      return 'void';
+    // open / pending / authorized: not terminal — leave the invoice as 'sent'.
+    default:
+      return null;
+  }
+}
+
 /**
  * POST /api/billing/webhooks/mollie
- * 
- * Webhook endpoint for Mollie payment events.
- * Mollie sends POST requests to this endpoint when payment status changes.
  */
 router.post('/mollie', async (req: Request, res: Response) => {
   try {
-    const { id: paymentId } = req.body;
-
-    if (!paymentId) {
-      res.status(400).json({
-        error: 'Missing payment ID',
-      });
+    const paymentId = req.body?.id;
+    if (!paymentId || typeof paymentId !== 'string') {
+      res.status(400).json({ error: 'Missing payment ID' });
       return;
     }
 
-    // Get Mollie service and process webhook
+    // Fetch the authoritative payment (never trust the webhook body).
     const mollieService = getMollieService();
-    const paymentStatus = await mollieService.processWebhook(paymentId);
+    const payment = await mollieService.processWebhook(paymentId);
 
-    // Extract metadata from payment to get tenant and invoice info
-    // Note: In production, you'd store the invoice ID in the payment metadata
-    const { status, paidAt } = paymentStatus;
-
-    // Update invoice status based on payment status
-    if (status === 'paid' && paidAt) {
-      // TODO: Extract invoice ID from payment metadata
-      // For now, we'll log the event
-      console.log(`Payment ${paymentId} completed at ${paidAt}`);
-      
-      // Update invoice status to 'paid'
-      // billingApi.updateInvoiceStatus(invoiceId, 'paid');
-    } else if (status === 'failed') {
-      console.log(`Payment ${paymentId} failed`);
-      
-      // Update invoice status to 'uncollectible'
-      // billingApi.updateInvoiceStatus(invoiceId, 'uncollectible');
-    } else if (status === 'canceled') {
-      console.log(`Payment ${paymentId} was canceled`);
-      
-      // Update invoice status to 'void'
-      // billingApi.updateInvoiceStatus(invoiceId, 'void');
+    const tenantId = payment.metadata?.tenantId;
+    const invoiceId = payment.metadata?.invoiceId;
+    if (typeof tenantId !== 'string' || typeof invoiceId !== 'string') {
+      // Nothing we can correlate — ack so Mollie stops retrying, but record it.
+      console.warn(`Mollie webhook ${paymentId}: missing tenantId/invoiceId metadata`);
+      res.status(200).json({ received: true });
+      return;
     }
 
-    res.status(200).json({
-      received: true,
+    const nextStatus = invoiceStatusFor(payment.status);
+    if (!nextStatus) {
+      // Non-terminal status (open/pending) — acknowledge without a state change.
+      res.status(200).json({ received: true });
+      return;
+    }
+
+    await withTenantDb(tenantId, getDbPool(), async (db) => {
+      const rows = await db
+        .select({ id: schema.invoice.id, status: schema.invoice.status })
+        .from(schema.invoice)
+        .where(
+          and(
+            eq(schema.invoice.id, invoiceId),
+            eq(schema.invoice.tenantId, tenantId),
+            eq(schema.invoice.paymentId, payment.id),
+          ),
+        );
+
+      const invoice = rows[0];
+      if (!invoice) {
+        console.warn(`Mollie webhook ${paymentId}: no matching invoice ${invoiceId}`);
+        return;
+      }
+
+      // Idempotency: a terminal invoice is never rewritten (double delivery = no-op).
+      if (invoice.status === 'paid' || invoice.status === 'void') {
+        return;
+      }
+
+      await db
+        .update(schema.invoice)
+        .set({
+          status: nextStatus,
+          paidAt: nextStatus === 'paid' ? new Date(payment.paidAt ?? Date.now()) : null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(eq(schema.invoice.id, invoiceId), eq(schema.invoice.tenantId, tenantId)),
+        );
     });
+
+    res.status(200).json({ received: true });
   } catch (error) {
     console.error('Error processing Mollie webhook:', error);
-    res.status(500).json({
-      error: 'Webhook processing failed',
-    });
+    res.status(500).json({ error: 'Webhook processing failed' });
   }
 });
 
 /**
- * GET /api/billing/webhooks/mollie/test
- * 
- * Test endpoint to verify webhook configuration.
- * Only enabled in development mode.
+ * GET /api/billing/webhooks/mollie/test — dev-only config check.
  */
 router.get('/mollie/test', (req: Request, res: Response) => {
   if (process.env.NODE_ENV === 'production') {
-    res.status(404).json({
-      error: 'Not found',
-    });
+    res.status(404).json({ error: 'Not found' });
     return;
   }
-
   res.json({
     status: 'Webhook endpoint is configured correctly',
     url: `${process.env.API_URL}/api/billing/webhooks/mollie`,

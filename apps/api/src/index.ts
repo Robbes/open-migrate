@@ -37,6 +37,8 @@ app.use(cors({
 }));
 app.use(morgan('combined'));
 app.use(express.json());
+// Mollie posts webhooks as application/x-www-form-urlencoded (id=<paymentId>).
+app.use(express.urlencoded({ extended: false }));
 
 // Health check
 app.get('/health', (req: Request, res: Response) => {

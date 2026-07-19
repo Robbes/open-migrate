@@ -9,7 +9,7 @@ import { createMollieClient, Mandate, Method, PaymentMethod, MandateMethod } fro
 
 export interface MolliePayment {
   id: string;
-  status: 'open' | 'canceled' | 'paid' | 'failed';
+  status: 'open' | 'canceled' | 'paid' | 'failed' | 'expired' | 'pending' | 'authorized';
   amount: {
     value: string;
     currency: string;
@@ -21,6 +21,8 @@ export interface MolliePayment {
   paidAt?: string;
   canceledAt?: string;
   failedAt?: string;
+  /** Application metadata round-tripped through Mollie (tenantId, invoiceId). */
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface MollieCustomer {
@@ -38,6 +40,8 @@ export interface CreatePaymentParams {
   webhookUrl?: string;
   customerId?: string;
   method?: PaymentMethod;
+  /** Extra metadata merged alongside tenantId (e.g. invoiceId) for webhook correlation. */
+  metadata?: Record<string, string>;
 }
 
 export interface CreateCustomerParams {
@@ -88,25 +92,12 @@ class MollieService {
       customerId: params.customerId,
       method: params.method,
       metadata: {
+        ...params.metadata,
         tenantId: params.tenantId,
       },
     });
 
-    return {
-      id: payment.id,
-      status: payment.status as MolliePayment['status'],
-      amount: {
-        value: payment.amount.value,
-        currency: payment.amount.currency,
-      },
-      description: payment.description,
-      redirectUrl: payment.redirectUrl,
-      webhookUrl: payment.webhookUrl,
-      createdAt: payment.createdAt,
-      paidAt: payment.paidAt,
-      canceledAt: payment.canceledAt,
-      failedAt: payment.failedAt,
-    };
+    return this.toMolliePayment(payment);
   }
 
   /**
@@ -114,7 +105,22 @@ class MollieService {
    */
   async getPayment(paymentId: string): Promise<MolliePayment> {
     const payment = await this.client.payments.get(paymentId);
+    return this.toMolliePayment(payment);
+  }
 
+  private toMolliePayment(payment: {
+    id: string;
+    status: string;
+    amount: { value: string; currency: string };
+    description: string;
+    redirectUrl?: string | null;
+    webhookUrl?: string | null;
+    createdAt: string;
+    paidAt?: string | null;
+    canceledAt?: string | null;
+    failedAt?: string | null;
+    metadata?: unknown;
+  }): MolliePayment {
     return {
       id: payment.id,
       status: payment.status as MolliePayment['status'],
@@ -123,12 +129,13 @@ class MollieService {
         currency: payment.amount.currency,
       },
       description: payment.description,
-      redirectUrl: payment.redirectUrl,
-      webhookUrl: payment.webhookUrl,
+      redirectUrl: payment.redirectUrl ?? undefined,
+      webhookUrl: payment.webhookUrl ?? undefined,
       createdAt: payment.createdAt,
-      paidAt: payment.paidAt,
-      canceledAt: payment.canceledAt,
-      failedAt: payment.failedAt,
+      paidAt: payment.paidAt ?? undefined,
+      canceledAt: payment.canceledAt ?? undefined,
+      failedAt: payment.failedAt ?? undefined,
+      metadata: (payment.metadata as Record<string, unknown> | null | undefined) ?? null,
     };
   }
 
@@ -191,19 +198,28 @@ class MollieService {
   }
 
   /**
-   * Process webhook event from Mollie
+   * Process a webhook event from Mollie.
+   *
+   * Follows Mollie's fetch-on-webhook pattern: the webhook body is untrusted, so
+   * we fetch the authoritative payment by id. Returns the current status plus the
+   * round-tripped metadata (tenantId/invoiceId) the caller needs to update the
+   * right invoice under the right tenant.
    */
   async processWebhook(paymentId: string): Promise<{
-    status: string;
+    id: string;
+    status: MolliePayment['status'];
     paidAt?: string;
     failedAt?: string;
+    metadata: Record<string, unknown> | null;
   }> {
     const payment = await this.getPayment(paymentId);
 
     return {
+      id: payment.id,
       status: payment.status,
       paidAt: payment.paidAt,
       failedAt: payment.failedAt,
+      metadata: payment.metadata ?? null,
     };
   }
 }
