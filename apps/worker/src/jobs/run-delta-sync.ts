@@ -13,6 +13,12 @@ import { Pool } from 'pg';
 import { runShadowPass } from '@openmig/core';
 import type { TenantId, MappingId } from '@openmig/shared';
 import { buildDepsFromMapping } from '../build-deps-from-mapping';
+import { 
+  withTenant, 
+  PgMigrationStatusStore,
+  recordComputeForRun,
+  recordApiCallForRun,
+} from '@openmig/ledger';
 
 // Job input schema
 const DeltaSyncJobSchema = z.object({
@@ -31,6 +37,26 @@ if (!DATABASE_URL) {
 
 // Create a persistent pool for jobs
 const pool = new Pool({ connectionString: DATABASE_URL });
+
+// Pricing configuration (should come from config/env in production)
+const PRICING = {
+  computePricePerHour: 5, // €0.05/hour
+};
+
+/**
+ * Get current billing period dates
+ */
+function getCurrentPeriod(): { periodStart: string; periodEnd: string } {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth(); // 0-11
+  
+  const periodStart = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const periodEnd = `${year}-${String(month + 1).padStart(2, '0')}-${lastDay}`;
+  
+  return { periodStart, periodEnd };
+}
 
 // Register the job with Trigger.dev
 export const runDeltaSync = schemaTask({
@@ -57,6 +83,7 @@ export const runDeltaSync = schemaTask({
       const domains = typedPayload.domains ?? ['email', 'calendar', 'contact', 'file'];
       const tenantId = typedPayload.tenantId as TenantId;
       const mappingId = typedPayload.mappingId as MappingId;
+      const { periodStart, periodEnd } = getCurrentPeriod();
 
       for (const domain of domains) {
         console.log(`Running delta sync for domain: ${domain}`);
@@ -71,6 +98,36 @@ export const runDeltaSync = schemaTask({
             const result = await runShadowPass(deps);
 
             console.log(`Mail sync completed: ${result.created} created, ${result.skipped} skipped`);
+            
+            // Record usage metrics inside tenant context
+            await withTenant(pool, tenantId, async (db) => {
+              // Get migration status for timing info
+              const statusStore = new PgMigrationStatusStore(db);
+              const statusList = await statusStore.getStatus(tenantId, mappingId);
+              const domainStatus = statusList.find(s => s.domain === domain);
+              
+              if (domainStatus && domainStatus.completedAt) {
+                // Record compute usage (duration)
+                await recordComputeForRun(db, {
+                  tenantId,
+                  mappingId,
+                  domain,
+                  startedAt: new Date(domainStatus.startedAt),
+                  completedAt: new Date(domainStatus.completedAt),
+                  periodStart,
+                  periodEnd,
+                }, PRICING);
+                
+                // Record API call (one sync operation)
+                await recordApiCallForRun(db, {
+                  tenantId,
+                  mappingId,
+                  domain,
+                  periodStart,
+                  periodEnd,
+                });
+              }
+            });
             
             // Status is already updated within buildDepsFromMapping's withTenant context
             // The ledger client is already scoped

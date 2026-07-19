@@ -5,7 +5,10 @@
   "type": "module",
   "main": "src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./schema-pg": "./src/schema-pg.ts",
+    "./db": "./src/db.ts",
+    "./usage-metering": "./src/usage-metering.ts"
   },
   "dependencies": {
     "@openmig/core": "workspace:*",

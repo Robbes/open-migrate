@@ -17,7 +17,7 @@ import { calculateCost } from '../../services/billing-service';
 import { getMollieService } from '../../services/mollie/index';
 import { eq, and, desc } from 'drizzle-orm';
 import * as schema from '@openmig/ledger';
-import type { PgDatabase } from '@openmig/ledger';
+import { getUsageMetricsForPeriod } from '@openmig/ledger';
 
 const router = Router();
 
@@ -42,7 +42,8 @@ const EstimateCostSchema = z.object({
  * GET /api/billing/usage
  * 
  * Get current usage metrics for the tenant
- * Aggregates all metric types (storage, egress, compute, api_calls) for the current period
+ * Uses T4's metering: storage/egress DERIVED from item ledger, compute/api_calls from upserts
+ * Returns REAL usage from the actual migration runs - NOT from client input
  */
 router.get('/usage', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -54,51 +55,21 @@ router.get('/usage', authenticate, async (req: AuthenticatedRequest, res: Respon
     const periodStart = new Date().toISOString().slice(0, 7) + '-01'; // First day of current month
     const _periodEnd = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().slice(0, 10); // Last day of current month
 
-    // Get all usage metrics for current period, grouped by metric_type
+    // Get REAL usage via T4's metering - derive storage/egress from item ledger, read compute/api from upserts
     const metrics = await withTenantDb(tenantId, getSharedPool(), async (db) => {
-      return await db.select({
-        metricType: schema.usageMetric.metricType,
-        quantity: schema.usageMetric.quantity,
-        unit: schema.usageMetric.unit,
-        totalCost: schema.usageMetric.totalCost,
-        resource: schema.usageMetric.resource,
-      })
-      .from(schema.usageMetric)
-      .where(
-        and(
-          eq(schema.usageMetric.tenantId, tenantId),
-          eq(schema.usageMetric.periodStart, periodStart),
-        )
-      );
+      return await getUsageMetricsForPeriod(db, tenantId as never as import('@openmig/shared').TenantId, periodStart, _periodEnd);
     });
 
-    // Aggregate metrics into the format expected by the UI
+    // Map T4's result to the UI response shape
     const usage = {
       tenantId,
       period: periodStart.slice(0, 7), // YYYY-MM
-      storageUsedGB: 0,
-      egressGB: 0,
-      computeHours: 0,
-      syncCount: 0,
+      storageUsedGB: metrics.storageBytes / (1024 * 1024 * 1024), // Convert bytes to GB
+      egressGB: metrics.egressBytes / (1024 * 1024 * 1024), // Convert bytes to GB
+      computeHours: metrics.computeHours,
+      syncCount: metrics.apiCallCount,
       lastUpdated: new Date().toISOString(),
     };
-
-    for (const metric of metrics) {
-      switch (metric.metricType) {
-        case 'storage':
-          usage.storageUsedGB = Number(metric.quantity);
-          break;
-        case 'egress':
-          usage.egressGB = Number(metric.quantity);
-          break;
-        case 'compute':
-          usage.computeHours = Number(metric.quantity);
-          break;
-        case 'api_calls':
-          usage.syncCount = Number(metric.quantity);
-          break;
-      }
-    }
 
     // Calculate current cost
     const cost = calculateCost(usage);
@@ -118,177 +89,8 @@ router.get('/usage', authenticate, async (req: AuthenticatedRequest, res: Respon
 });
 
 /**
- * POST /api/billing/usage
- * 
- * Record usage metrics (called by worker after sync)
- * Creates/updates individual metric rows for each metric type
- */
-router.post('/usage', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const tenantId = req.tenantId;
-    if (!tenantId) {
-      return res.status(401).json({ error: 'Unauthorized', message: 'Tenant ID required' });
-    }
-    
-    const body = z.object({
-      period: z.string(), // YYYY-MM format
-      storageUsedGB: z.number(),
-      egressGB: z.number(),
-      computeHours: z.number(),
-      syncCount: z.number(),
-    }).parse(req.body);
-
-    // Convert period (YYYY-MM) to period_start and period_end dates
-    const [yearStr, monthStr] = body.period.split('-');
-    const year = Number(yearStr);
-    const month = Number(monthStr);
-    const periodStart = `${body.period}-01`;
-    const periodEnd = new Date(year, month - 1, 0).toISOString().slice(0, 10); // Last day of month
-
-    // Use default pricing from billing service
-    const defaultPricing = {
-      baseFee: 999,
-      storagePricePerGB: 10,
-      egressPricePerGB: 20,
-      computePricePerHour: 5,
-    };
-
-    // Calculate costs for each metric
-    const storageCost = Math.round(body.storageUsedGB * defaultPricing.storagePricePerGB);
-    const egressCost = Math.round(body.egressGB * defaultPricing.egressPricePerGB);
-    const computeCost = Math.round(body.computeHours * defaultPricing.computePricePerHour);
-    const _syncCost = 0; // API calls are free for now
-
-    // Insert/update each metric type
-    await withTenantDb(tenantId, getSharedPool(), async (db: PgDatabase) => {
-      // Storage metric
-      await db.insert(schema.usageMetric)
-        .values({
-          tenantId,
-          periodStart,
-          periodEnd,
-          metricType: 'storage',
-          resource: 'storage',
-          quantity: String(body.storageUsedGB),
-          unit: 'GB',
-          unitPrice: String(defaultPricing.storagePricePerGB),
-          totalCost: String(storageCost),
-          metadata: {},
-        })
-        .onConflictDoUpdate({
-          target: [schema.usageMetric.tenantId, schema.usageMetric.periodStart, schema.usageMetric.metricType, schema.usageMetric.resource],
-          set: {
-            quantity: String(body.storageUsedGB),
-            totalCost: String(storageCost),
-            updatedAt: new Date(),
-          },
-        });
-
-      // Egress metric
-      await db.insert(schema.usageMetric)
-        .values({
-          tenantId,
-          periodStart,
-          periodEnd,
-          metricType: 'egress',
-          resource: 'egress',
-          quantity: String(body.egressGB),
-          unit: 'GB',
-          unitPrice: String(defaultPricing.egressPricePerGB),
-          totalCost: String(egressCost),
-          metadata: {},
-        })
-        .onConflictDoUpdate({
-          target: [schema.usageMetric.tenantId, schema.usageMetric.periodStart, schema.usageMetric.metricType, schema.usageMetric.resource],
-          set: {
-            quantity: String(body.egressGB),
-            totalCost: String(egressCost),
-            updatedAt: new Date(),
-          },
-        });
-
-      // Compute metric
-      await db.insert(schema.usageMetric)
-        .values({
-          tenantId,
-          periodStart,
-          periodEnd,
-          metricType: 'compute',
-          resource: 'compute',
-          quantity: String(body.computeHours),
-          unit: 'hours',
-          unitPrice: String(defaultPricing.computePricePerHour),
-          totalCost: String(computeCost),
-          metadata: {},
-        })
-        .onConflictDoUpdate({
-          target: [schema.usageMetric.tenantId, schema.usageMetric.periodStart, schema.usageMetric.metricType, schema.usageMetric.resource],
-          set: {
-            quantity: String(body.computeHours),
-            totalCost: String(computeCost),
-            updatedAt: new Date(),
-          },
-        });
-
-      // API calls metric
-      await db.insert(schema.usageMetric)
-        .values({
-          tenantId,
-          periodStart,
-          periodEnd,
-          metricType: 'api_calls',
-          resource: 'sync',
-          quantity: String(body.syncCount),
-          unit: 'requests',
-          unitPrice: '0',
-          totalCost: '0',
-          metadata: {},
-        })
-        .onConflictDoUpdate({
-          target: [schema.usageMetric.tenantId, schema.usageMetric.periodStart, schema.usageMetric.metricType, schema.usageMetric.resource],
-          set: {
-            quantity: String(body.syncCount),
-            updatedAt: new Date(),
-          },
-        });
-    });
-
-    // Return the aggregated usage
-    const usage = {
-      tenantId,
-      period: body.period,
-      storageUsedGB: body.storageUsedGB,
-      egressGB: body.egressGB,
-      computeHours: body.computeHours,
-      syncCount: body.syncCount,
-      lastUpdated: new Date().toISOString(),
-    };
-
-    const cost = calculateCost(usage);
-
-    res.json({
-      usage,
-      cost,
-    });
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      res.status(400).json({
-        error: 'Validation error',
-        details: error.errors,
-      });
-    } else {
-      console.error('Error recording usage:', error);
-      res.status(500).json({
-        error: 'Internal server error',
-        message: 'Failed to record usage',
-      });
-    }
-  }
-});
-
-/**
  * GET /api/billing/usage/history
- * 
+ *
  * Get usage history for the tenant
  * Aggregates metrics by period
  */
