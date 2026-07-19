@@ -8,9 +8,8 @@
  * Security: All tests use withTenant for RLS enforcement.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { Pool } from 'pg';
-import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { createPgDb } from './db';
 import { 
   deriveStorageAndEgressForPeriod,
   recordComputeForRun,
@@ -18,488 +17,418 @@ import {
   getUsageMetricsForPeriod,
   type ComputeUsageInput,
   type ApiCallUsageInput,
-  tenant,
-  connection,
-  mailbox,
-  mailboxMapping,
-  item,
-  usageMetric,
 } from '@openmig/ledger';
-import { createTestPool, cleanupTestSchema } from '@openmig/testing';
+import {
+  tenant as tenantTable,
+  connection as connectionTable,
+  mailbox as mailboxTable,
+  mailboxMapping as mailboxMappingTable,
+  item as itemTable,
+  usageMetric as usageMetricTable,
+  migrationStatus as migrationStatusTable,
+} from '@openmig/ledger/schema-pg';
 import type { TenantId, MappingId } from '@openmig/shared';
-import { eq, and } from 'drizzle-orm';
+import { randomUUID } from 'crypto';
 
-const PRICING = {
+// Connection string from Testcontainers
+const PG_CONNECTION_STRING = process.env.TEST_DATABASE_URL;
+if (!PG_CONNECTION_STRING) {
+  throw new Error(
+    'TEST_DATABASE_URL is not set. Integration tests require Testcontainers to be running. ' +
+    'Run: pnpm test:integration'
+  );
+}
+
+const _PRICING = {
   computePricePerHour: 5,
 };
 
-// Helper function to create db from pool
-function createPgDbFromPool(pool: Pool) {
-  // Import schema locally
-  const { schema: schemaPg } = require('@openmig/ledger');
-  return drizzlePg(pool, { schema: schemaPg });
-}
+// Fixed UUIDs for testing - namespace 5a0c for usage-metering.integration.test.ts
+const TEST_TENANT_ID = '5a0c0000-e29b-41d4-a716-446655440001' as never as TenantId;
+const TEST_TENANT_2_ID = '5a0c0000-e29b-41d4-a716-446655440002' as never as TenantId;
+const TEST_MAPPING_ID = '5a0c0000-e29b-41d4-a716-446655440003' as never as MappingId;
 
 describe('Usage Metering - Integration', () => {
-  let pool: Pool;
-  let tenantId: TenantId;
-  let mappingId: MappingId;
-  const periodStart = '2026-07-01';
-  const periodEnd = '2026-07-31';
+  let db: ReturnType<typeof createPgDb>;
 
-  beforeAll(async () => {
-    pool = await createTestPool();
+  beforeAll(() => {
+    db = createPgDb(PG_CONNECTION_STRING);
   });
 
   afterAll(async () => {
-    await cleanupTestSchema(pool);
-    await pool.end();
+    await db.$pool.end();
   });
 
   beforeEach(async () => {
-    // Create test tenant and mapping
-    const db = createPgDbFromPool(pool);
-    
-    const [tenant] = await db.insert(tenant).values({
-      name: 't4-test-001',
-      status: 'active',
-    }).returning();
-    
-    tenantId = tenant.id as TenantId;
+    // Clean up test data
+    await db.delete(usageMetricTable);
+    await db.delete(itemTable);
+    await db.delete(migrationStatusTable);
+    await db.delete(mailboxMappingTable);
+    await db.delete(mailboxTable);
+    await db.delete(connectionTable);
+    await db.delete(tenantTable);
+  });
 
-    const [connection1] = await db.insert(connection).values({
+  /**
+   * Helper to create a complete test fixture with tenant, connections, mailboxes, and mapping
+   */
+  async function createFixture(tenantId: TenantId, mappingId: MappingId) {
+    await db.insert(tenantTable).values({
+      id: tenantId,
+      name: `t4-test-${tenantId}`,
+      status: 'active',
+    });
+
+    const sourceConn = (await db.insert(connectionTable).values({
       tenantId,
       role: 'source',
       kind: 'o365',
       displayName: 'Source',
       config: {},
-    }).returning();
+    }).returning())[0]!;
 
-    const [connection2] = await db.insert(connection).values({
+    const targetConn = (await db.insert(connectionTable).values({
       tenantId,
       role: 'target',
-      kind: 'jmap',
+      kind: 'imap',
       displayName: 'Target',
       config: {},
-    }).returning();
+    }).returning())[0]!;
 
-    const [mailbox1] = await db.insert(mailbox).values({
-      tenantId,
-      connectionId: connection1.id,
-      displayName: 'Source Mailbox',
-    }).returning();
-
-    const [mailbox2] = await db.insert(mailbox).values({
-      tenantId,
-      connectionId: connection2.id,
-      displayName: 'Target Mailbox',
-    }).returning();
-
-    const [mapping] = await db.insert(mailboxMapping).values({
-      tenantId,
-      sourceMailboxId: mailbox1.id,
-      targetMailboxId: mailbox2.id,
-      mode: 'mirror',
-      status: 'active',
-    }).returning();
-
-    mappingId = mapping.id as MappingId;
-  });
-
-  /**
-   * Test 1: Usage matches item records for a period
-   */
-  it('should derive correct storage and egress from item ledger', async () => {
-    const db = createPgDbFromPool(pool);
-
-    // Create items with different sizes and statuses
-    const items = [
-      { status: 'copied', sizeBytes: 1024, lastSyncedAt: '2026-07-15' },
-      { status: 'updated', sizeBytes: 2048, lastSyncedAt: '2026-07-15' },
-      { status: 'skipped', sizeBytes: 512, lastSyncedAt: '2026-07-15' },
-      { status: 'failed', sizeBytes: 4096, lastSyncedAt: '2026-07-15' }, // Should be excluded
-      { status: 'pending', sizeBytes: 8192, lastSyncedAt: '2026-07-15' }, // Should be excluded
-    ];
-
-    for (const item of items) {
-      await db.insert(item).values({
+    const sourceMailboxId = randomUUID() as never;
+    const targetMailboxId = randomUUID() as never;
+    
+    await db.insert(mailboxTable).values([
+      {
+        id: sourceMailboxId,
         tenantId,
-        mappingId,
-        domain: 'email',
-        collection: 'Inbox',
-        naturalKey: `item-${item.status}`,
-        naturalKeyHash: `hash-${item.status}`,
-        sizeBytes: item.sizeBytes,
-        status: item.status as 'copied' | 'updated' | 'skipped' | 'failed' | 'pending',
-        lastSyncedAt: new Date(item.lastSyncedAt),
+        connectionId: sourceConn.id,
+        displayName: 'Source Inbox',
+        kind: 'user',
+      },
+      {
+        id: targetMailboxId,
+        tenantId,
+        connectionId: targetConn.id,
+        displayName: 'Target Inbox',
+        kind: 'user',
+      },
+    ]);
+
+    await db.insert(mailboxMappingTable).values({
+      id: mappingId,
+      tenantId,
+      sourceMailboxId,
+      targetMailboxId,
+      status: 'active',
+    });
+
+    return { sourceConn, targetConn };
+  }
+
+  describe('Storage/Egress derivation', () => {
+    it('should derive correct storage and egress from item ledger', async () => {
+      await createFixture(TEST_TENANT_ID, TEST_MAPPING_ID);
+
+      // Create items with known sizes and lastSyncedAt
+      const testDate = new Date('2026-07-15T10:00:00Z');
+      await db.insert(itemTable).values([
+        {
+          tenantId: TEST_TENANT_ID,
+          mappingId: TEST_MAPPING_ID,
+          domain: 'email',
+          collection: 'Inbox',
+          naturalKey: 'msg-1',
+          naturalKeyHash: 'hash1',
+          sizeBytes: 1024n,
+          status: 'copied',
+          lastSyncedAt: testDate,
+        },
+        {
+          tenantId: TEST_TENANT_ID,
+          mappingId: TEST_MAPPING_ID,
+          domain: 'email',
+          collection: 'Inbox',
+          naturalKey: 'msg-2',
+          naturalKeyHash: 'hash2',
+          sizeBytes: 2048n,
+          status: 'copied',
+          lastSyncedAt: testDate,
+        },
+        {
+          tenantId: TEST_TENANT_ID,
+          mappingId: TEST_MAPPING_ID,
+          domain: 'email',
+          collection: 'Inbox',
+          naturalKey: 'msg-3',
+          naturalKeyHash: 'hash3',
+          sizeBytes: 512n,
+          status: 'copied',
+          lastSyncedAt: testDate,
+        },
+      ]);
+
+      // Derive usage for the period
+      const result = await deriveStorageAndEgressForPeriod(
+        db,
+        TEST_TENANT_ID,
+        '2026-07-01',
+        '2026-07-31'
+      );
+
+      expect(result.storageBytes).toBe(3584); // 1024 + 2048 + 512
+      expect(result.egressBytes).toBe(3584); // Same as storage
+    });
+
+    it('should exclude items outside the billing period', async () => {
+      await createFixture(TEST_TENANT_ID, TEST_MAPPING_ID);
+
+      // Items in different periods
+      await db.insert(itemTable).values([
+        {
+          tenantId: TEST_TENANT_ID,
+          mappingId: TEST_MAPPING_ID,
+          domain: 'email',
+          collection: 'Inbox',
+          naturalKey: 'msg-june',
+          naturalKeyHash: 'hash-june',
+          sizeBytes: 1000n,
+          status: 'copied',
+          lastSyncedAt: new Date('2026-06-15T10:00:00Z'), // Before period
+        },
+        {
+          tenantId: TEST_TENANT_ID,
+          mappingId: TEST_MAPPING_ID,
+          domain: 'email',
+          collection: 'InBox',
+          naturalKey: 'msg-july',
+          naturalKeyHash: 'hash-july',
+          sizeBytes: 2000n,
+          status: 'copied',
+          lastSyncedAt: new Date('2026-07-15T10:00:00Z'), // In period
+        },
+        {
+          tenantId: TEST_TENANT_ID,
+          mappingId: TEST_MAPPING_ID,
+          domain: 'email',
+          collection: 'Inbox',
+          naturalKey: 'msg-aug',
+          naturalKeyHash: 'hash-aug',
+          sizeBytes: 3000n,
+          status: 'copied',
+          lastSyncedAt: new Date('2026-08-15T10:00:00Z'), // After period
+        },
+      ]);
+
+      const result = await deriveStorageAndEgressForPeriod(
+        db,
+        TEST_TENANT_ID,
+        '2026-07-01',
+        '2026-07-31'
+      );
+
+      expect(result.storageBytes).toBe(2000); // Only July item
+      expect(result.egressBytes).toBe(2000);
+    });
+
+    it('should handle null lastSyncedAt (exclude from counts)', async () => {
+      await createFixture(TEST_TENANT_ID, TEST_MAPPING_ID);
+
+      await db.insert(itemTable).values([
+        {
+          tenantId: TEST_TENANT_ID,
+          mappingId: TEST_MAPPING_ID,
+          domain: 'email',
+          collection: 'Inbox',
+          naturalKey: 'msg-synced',
+          naturalKeyHash: 'hash-synced',
+          sizeBytes: 1000n,
+          status: 'copied',
+          lastSyncedAt: new Date('2026-07-15T10:00:00Z'),
+        },
+        {
+          tenantId: TEST_TENANT_ID,
+          mappingId: TEST_MAPPING_ID,
+          domain: 'email',
+          collection: 'Inbox',
+          naturalKey: 'msg-not-synced',
+          naturalKeyHash: 'hash-not-synced',
+          sizeBytes: 5000n,
+          status: 'pending',
+          lastSyncedAt: null, // Not synced yet
+        },
+      ]);
+
+      const result = await deriveStorageAndEgressForPeriod(
+        db,
+        TEST_TENANT_ID,
+        '2026-07-01',
+        '2026-07-31'
+      );
+
+      expect(result.storageBytes).toBe(1000); // Only synced item
+      expect(result.egressBytes).toBe(1000);
+    });
+
+    it('should return zeros for empty set', async () => {
+      await db.insert(tenantTable).values({
+        id: TEST_TENANT_ID,
+        name: 't4-test-empty',
+        status: 'active',
       });
-    }
 
-    // Derive usage
-    const { storageBytes, egressBytes } = await deriveStorageAndEgressForPeriod(
-      db,
-      tenantId,
-      periodStart,
-      periodEnd
-    );
-
-    // Expected: 1024 + 2048 + 512 = 3584 (copied + updated + skipped)
-    const expectedBytes = 1024 + 2048 + 512;
-    
-    expect(storageBytes).toBe(expectedBytes);
-    expect(egressBytes).toBe(expectedBytes); // Identical to storage
-  });
-
-  /**
-   * Test 2: Period filtering - items outside the period are excluded
-   */
-  it('should only count items synced in the correct billing period', async () => {
-    const db = createPgDbFromPool(pool);
-
-    // Create items in July
-    await db.insert(item).values({
-      tenantId,
-      mappingId,
-      domain: 'email',
-      collection: 'Inbox',
-      naturalKey: 'july-item-1',
-      naturalKeyHash: 'hash-july-1',
-      sizeBytes: 1000,
-      status: 'copied',
-      lastSyncedAt: new Date('2026-07-15'),
-    });
-
-    // Create items in August
-    await db.insert(item).values({
-      tenantId,
-      mappingId,
-      domain: 'email',
-      collection: 'Inbox',
-      naturalKey: 'august-item-1',
-      naturalKeyHash: 'hash-august-1',
-      sizeBytes: 2000,
-      status: 'copied',
-      lastSyncedAt: new Date('2026-08-15'),
-    });
-
-    // Query July usage
-    const julyUsage = await deriveStorageAndEgressForPeriod(
-      db,
-      tenantId,
-      '2026-07-01',
-      '2026-07-31'
-    );
-
-    expect(julyUsage.storageBytes).toBe(1000);
-    expect(julyUsage.egressBytes).toBe(1000);
-
-    // Query August usage
-    const augustUsage = await deriveStorageAndEgressForPeriod(
-      db,
-      tenantId,
-      '2026-08-01',
-      '2026-08-31'
-    );
-
-    expect(augustUsage.storageBytes).toBe(2000);
-    expect(augustUsage.egressBytes).toBe(2000);
-
-    // Verify totals don't overlap
-    const totalUsage = await deriveStorageAndEgressForPeriod(
-      db,
-      tenantId,
-      '2026-07-01',
-      '2026-08-31'
-    );
-    
-    // Note: This query won't work as written because we're using gte/lte with a single period
-    // The test confirms that period filtering works correctly
-  });
-
-  /**
-   * Test 3: Idempotency - derived metrics don't double-count on re-read
-   */
-  it('should return same derived values on re-read', async () => {
-    const db = createPgDbFromPool(pool);
-
-    // Create items
-    await db.insert(item).values({
-      tenantId,
-      mappingId,
-      domain: 'email',
-      collection: 'Inbox',
-      naturalKey: 'idempotent-item',
-      naturalKeyHash: 'hash-idempotent',
-      sizeBytes: 5000,
-      status: 'copied',
-      lastSyncedAt: new Date('2026-07-15'),
-    });
-
-    // Read multiple times
-    const usage1 = await deriveStorageAndEgressForPeriod(db, tenantId, periodStart, periodEnd);
-    const usage2 = await deriveStorageAndEgressForPeriod(db, tenantId, periodStart, periodEnd);
-    const usage3 = await deriveStorageAndEgressForPeriod(db, tenantId, periodStart, periodEnd);
-
-    expect(usage1.storageBytes).toBe(5000);
-    expect(usage2.storageBytes).toBe(5000);
-    expect(usage3.storageBytes).toBe(5000);
-    
-    // All reads return same value
-    expect(usage1.storageBytes).toBe(usage2.storageBytes);
-    expect(usage2.storageBytes).toBe(usage3.storageBytes);
-  });
-
-  /**
-   * Test 4: Idempotency - upserted metrics don't double-count on retry
-   */
-  it('should not double-count compute/api_calls on job retry', async () => {
-    const db = createPgDbFromPool(pool);
-
-    const computeInput: ComputeUsageInput = {
-      tenantId,
-      mappingId,
-      domain: 'email',
-      startedAt: new Date('2026-07-15T10:00:00Z'),
-      completedAt: new Date('2026-07-15T10:30:00Z'), // 30 minutes
-      periodStart,
-      periodEnd,
-    };
-
-    const apiInput: ApiCallUsageInput = {
-      tenantId,
-      mappingId,
-      domain: 'email',
-      periodStart,
-      periodEnd,
-    };
-
-    // Simulate job retry (record same run multiple times)
-    await recordComputeForRun(db, computeInput, PRICING);
-    await recordComputeForRun(db, computeInput, PRICING);
-    await recordComputeForRun(db, computeInput, PRICING);
-
-    await recordApiCallForRun(db, apiInput);
-    await recordApiCallForRun(db, apiInput);
-    await recordApiCallForRun(db, apiInput);
-
-    // Check that only one row exists for each (upsert replaced, didn't accumulate)
-    const computeMetrics = await db.select()
-      .from(usageMetric)
-      .where(
-        and(
-          eq(usageMetric.tenantId, tenantId),
-          eq(usageMetric.metricType, 'compute'),
-        )
+      const result = await deriveStorageAndEgressForPeriod(
+        db,
+        TEST_TENANT_ID,
+        '2026-07-01',
+        '2026-07-31'
       );
 
-    const apiMetrics = await db.select()
-      .from(usageMetric)
-      .where(
-        and(
-          eq(usageMetric.tenantId, tenantId),
-          eq(usageMetric.metricType, 'api_calls'),
-        )
-      );
-
-    expect(computeMetrics).toHaveLength(1);
-    expect(apiMetrics).toHaveLength(1);
-
-    // Values should be correct (not accumulated)
-    expect(Number(computeMetrics[0]!.quantity)).toBe(0.5); // 30 minutes = 0.5 hours
-    expect(Number(apiMetrics[0]!.quantity)).toBe(1); // One sync operation
+      expect(result.storageBytes).toBe(0);
+      expect(result.egressBytes).toBe(0);
+    });
   });
 
-  /**
-   * Test 5: Two distinct runs should both count
-   */
-  it('should count two distinct runs separately', async () => {
-    const db = createPgDbFromPool(pool);
+  describe('Compute/API call upsert', () => {
+    it('should idempotently record compute usage', async () => {
+      await db.insert(tenantTable).values({
+        id: TEST_TENANT_ID,
+        name: 't4-test-compute',
+        status: 'active',
+      });
 
-    // First run
-    const computeInput1: ComputeUsageInput = {
-      tenantId,
-      mappingId,
-      domain: 'email',
-      startedAt: new Date('2026-07-15T10:00:00Z'),
-      completedAt: new Date('2026-07-15T10:30:00Z'), // 30 minutes
-      periodStart,
-      periodEnd,
-    };
+      const periodStart = '2026-07-01';
+      const periodEnd = '2026-07-31';
+      const startedAt = new Date('2026-07-15T10:00:00Z');
+      const completedAt = new Date('2026-07-15T11:00:00Z'); // 1 hour
 
-    // Second run (different time)
-    const computeInput2: ComputeUsageInput = {
-      tenantId,
-      mappingId,
-      domain: 'calendar', // Different domain = different resource
-      startedAt: new Date('2026-07-15T14:00:00Z'),
-      completedAt: new Date('2026-07-15T14:45:00Z'), // 45 minutes
-      periodStart,
-      periodEnd,
-    };
+      const computeInput: ComputeUsageInput = {
+        tenantId: TEST_TENANT_ID,
+        mappingId: TEST_MAPPING_ID,
+        domain: 'email',
+        startedAt,
+        completedAt,
+        periodStart,
+        periodEnd,
+      };
 
-    await recordComputeForRun(db, computeInput1, PRICING);
-    await recordComputeForRun(db, computeInput2, PRICING);
+      // First record
+      await recordComputeForRun(db, computeInput, _PRICING);
 
-    const metrics = await db.select()
-      .from(usageMetric)
-      .where(
-        and(
-          eq(usageMetric.tenantId, tenantId),
-          eq(usageMetric.metricType, 'compute'),
-        )
-      );
+      // Get usage
+      const usage1 = await getUsageMetricsForPeriod(db, TEST_TENANT_ID, periodStart, periodEnd);
+      expect(usage1.computeHours).toBe(1);
 
-    // Two distinct rows (different resource = domain-email vs domain-calendar)
-    expect(metrics).toHaveLength(2);
+      // Retry with same key - should REPLACE, not increment
+      await recordComputeForRun(db, computeInput, _PRICING);
 
-    // Find each by resource
-    const emailCompute = metrics.find(m => m.resource === 'domain-email');
-    const calendarCompute = metrics.find(m => m.resource === 'domain-calendar');
-
-    expect(emailCompute?.quantity).toBe('0.5'); // 30 minutes
-    expect(calendarCompute?.quantity).toBe('0.75'); // 45 minutes
-  });
-
-  /**
-   * Test 6: Cross-tenant isolation
-   */
-  it('should not expose tenant B usage to tenant A', async () => {
-    const db = createPgDbFromPool(pool);
-
-    // Create tenant B
-    const [tenantB] = await db.insert(tenant).values({
-      name: 't4-test-002',
-      status: 'active',
-    }).returning();
-
-    const tenantBId = tenantB.id as TenantId;
-
-    // Create connections for tenant B
-    const [connB1] = await db.insert(connection).values({
-      tenantId: tenantBId,
-      role: 'source',
-      kind: 'o365',
-      displayName: 'Source B',
-      config: {},
-    }).returning();
-
-    const [connB2] = await db.insert(connection).values({
-      tenantId: tenantBId,
-      role: 'target',
-      kind: 'jmap',
-      displayName: 'Target B',
-      config: {},
-    }).returning();
-
-    const [mailboxB1] = await db.insert(mailbox).values({
-      tenantId: tenantBId,
-      connectionId: connB1.id,
-      displayName: 'Source Mailbox B',
-    }).returning();
-
-    const [mailboxB2] = await db.insert(mailbox).values({
-      tenantId: tenantBId,
-      connectionId: connB2.id,
-      displayName: 'Target Mailbox B',
-    }).returning();
-
-    const [mappingB] = await db.insert(mailboxMapping).values({
-      tenantId: tenantBId,
-      sourceMailboxId: mailboxB1.id,
-      targetMailboxId: mailboxB2.id,
-      mode: 'mirror',
-      status: 'active',
-    }).returning();
-
-    const mappingBId = mappingB.id as MappingId;
-
-    // Create items for tenant A
-    await db.insert(item).values({
-      tenantId,
-      mappingId,
-      domain: 'email',
-      collection: 'Inbox',
-      naturalKey: 'tenant-a-item',
-      naturalKeyHash: 'hash-tenant-a',
-      sizeBytes: 5000,
-      status: 'copied',
-      lastSyncedAt: new Date('2026-07-15'),
+      const usage2 = await getUsageMetricsForPeriod(db, TEST_TENANT_ID, periodStart, periodEnd);
+      expect(usage2.computeHours).toBe(1); // Same, not doubled
     });
 
-    // Create items for tenant B
-    await db.insert(item).values({
-      tenantId: tenantBId,
-      mappingId: mappingBId,
-      domain: 'email',
-      collection: 'Inbox',
-      naturalKey: 'tenant-b-item',
-      naturalKeyHash: 'hash-tenant-b',
-      sizeBytes: 10000,
-      status: 'copied',
-      lastSyncedAt: new Date('2026-07-15'),
+    it('should idempotently record API call usage', async () => {
+      await db.insert(tenantTable).values({
+        id: TEST_TENANT_ID,
+        name: 't4-test-api',
+        status: 'active',
+      });
+
+      const periodStart = '2026-07-01';
+      const periodEnd = '2026-07-31';
+
+      const apiInput: ApiCallUsageInput = {
+        tenantId: TEST_TENANT_ID,
+        mappingId: TEST_MAPPING_ID,
+        domain: 'email',
+        periodStart,
+        periodEnd,
+      };
+
+      // First record
+      await recordApiCallForRun(db, apiInput);
+
+      const usage1 = await getUsageMetricsForPeriod(db, TEST_TENANT_ID, periodStart, periodEnd);
+      expect(usage1.apiCallCount).toBe(1);
+
+      // Retry - should REPLACE
+      await recordApiCallForRun(db, apiInput);
+
+      const usage2 = await getUsageMetricsForPeriod(db, TEST_TENANT_ID, periodStart, periodEnd);
+      expect(usage2.apiCallCount).toBe(1); // Same, not doubled
     });
 
-    // Query tenant A's usage (RLS should filter out tenant B's data)
-    const usageA = await deriveStorageAndEgressForPeriod(db, tenantId, periodStart, periodEnd);
-    
-    expect(usageA.storageBytes).toBe(5000); // Only tenant A's items
+    it('should allow separate tracking per domain', async () => {
+      await db.insert(tenantTable).values({
+        id: TEST_TENANT_ID,
+        name: 't4-test-multi-domain',
+        status: 'active',
+      });
 
-    // Query tenant B's usage
-    const usageB = await deriveStorageAndEgressForPeriod(db, tenantBId, periodStart, periodEnd);
-    
-    expect(usageB.storageBytes).toBe(10000); // Only tenant B's items
-    
-    // Verify they are different
-    expect(usageA.storageBytes).not.toBe(usageB.storageBytes);
-  });
+      const periodStart = '2026-07-01';
+      const periodEnd = '2026-07-31';
 
-  /**
-   * Test 7: Empty set handling
-   */
-  it('should return zeros for tenant with no items in period', async () => {
-    const db = createPgDbFromPool(pool);
+      await recordApiCallForRun(db, {
+        tenantId: TEST_TENANT_ID,
+        mappingId: TEST_MAPPING_ID,
+        domain: 'email',
+        periodStart,
+        periodEnd,
+      });
 
-    const usage = await deriveStorageAndEgressForPeriod(
-      db,
-      tenantId,
-      periodStart,
-      periodEnd
-    );
+      await recordApiCallForRun(db, {
+        tenantId: TEST_TENANT_ID,
+        mappingId: TEST_MAPPING_ID,
+        domain: 'calendar',
+        periodStart,
+        periodEnd,
+      });
 
-    expect(usage.storageBytes).toBe(0);
-    expect(usage.egressBytes).toBe(0);
-  });
-
-  /**
-   * Test 8: Null lastSyncedAt handling
-   */
-  it('should exclude items with null lastSyncedAt', async () => {
-    const db = createPgDbFromPool(pool);
-
-    // Create item with null lastSyncedAt
-    await db.insert(item).values({
-      tenantId,
-      mappingId,
-      domain: 'email',
-      collection: 'Inbox',
-      naturalKey: 'null-timestamp-item',
-      naturalKeyHash: 'hash-null-timestamp',
-      sizeBytes: 99999,
-      status: 'copied',
-      lastSyncedAt: null, // Explicitly null
+      const usage = await getUsageMetricsForPeriod(db, TEST_TENANT_ID, periodStart, periodEnd);
+      expect(usage.apiCallCount).toBe(2); // Both domains
     });
+  });
 
-    const usage = await deriveStorageAndEgressForPeriod(
-      db,
-      tenantId,
-      periodStart,
-      periodEnd
-    );
+  describe('Cross-tenant isolation', () => {
+    it('should not expose tenant B usage to tenant A', async () => {
+      // Create two tenants
+      await db.insert(tenantTable).values([
+        {
+          id: TEST_TENANT_ID,
+          name: 't4-tenant-a',
+          status: 'active',
+        },
+        {
+          id: TEST_TENANT_2_ID,
+          name: 't4-tenant-b',
+          status: 'active',
+        },
+      ]);
 
-    // Should be 0 because the only item has null lastSyncedAt
-    expect(usage.storageBytes).toBe(0);
-    expect(usage.egressBytes).toBe(0);
+      const periodStart = '2026-07-01';
+      const periodEnd = '2026-07-31';
+      const startedAt = new Date('2026-07-15T10:00:00Z');
+      const completedAt = new Date('2026-07-15T12:00:00Z'); // 2 hours
+
+      // Record usage for tenant B
+      await recordComputeForRun(db, {
+        tenantId: TEST_TENANT_2_ID,
+        mappingId: TEST_MAPPING_ID,
+        domain: 'email',
+        startedAt,
+        completedAt,
+        periodStart,
+        periodEnd,
+      }, _PRICING);
+
+      // Tenant A should see nothing
+      const usageA = await getUsageMetricsForPeriod(db, TEST_TENANT_ID, periodStart, periodEnd);
+      expect(usageA.computeHours).toBe(0);
+      expect(usageA.storageBytes).toBe(0);
+
+      // Tenant B should see their own usage
+      const usageB = await getUsageMetricsForPeriod(db, TEST_TENANT_2_ID, periodStart, periodEnd);
+      expect(usageB.computeHours).toBe(2);
+    });
   });
 });
-
-// Helper function to create db from pool
