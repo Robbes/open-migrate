@@ -37,8 +37,8 @@ process.env.APP_DATABASE_URL = getAppUserConnectionString(PG_CONNECTION_STRING);
 import app from '../../index.js';
 
 // UUIDs for API isolation tests (950e8400-e29b-41d4-a716-44665544xxxx)
-const API_TENANT_A = '950e8400-e29b-41d4-a716-446655444101';
-const API_TENANT_B = '950e8400-e29b-41d4-a716-446655444102';
+const API_TENANT_A = '5d2b0000-e29b-41d4-a716-446655444101';
+const API_TENANT_B = '5d2b0000-e29b-41d4-a716-446655444102';
 
 function createTestToken(tenantId: string, role: string = 'member'): string {
   return jwt.sign(
