@@ -22,7 +22,11 @@
       "@openmig/connectors": ["./packages/connectors/src/index.ts"],
       "@openmig/connectors/*": ["./packages/connectors/src/*"],
       "@openmig/engines": ["./packages/engines/src/index.ts"],
-      "@openmig/engines/*": ["./packages/engines/src/*"]
+      "@openmig/engines/*": ["./packages/engines/src/*"],
+      "@openmig/scheduler": ["./packages/scheduler/src/index.ts"],
+      "@openmig/scheduler/*": ["./packages/scheduler/src/*"],
+      "@openmig/provisioner": ["./packages/provisioner/src/index.ts"],
+      "@openmig/provisioner/*": ["./packages/provisioner/src/*"]
     }
   }
 }

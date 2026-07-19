@@ -18,6 +18,7 @@ import type { AuthenticatedRequest, JwtPayload } from './types/api';
 import webhookRoutes from './routes/trigger-webhook';
 import tenantRoutes from './routes/tenants/index';
 import mappingRoutes from './routes/migrations/index';
+import syncTriggerRoutes from './routes/sync-trigger';
 import billingRoutes from './routes/billing/index';
 import billingWebhookRoutes from './routes/billing/webhooks';
 
@@ -46,6 +47,7 @@ app.get('/health', (req: Request, res: Response) => {
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/tenants', tenantRoutes);
 app.use('/api/migrations', mappingRoutes);
+app.use('/api', syncTriggerRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/billing', billingWebhookRoutes);
 

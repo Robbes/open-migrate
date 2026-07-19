@@ -6,7 +6,9 @@
   "main": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./cutover-state": "./src/cutover-state.ts"
+    "./cutover-state": "./src/cutover-state.ts",
+    "./secret-store": "./src/secret-store.ts",
+    "./secrets": "./src/secrets.ts"
   },
   "dependencies": {
     "@openmig/shared": "workspace:*"
