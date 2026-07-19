@@ -1,5 +1,10 @@
 # DAV Integration Status — Honest Assessment
 
+> 📄 **HISTORICAL (resolved).** This is a point-in-time (2026-07-12) assessment of DAV integration
+> test failures. Those failures were **resolved in workplan 0007** — the CalDAV/CardDAV/WebDAV
+> suites now run and pass against Stalwart v0.16.10 (see the 0007 Status block and PR #35). Kept
+> for the debugging trail; not a description of current state.
+
 **Date**: 2026-07-12  
 **Subject**: CalDAV/CardDAV/WebDAV integration test failures against Stalwart v0.16.10
 

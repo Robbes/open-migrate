@@ -1,5 +1,11 @@
 # Unified Sync Engine Guide
 
+> ⚠️ **SUPERSEDED (2026-07-19).** This document describes the `GenericSyncEngine` /
+> `runUnifiedSync` approach, which was **removed** in PR #38 (workplan 0007). Multi-domain sync is
+> now implemented per-domain in `packages/core/src/domain-sync.ts`, orchestrated by the worker's
+> `runAllDomains`. See **[`design/domain-sync.md`](./design/domain-sync.md)** for the current
+> design. This file is kept for history — do not build against the API described below.
+
 ## Overview
 
 The Unified Sync Engine is the orchestration layer that coordinates synchronization across all data types: mail, calendar, contacts, and files. It provides a single entry point for running complete migrations while maintaining the idempotency and non-destructive properties of individual sync engines.
