@@ -10,42 +10,7 @@ import {
   Clock,
   HardDrive
 } from 'lucide-react';
-import { apiClient } from '../services/api.js';
-
-interface _SystemHealth {
-  status: 'healthy' | 'degraded' | 'critical';
-  uptime: string;
-  lastRestart: string;
-}
-
-interface _TenantStats {
-  total: number;
-  active: number;
-  inactive: number;
-  newThisMonth: number;
-}
-
-interface _MigrationStats {
-  total: number;
-  running: number;
-  completed: number;
-  failed: number;
-  successRate: number;
-}
-
-interface _ResourceUsage {
-  cpu: number;
-  memory: number;
-  storage: number;
-  databaseConnections: number;
-}
-
-interface _Revenue {
-  total: number;
-  thisMonth: number;
-  lastMonth: number;
-  growth: number;
-}
+import apiClient from '../services/api';
 
 const OperatorDashboard: React.FC = () => {
   const { data: health, isLoading: healthLoading } = useQuery({

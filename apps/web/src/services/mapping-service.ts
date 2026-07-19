@@ -125,31 +125,31 @@ export const memberApi = {
 // Mapping API
 export const mappingApi = {
   list: async () => {
-    const response = await apiClient.get('/mappings');
+    const response = await apiClient.get('/migrations');
     return z.array(MappingSchema).parse(response.data.mappings);
   },
 
   create: async (data: Partial<Mapping>) => {
-    const response = await apiClient.post('/mappings', data);
+    const response = await apiClient.post('/migrations', data);
     return MappingSchema.parse(response.data);
   },
 
   get: async (mappingId: string) => {
-    const response = await apiClient.get(`/mappings/${mappingId}`);
+    const response = await apiClient.get(`/migrations/${mappingId}`);
     return MappingSchema.parse(response.data);
   },
 
   update: async (mappingId: string, data: Partial<Mapping>) => {
-    const response = await apiClient.put(`/mappings/${mappingId}`, data);
+    const response = await apiClient.put(`/migrations/${mappingId}`, data);
     return MappingSchema.parse(response.data);
   },
 
   delete: async (mappingId: string) => {
-    await apiClient.delete(`/mappings/${mappingId}`);
+    await apiClient.delete(`/migrations/${mappingId}`);
   },
 
   triggerSync: async (mappingId: string, type: 'full' | 'delta', forceFullScan = false) => {
-    const response = await apiClient.post(`/mappings/${mappingId}/sync`, {
+    const response = await apiClient.post(`/migrations/${mappingId}/sync`, {
       type,
       forceFullScan,
     });
@@ -161,17 +161,17 @@ export const mappingApi = {
     skipVerification?: boolean;
     gracePeriodHours?: number;
   }) => {
-    const response = await apiClient.post(`/mappings/${mappingId}/cutover`, options);
+    const response = await apiClient.post(`/migrations/${mappingId}/cutover`, options);
     return response.data;
   },
 
   listRuns: async (mappingId: string) => {
-    const response = await apiClient.get(`/mappings/${mappingId}/runs`);
+    const response = await apiClient.get(`/migrations/${mappingId}/runs`);
     return z.array(RunSchema).parse(response.data.runs);
   },
 
   getRun: async (mappingId: string, runId: string) => {
-    const response = await apiClient.get(`/mappings/${mappingId}/runs/${runId}`);
+    const response = await apiClient.get(`/migrations/${mappingId}/runs/${runId}`);
     return response.data;
   },
 };

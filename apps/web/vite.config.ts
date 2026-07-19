@@ -22,5 +22,9 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
+    setupFiles: ['./src/test-setup.ts'],
+    // Component tests are self-contained (jsdom, mocked API) — no Testcontainers,
+    // so they run without Docker, unlike the root integration suite.
+    include: ['src/**/*.{test,unit.test}.{ts,tsx}'],
   },
 });

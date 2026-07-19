@@ -18,6 +18,9 @@ import { useMutation } from '@tanstack/react-query';
 
 type Step = 'source' | 'target' | 'credentials' | 'data-types' | 'schedule' | 'review';
 
+// Matches the shared/API domain enum so the wizard submits a schema-valid config.
+type Domain = 'email' | 'calendar' | 'contact' | 'file';
+
 interface FormData {
   name: string;
   sourceType: 'imap' | 'oauth2' | 'graph';
@@ -32,7 +35,7 @@ interface FormData {
   targetUsername: string;
   targetPassword: string;
   targetSsl: boolean;
-  domains: string[];
+  domains: Domain[];
   schedule: string;
 }
 
@@ -63,7 +66,7 @@ const steps: { id: Step; name: string; icon: React.FC<React.SVGProps<SVGSVGEleme
   { id: 'review', name: 'Review', icon: Check },
 ];
 
-const dataTypes = [
+const dataTypes: { id: Domain; name: string; icon: React.FC<React.SVGProps<SVGSVGElement>>; description: string }[] = [
   { id: 'email', name: 'Email', icon: FileText, description: 'Email messages and folders' },
   { id: 'calendar', name: 'Calendar', icon: Calendar, description: 'Events and appointments' },
   { id: 'contact', name: 'Contacts', icon: Users, description: 'Address book entries' },
@@ -122,11 +125,11 @@ const CreateMapping: React.FC = () => {
     }
   };
 
-  const updateField = (field: keyof FormData, value: string | boolean | string[]) => {
+  const updateField = (field: keyof FormData, value: string | number | boolean | string[]) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
-  const toggleDomain = (domain: string) => {
+  const toggleDomain = (domain: Domain) => {
     setFormData((prev) => ({
       ...prev,
       domains: prev.domains.includes(domain)
@@ -610,10 +613,10 @@ const CreateMapping: React.FC = () => {
 
         <button
           onClick={handleNext}
-          disabled={!canProceed() || createMutation.isLoading}
+          disabled={!canProceed() || createMutation.isPending}
           className="flex items-center px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          {createMutation.isLoading ? (
+          {createMutation.isPending ? (
             <>
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2" />
               Creating...

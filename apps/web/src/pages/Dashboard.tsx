@@ -7,7 +7,8 @@ import {
   CheckCircle, 
   AlertCircle,
   Clock,
-  Plus
+  Plus,
+  Settings
 } from 'lucide-react';
 import { mappingApi } from '../services/mapping-service';
 import { formatDistanceToNow } from 'date-fns';
