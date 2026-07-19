@@ -62,8 +62,8 @@ const MAX_RETRIES = 10;
 const RETRY_DELAY_MS = 2000;
 
 // Fixed UUIDs for reindex testing (consistent across runs for reproducibility)
-const REINDEX_TENANT_ID = asTenantId('650e8400-e29b-41d4-a716-446655440001' as never);
-const REINDEX_MAPPING_ID = asMappingId('650e8400-e29b-41d4-a716-446655440002' as never);
+const REINDEX_TENANT_ID = asTenantId('5e0b0000-e29b-41d4-a716-446655440001' as never);
+const REINDEX_MAPPING_ID = asMappingId('5e0b0000-e29b-41d4-a716-446655440002' as never);
 
 /**
  * Wait for schema to be ready by checking if a table exists.
@@ -215,7 +215,7 @@ async function cleanDatabaseState(): Promise<void> {
     `);
     
     // Create source connection
-    const sourceConnId = '650e8400-e29b-41d4-a716-446655440003';
+    const sourceConnId = '5e0b0000-e29b-41d4-a716-446655440003';
     await client.execute(sql`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status)
       VALUES (${sourceConnId}, ${REINDEX_TENANT_ID}, 'source', 'imap', 'Test Source', '{}', 'connected')
@@ -223,7 +223,7 @@ async function cleanDatabaseState(): Promise<void> {
     `);
     
     // Create target connection
-    const targetConnId = '650e8400-e29b-41d4-a716-446655440004';
+    const targetConnId = '5e0b0000-e29b-41d4-a716-446655440004';
     await client.execute(sql`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status)
       VALUES (${targetConnId}, ${REINDEX_TENANT_ID}, 'target', 'selfhosted_mail', 'Test Target', '{}', 'connected')
@@ -231,7 +231,7 @@ async function cleanDatabaseState(): Promise<void> {
     `);
     
     // Create source mailbox
-    const sourceMailboxId = '650e8400-e29b-41d4-a716-446655440005';
+    const sourceMailboxId = '5e0b0000-e29b-41d4-a716-446655440005';
     await client.execute(sql`
       INSERT INTO mailbox (id, tenant_id, connection_id, kind, display_name, status)
       VALUES (${sourceMailboxId}, ${REINDEX_TENANT_ID}, ${sourceConnId}, 'user', 'INBOX', 'active')
@@ -239,7 +239,7 @@ async function cleanDatabaseState(): Promise<void> {
     `);
     
     // Create target mailbox
-    const targetMailboxId = '650e8400-e29b-41d4-a716-446655440006';
+    const targetMailboxId = '5e0b0000-e29b-41d4-a716-446655440006';
     await client.execute(sql`
       INSERT INTO mailbox (id, tenant_id, connection_id, kind, display_name, status)
       VALUES (${targetMailboxId}, ${REINDEX_TENANT_ID}, ${targetConnId}, 'user', 'INBOX', 'active')
