@@ -99,6 +99,16 @@ jobs:
           fi
           echo "No case collisions found."
 
+  fixture-uuid-check:
+    name: fixture-uuid-check
+    runs-on: ${{ github.event_name == 'push' && 'self-hosted' || 'ubuntu-latest' }}
+    # Runs on all PRs — fast check before heavier jobs
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
+      - name: Check for cross-file UUID collisions
+        run: |
+          ./scripts/check-fixture-uuid-collisions.sh
+
   lint:
     name: lint
     runs-on: ${{ github.event_name == 'push' && 'self-hosted' || 'ubuntu-latest' }}
