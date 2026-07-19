@@ -6,6 +6,11 @@
  * Tests connect as the non-owner app_user role to ensure RLS is enforced.
  *
  * UUID Family: 950e8400-e29b-41d4-a716-44665544xxxx
+ *
+ * NOTE: POST /api/billing/usage has been removed. Usage is now recorded
+ * by T4 metering functions (recordComputeForRun, recordApiCallForRun, etc.)
+ * during migration job execution. Billing GET /usage reads from the real
+ * source of truth (migration_status + item ledger).
  */
 
 // Set JWT_SECRET before importing app
@@ -35,6 +40,7 @@ const getAppUserConnectionString = (originalUrl: string): string => {
 process.env.APP_DATABASE_URL = getAppUserConnectionString(PG_CONNECTION_STRING);
 
 import app from '../../index.js';
+
 
 // UUIDs for API isolation tests (950e8400-e29b-41d4-a716-44665544xxxx)
 const API_TENANT_A = '5f0b0000-e29b-41d4-a716-446655443101';
@@ -100,20 +106,26 @@ describe('Billing Route Isolation', () => {
 
   describe('GET /api/billing/usage', () => {
     it('should return usage for authenticated tenant', async () => {
-      // First record some usage for tenant A
-      const usageId = randomUUID();
+      // Get current period
+      const now = new Date();
+      const periodStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+      const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+
+      // Record usage using T4 metering schema (usageMetric table)
+      const runId = randomUUID();
+      
+      // Record compute usage (10 hours)
       await superuserPool.query(`
-        INSERT INTO usage_metric (id, tenant_id, period_start, period_end, metric_type, resource, quantity, unit, unit_price, total_cost, metadata)
-        VALUES ($1, $2, $3, $4, 'storage', 'storage', $5, 'GB', $6, $7, '{}')
-      `, [
-        usageId,
-        API_TENANT_A,
-        new Date().toISOString().slice(0, 7) + '-01',
-        new Date().toISOString().slice(0, 7) + '-28',
-        10,
-        10,
-        100,
-      ]);
+        INSERT INTO usage_metric (id, tenant_id, period_start, period_end, metric_type, resource, quantity, unit, unit_price, total_cost, metadata, created_at)
+        VALUES ($1, $2, $3, $4, 'compute', 'domain-test', $5, 'hours', $6, $7, '{"mappingId":"m1","domain":"test"}', NOW())
+      `, [runId, API_TENANT_A, periodStart, periodEnd, 10, 5, 50]);
+
+      // Record API call usage (1 sync)
+      const runId2 = randomUUID();
+      await superuserPool.query(`
+        INSERT INTO usage_metric (id, tenant_id, period_start, period_end, metric_type, resource, quantity, unit, unit_price, total_cost, metadata, created_at)
+        VALUES ($1, $2, $3, $4, 'api_calls', 'sync-test', $5, 'request', $6, $7, '{}', NOW())
+      `, [runId2, API_TENANT_A, periodStart, periodEnd, 1, 0, 0]);
 
       const response = await request
         .get('/api/billing/usage')
@@ -121,7 +133,8 @@ describe('Billing Route Isolation', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.usage.tenantId).toBe(API_TENANT_A);
-      expect(response.body.usage.storageUsedGB).toBe(10);
+      expect(response.body.usage.computeHours).toBe(10);
+      expect(response.body.usage.syncCount).toBe(1);
     });
 
     it('should prevent tenant B from accessing tenant A usage', async () => {
@@ -131,54 +144,13 @@ describe('Billing Route Isolation', () => {
 
       expect(response.status).toBe(200);
       // RLS should filter out tenant A's data
-      expect(response.body.usage.storageUsedGB).toBe(0);
+      expect(response.body.usage.computeHours).toBe(0);
+      expect(response.body.usage.syncCount).toBe(0);
     });
 
     it('should return 401 without token', async () => {
       const response = await request.get('/api/billing/usage');
       expect(response.status).toBe(401);
-    });
-  });
-
-  describe('POST /api/billing/usage', () => {
-    it('should record usage for authenticated tenant', async () => {
-      const response = await request
-        .post('/api/billing/usage')
-        .set('Authorization', `Bearer ${TOKEN_TENANT_A}`)
-        .send({
-          period: new Date().toISOString().slice(0, 7),
-          storageUsedGB: 5,
-          egressGB: 2,
-          computeHours: 10,
-          syncCount: 100,
-        });
-
-      expect(response.status).toBe(200);
-      expect(response.body.usage.tenantId).toBe(API_TENANT_A);
-      expect(response.body.usage.storageUsedGB).toBe(5);
-    });
-
-    it('should prevent cross-tenant write attempt', async () => {
-      // Try to write with tenant B token but different tenant_id in body
-      // The body tenant_id should be ignored - only authenticated tenant matters
-      const response = await request
-        .post('/api/billing/usage')
-        .set('Authorization', `Bearer ${TOKEN_TENANT_B}`)
-        .send({
-          period: new Date().toISOString().slice(0, 7),
-          storageUsedGB: 999,
-          egressGB: 999,
-          computeHours: 999,
-          syncCount: 999,
-        });
-
-      expect(response.status).toBe(200);
-      // Data should be written for tenant B (from auth), not the body
-      const verifyResponse = await request
-        .get('/api/billing/usage')
-        .set('Authorization', `Bearer ${TOKEN_TENANT_B}`);
-      
-      expect(verifyResponse.body.usage.storageUsedGB).toBe(999);
     });
   });
 

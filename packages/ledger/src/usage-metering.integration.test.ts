@@ -26,7 +26,7 @@ import {
   item as itemTable,
   usageMetric as usageMetricTable,
   migrationStatus as migrationStatusTable,
-} from '@openmig/ledger/schema-pg';
+} from './schema-pg';
 import type { TenantId, MappingId } from '@openmig/shared';
 import { randomUUID } from 'crypto';
 
