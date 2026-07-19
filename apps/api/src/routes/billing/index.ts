@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { authenticate, getDbPool, withTenantDb } from '../../middleware/auth';
 import type { AuthenticatedRequest } from '../../types/api';
 import { calculateCost } from '../../services/billing-service';
+import { generateInvoiceForPeriod } from '../../services/invoice-generation';
 import { getMollieService } from '../../services/mollie/index';
 import { eq, and, desc } from 'drizzle-orm';
 import * as schema from '@openmig/ledger';
@@ -231,8 +232,46 @@ router.post('/estimate', authenticate, async (req: AuthenticatedRequest, res: Re
 });
 
 /**
+ * POST /api/billing/invoices/generate
+ *
+ * Generate (or refresh) the invoice for a billing period from metered usage.
+ * Body: { period?: "YYYY-MM" } — defaults to the current month. Idempotent; a
+ * paid/void invoice is returned unchanged. Intended to be called by a
+ * managed-mode scheduled job at period close (self-host never loads billing).
+ */
+router.post('/invoices/generate', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      res.status(401).json({ error: 'Unauthorized', message: 'Tenant ID required' });
+      return;
+    }
+
+    const parsed = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/).optional() }).safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Bad Request', message: 'period must be YYYY-MM' });
+      return;
+    }
+
+    const ym = parsed.data.period ?? new Date().toISOString().slice(0, 7);
+    const [year, month] = ym.split('-').map(Number) as [number, number];
+    const periodStart = `${ym}-01`;
+    const periodEnd = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+
+    const invoice = await withTenantDb(tenantId, getSharedPool(), async (db) =>
+      generateInvoiceForPeriod(db, tenantId, periodStart, periodEnd),
+    );
+
+    res.status(201).json({ invoice });
+  } catch (error) {
+    console.error('Error generating invoice:', error);
+    res.status(500).json({ error: 'Internal server error', message: 'Failed to generate invoice' });
+  }
+});
+
+/**
  * GET /api/billing/invoices
- * 
+ *
  * List all invoices for the tenant
  */
 router.get('/invoices', authenticate, async (req: AuthenticatedRequest, res: Response) => {
@@ -406,6 +445,9 @@ router.post('/invoices/:invoiceId/pay', authenticate, async (req: AuthenticatedR
       description: `Invoice ${invoice.id} for period ${invoice.periodStart} to ${invoice.periodEnd}`,
       redirectUrl: `${process.env.WEB_URL || 'http://localhost:3123'}/billing/invoices/${invoiceId}`,
       webhookUrl: `${process.env.API_URL || 'http://localhost:3001'}/api/billing/webhooks/mollie`,
+      // Round-trip the invoice + tenant so the webhook can correlate the payment
+      // back to the exact invoice under the right RLS context.
+      metadata: { invoiceId },
     });
 
     // Update invoice status in database

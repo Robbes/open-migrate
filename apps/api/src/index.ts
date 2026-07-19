@@ -37,6 +37,8 @@ app.use(cors({
 }));
 app.use(morgan('combined'));
 app.use(express.json());
+// Mollie posts webhooks as application/x-www-form-urlencoded (id=<paymentId>).
+app.use(express.urlencoded({ extended: false }));
 
 // Health check
 app.get('/health', (req: Request, res: Response) => {
@@ -49,7 +51,9 @@ app.use('/api/tenants', tenantRoutes);
 app.use('/api/migrations', mappingRoutes);
 app.use('/api', syncTriggerRoutes);
 app.use('/api/billing', billingRoutes);
-app.use('/api/billing', billingWebhookRoutes);
+// Mount at /webhooks so the route resolves to /api/billing/webhooks/mollie —
+// the exact URL advertised to Mollie in createPayment's webhookUrl.
+app.use('/api/billing/webhooks', billingWebhookRoutes);
 
 // Error handling middleware
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
