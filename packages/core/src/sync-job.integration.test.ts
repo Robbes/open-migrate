@@ -348,39 +348,24 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
     });
 
     it('should fail when connection credentials are missing', async () => {
-      // Create a mapping (without source/target/domains columns - they don't exist in schema)
-      const badMappingId = asMappingId('88888888-8888-8888-8888-888888888888' as never);
-      await db.execute(sql`
-        INSERT INTO mailbox_mapping (id, tenant_id, source_mailbox_id, target_mailbox_id, status, pattern, mode)
-        VALUES (
-          ${badMappingId},
-          ${TENANT_A_ID},
-          '750e8400-e29b-41d4-a716-446655440001',
-          '750e8400-e29b-41d4-a716-446655440002',
-          'active',
-          'shared_s',
-          'mirror'
-        )
-        ON CONFLICT (id) DO NOTHING
-      `);
-
-      // Create a connection without credentials
-      await db.execute(sql`
-        INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status)
-        VALUES (
-          '650e8400-e29b-41d4-a716-446655440005',
-          ${TENANT_A_ID},
-          'source',
-          'o365',
-          'No Creds Source',
-          '{}',
-          'connected'
-        )
-        ON CONFLICT (id) DO NOTHING
-      `);
-
+      // Dedicated tenant C with ONLY a no-creds source connection. Needed because (a)
+      // buildDepsFromMapping loads connections by (tenant, role) so TENANT_A already having good
+      // creds would mask this, and (b) the afterEach cleanup only deletes TENANT_A/B, so tenant C
+      // fixtures survive intact.
+      const TENANT_C_ID = asTenantId('550e8400-e29b-41d4-a716-4466554403c1' as never);
+      const mappingC = asMappingId('550e8400-e29b-41d4-a716-4466554403c9' as never);
+      const connCsrc = '550e8400-e29b-41d4-a716-4466554403c5';
+      const connCtgt = '550e8400-e29b-41d4-a716-4466554403c6';
+      const mboxCsrc = '550e8400-e29b-41d4-a716-4466554403ca';
+      const mboxCtgt = '550e8400-e29b-41d4-a716-4466554403cb';
+      await db.execute(sql`INSERT INTO tenant (id, name, status) VALUES (${TENANT_C_ID}, 'Tenant C', 'active') ON CONFLICT (id) DO NOTHING`);
+      await db.execute(sql`INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status) VALUES (${connCsrc}, ${TENANT_C_ID}, 'source', 'o365', 'No Creds Source', '{}', 'connected') ON CONFLICT (id) DO NOTHING`);
+      await db.execute(sql`INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status) VALUES (${connCtgt}, ${TENANT_C_ID}, 'target', 'nextcloud', 'T', '{}', 'connected') ON CONFLICT (id) DO NOTHING`);
+      await db.execute(sql`INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, status) VALUES (${mboxCsrc}, ${TENANT_C_ID}, ${connCsrc}, 'c-src@x.com', 'user', 'active') ON CONFLICT (id) DO NOTHING`);
+      await db.execute(sql`INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, status) VALUES (${mboxCtgt}, ${TENANT_C_ID}, ${connCtgt}, 'c-tgt@x.com', 'user', 'active') ON CONFLICT (id) DO NOTHING`);
+      await db.execute(sql`INSERT INTO mailbox_mapping (id, tenant_id, source_mailbox_id, target_mailbox_id, status, pattern, mode) VALUES (${mappingC}, ${TENANT_C_ID}, ${mboxCsrc}, ${mboxCtgt}, 'active', 'shared_s', 'mirror') ON CONFLICT (id) DO NOTHING`);
       await expect(async () => {
-        await buildDepsFromMapping(pool, TENANT_A_ID, badMappingId);
+        await buildDepsFromMapping(pool, TENANT_C_ID, mappingC);
       }).rejects.toThrow('Source connection has no credentials');
     });
   });
@@ -448,15 +433,27 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
 
   describe('Full sync vs Delta sync', () => {
     it('full sync should work with undefined cursors (force full scan)', async () => {
+      // Real tenant-scoped deps (ledger, cursors) from decrypted creds; source/target mocked
+      // so the full-vs-delta cursor wiring is proven without a live IMAP server.
       const deps = await buildDepsFromMapping(pool, TENANT_A_ID, MAPPING_A_ID);
 
-      // Full sync: pass undefined for cursors
+      const mockSource = {
+        listFolders: async () => [],
+        listSince: async () => ({ items: [], nextCursor: { value: '' } }),
+        fetch: async () => ({ rfc822: '', size: 0 }),
+      };
+      const mockTarget = {
+        ensureMailbox: async () => 'mock-mailbox-id',
+        upsertEmail: async () => ({ targetId: 'mock-target-id', created: true }),
+      };
+
       const result = await runShadowPass({
         ...deps,
-        cursors: undefined, // Force full scan
+        source: mockSource as any,
+        target: mockTarget as any,
+        cursors: undefined,
       });
 
-      // Should complete without error (even with mocked connectors)
       expect(result).toBeDefined();
       expect(typeof result.scanned).toBe('number');
       expect(typeof result.created).toBe('number');
@@ -464,12 +461,24 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
     });
 
     it('delta sync should work with cursors (incremental)', async () => {
+      // Same as full sync but passes the real tenant-scoped cursor store (incremental path).
       const deps = await buildDepsFromMapping(pool, TENANT_A_ID, MAPPING_A_ID);
 
-      // Delta sync: use the cursor store
+      const mockSource = {
+        listFolders: async () => [],
+        listSince: async () => ({ items: [], nextCursor: { value: '' } }),
+        fetch: async () => ({ rfc822: '', size: 0 }),
+      };
+      const mockTarget = {
+        ensureMailbox: async () => 'mock-mailbox-id',
+        upsertEmail: async () => ({ targetId: 'mock-target-id', created: true }),
+      };
+
       const result = await runShadowPass({
         ...deps,
-        cursors: deps.cursors, // Use cursors for incremental sync
+        source: mockSource as any,
+        target: mockTarget as any,
+        cursors: deps.cursors,
       });
 
       expect(result).toBeDefined();

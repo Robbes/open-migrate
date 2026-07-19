@@ -7,7 +7,7 @@ ADD COLUMN IF NOT EXISTS encrypted_credentials jsonb;
 
 -- Add jmap to the allowed kinds
 ALTER TABLE connection 
-DROP CONSTRAINT connection_kind_check;
+DROP CONSTRAINT IF EXISTS connection_kind_check;
 
 ALTER TABLE connection 
 ADD CONSTRAINT connection_kind_check CHECK (
