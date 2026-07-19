@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS connection (
   tenant_id    uuid NOT NULL REFERENCES tenant(id) ON DELETE CASCADE,
   role         text NOT NULL CHECK (role IN ('source','target')),
   kind         text NOT NULL CHECK (kind IN
-                 ('o365','soverin','nextcloud','proton','imap','caldav','carddav','webdav','selfhosted_mail')),
+                 ('o365','soverin','nextcloud','proton','imap','caldav','carddav','webdav','selfhosted_mail','jmap')),
   display_name text NOT NULL,
   config       jsonb NOT NULL DEFAULT '{}',   -- non-secret: hosts, base URLs, drive ids, MS tenant id
   secret_ref   text,                          -- pointer to vault; NEVER the secret itself

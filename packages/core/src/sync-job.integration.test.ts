@@ -31,10 +31,10 @@ if (!TEST_DATABASE_URL) {
 }
 
 // Fixed UUIDs for testing
-const TENANT_A_ID = asTenantId('550e8400-e29b-41d4-a716-446655440001' as never);
-const TENANT_B_ID = asTenantId('550e8400-e29b-41d4-a716-446655440002' as never);
-const MAPPING_A_ID = asMappingId('550e8400-e29b-41d4-a716-446655440101' as never);
-const MAPPING_B_ID = asMappingId('550e8400-e29b-41d4-a716-446655440102' as never);
+const TENANT_A_ID = asTenantId('5c0b0000-e29b-41d4-a716-446655440001' as never);
+const TENANT_B_ID = asTenantId('5c0b0000-e29b-41d4-a716-446655440002' as never);
+const MAPPING_A_ID = asMappingId('5c0b0000-e29b-41d4-a716-446655440101' as never);
+const MAPPING_B_ID = asMappingId('5c0b0000-e29b-41d4-a716-446655440102' as never);
 
 // Encryption key for tests (same key used across all tests)
 const TEST_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'; // 32 bytes = 64 hex chars
@@ -85,7 +85,7 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
     await db.execute(sql`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, secret_ref, config, status)
       VALUES (
-        '650e8400-e29b-41d4-a716-446655440001',
+        '5c0b0001-e29b-41d4-a716-446655440001',
         ${TENANT_A_ID},
         'source',
         'o365',
@@ -115,7 +115,7 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
     await db.execute(sql`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, secret_ref, config, status)
       VALUES (
-        '650e8400-e29b-41d4-a716-446655440002',
+        '5c0b0001-e29b-41d4-a716-446655440002',
         ${TENANT_A_ID},
         'target',
         'jmap',
@@ -131,9 +131,9 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
     await db.execute(sql`
       INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, status)
       VALUES (
-        '750e8400-e29b-41d4-a716-446655440001',
+        '5c0b0002-e29b-41d4-a716-446655440001',
         ${TENANT_A_ID},
-        '650e8400-e29b-41d4-a716-446655440001',
+        '5c0b0001-e29b-41d4-a716-446655440001',
         'user-a-source@source.com',
         'user',
         'active'
@@ -144,9 +144,9 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
     await db.execute(sql`
       INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, status)
       VALUES (
-        '750e8400-e29b-41d4-a716-446655440002',
+        '5c0b0002-e29b-41d4-a716-446655440002',
         ${TENANT_A_ID},
-        '650e8400-e29b-41d4-a716-446655440002',
+        '5c0b0001-e29b-41d4-a716-446655440002',
         'user-a-target@target.com',
         'user',
         'active'
@@ -160,8 +160,8 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
       VALUES (
         ${MAPPING_A_ID},
         ${TENANT_A_ID},
-        '750e8400-e29b-41d4-a716-446655440001',
-        '750e8400-e29b-41d4-a716-446655440002',
+        '5c0b0002-e29b-41d4-a716-446655440001',
+        '5c0b0002-e29b-41d4-a716-446655440002',
         'active',
         'shared_s',
         'mirror'
@@ -188,7 +188,7 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
     await db.execute(sql`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, secret_ref, config, status)
       VALUES (
-        '650e8400-e29b-41d4-a716-446655440003',
+        '5c0b0001-e29b-41d4-a716-446655440003',
         ${TENANT_B_ID},
         'source',
         'o365',
@@ -218,7 +218,7 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
     await db.execute(sql`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, secret_ref, config, status)
       VALUES (
-        '650e8400-e29b-41d4-a716-446655440004',
+        '5c0b0001-e29b-41d4-a716-446655440004',
         ${TENANT_B_ID},
         'target',
         'jmap',
@@ -233,7 +233,7 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
     await db.execute(sql`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, secret_ref, config, status)
       VALUES (
-        '650e8400-e29b-41d4-a716-446655440004',
+        '5c0b0001-e29b-41d4-a716-446655440004',
         ${TENANT_B_ID},
         'target',
         'jmap',
@@ -249,9 +249,9 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
     await db.execute(sql`
       INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, status)
       VALUES (
-        '750e8400-e29b-41d4-a716-446655440003',
+        '5c0b0002-e29b-41d4-a716-446655440003',
         ${TENANT_B_ID},
-        '650e8400-e29b-41d4-a716-446655440003',
+        '5c0b0001-e29b-41d4-a716-446655440003',
         'user-b-source@source-b.com',
         'user',
         'active'
@@ -262,9 +262,9 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
     await db.execute(sql`
       INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, status)
       VALUES (
-        '750e8400-e29b-41d4-a716-446655440004',
+        '5c0b0002-e29b-41d4-a716-446655440004',
         ${TENANT_B_ID},
-        '650e8400-e29b-41d4-a716-446655440004',
+        '5c0b0001-e29b-41d4-a716-446655440004',
         'user-b-target@target-b.com',
         'user',
         'active'
@@ -278,8 +278,8 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
       VALUES (
         ${MAPPING_B_ID},
         ${TENANT_B_ID},
-        '750e8400-e29b-41d4-a716-446655440003',
-        '750e8400-e29b-41d4-a716-446655440004',
+        '5c0b0002-e29b-41d4-a716-446655440003',
+        '5c0b0002-e29b-41d4-a716-446655440004',
         'active',
         'shared_s',
         'mirror'
@@ -352,12 +352,12 @@ describe('Sync Jobs with Encrypted Credentials (integration)', () => {
       // buildDepsFromMapping loads connections by (tenant, role) so TENANT_A already having good
       // creds would mask this, and (b) the afterEach cleanup only deletes TENANT_A/B, so tenant C
       // fixtures survive intact.
-      const TENANT_C_ID = asTenantId('550e8400-e29b-41d4-a716-4466554403c1' as never);
-      const mappingC = asMappingId('550e8400-e29b-41d4-a716-4466554403c9' as never);
-      const connCsrc = '550e8400-e29b-41d4-a716-4466554403c5';
-      const connCtgt = '550e8400-e29b-41d4-a716-4466554403c6';
-      const mboxCsrc = '550e8400-e29b-41d4-a716-4466554403ca';
-      const mboxCtgt = '550e8400-e29b-41d4-a716-4466554403cb';
+      const TENANT_C_ID = asTenantId('5c0b0000-e29b-41d4-a716-4466554403c1' as never);
+      const mappingC = asMappingId('5c0b0000-e29b-41d4-a716-4466554403c9' as never);
+      const connCsrc = '5c0b0000-e29b-41d4-a716-4466554403c5';
+      const connCtgt = '5c0b0000-e29b-41d4-a716-4466554403c6';
+      const mboxCsrc = '5c0b0000-e29b-41d4-a716-4466554403ca';
+      const mboxCtgt = '5c0b0000-e29b-41d4-a716-4466554403cb';
       await db.execute(sql`INSERT INTO tenant (id, name, status) VALUES (${TENANT_C_ID}, 'Tenant C', 'active') ON CONFLICT (id) DO NOTHING`);
       await db.execute(sql`INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status) VALUES (${connCsrc}, ${TENANT_C_ID}, 'source', 'o365', 'No Creds Source', '{}', 'connected') ON CONFLICT (id) DO NOTHING`);
       await db.execute(sql`INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status) VALUES (${connCtgt}, ${TENANT_C_ID}, 'target', 'nextcloud', 'T', '{}', 'connected') ON CONFLICT (id) DO NOTHING`);
