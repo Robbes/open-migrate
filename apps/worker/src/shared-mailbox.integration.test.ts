@@ -122,8 +122,8 @@ async function waitForImap(host: string, port: number): Promise<void> {
 }
 
 // Fixed UUIDs for shared mailbox testing
-const SHARED_TENANT_ID = asTenantId('550e8400-e29b-41d4-a716-446655440011' as never);
-const SHARED_MAPPING_ID = asMappingId('550e8400-e29b-41d4-a716-446655440012' as never);
+const SHARED_TENANT_ID = asTenantId('5f1b0000-e29b-41d4-a716-446655440011' as never);
+const SHARED_MAPPING_ID = asMappingId('5f1b0000-e29b-41d4-a716-446655440012' as never);
 
 /**
  * Database type for drizzle.
@@ -314,8 +314,8 @@ describe('Shared Mailbox Integration (Pattern-S, B-T5)', () => {
       ON CONFLICT (id) DO NOTHING
     `);
 
-    const sourceConnId = '650e8400-e29b-41d4-a716-446655440011';
-    const targetConnId = '650e8400-e29b-41d4-a716-446655440012';
+    const sourceConnId = '5f1b0000-e29b-41d4-a716-446655440011';
+    const targetConnId = '5f1b0000-e29b-41d4-a716-446655440012';
     
     await db.execute(sql`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status)
@@ -329,8 +329,8 @@ describe('Shared Mailbox Integration (Pattern-S, B-T5)', () => {
       ON CONFLICT (id) DO NOTHING
     `);
 
-    const sourceMailboxId = '750e8400-e29b-41d4-a716-446655440011';
-    const targetMailboxId = '750e8400-e29b-41d4-a716-446655440012';
+    const sourceMailboxId = '5f1b0000-e29b-41d4-a716-446655440011';
+    const targetMailboxId = '5f1b0000-e29b-41d4-a716-446655440012';
     
     await db.execute(sql`
       INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, display_name, status)

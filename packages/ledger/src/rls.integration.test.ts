@@ -33,10 +33,10 @@ if (!PG_CONNECTION_STRING) {
 // - 550e8400-e29b-41d4-a716-4466554402xx: cutover lifecycle tests
 // - 550e8400-e29b-41d4-a716-4466554403xx: rollback tests
 // - 950e8400-e29b-41d4-a716-44665544xxxx: RLS tests (this suite)
-const TENANT_RLS_A = '950e8400-e29b-41d4-a716-446655441101';
-const TENANT_RLS_B = '950e8400-e29b-41d4-a716-446655441102';
-const CONNECTION_RLS_A = '950e8400-e29b-41d4-a716-446655441201';
-const CONNECTION_RLS_B = '950e8400-e29b-41d4-a716-446655441202';
+const TENANT_RLS_A = '5c2b0000-e29b-41d4-a716-446655441101';
+const TENANT_RLS_B = '5c2b0000-e29b-41d4-a716-446655441102';
+const CONNECTION_RLS_A = '5c2b0000-e29b-41d4-a716-446655441201';
+const CONNECTION_RLS_B = '5c2b0000-e29b-41d4-a716-446655441202';
 
 // Connection string for app_user role (non-superuser for RLS testing)
 // Parses the TEST_DATABASE_URL and replaces the user/password with app_user credentials
@@ -127,7 +127,7 @@ describe('RLS Policies', () => {
     await appPool!.query(`SET app.current_tenant = '${TENANT_RLS_A}'`);
     
     // Insert a new connection (use unique ID to avoid collision)
-    const newId = '950e8400-e29b-41d4-a716-446655441301';
+    const newId = '5c2b0000-e29b-41d4-a716-446655441301';
     await appPool!.query(`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config)
       VALUES ($1, $2, 'target', 'imap', 'Tenant A RLS Target', '{}')
@@ -280,7 +280,7 @@ describe('withTenant helper', () => {
     }
     
     // Try to insert with Tenant A context but with Tenant B's ID
-    const foreignId = '950e8400-e29b-41d4-a716-446655441401';
+    const foreignId = '5c2b0000-e29b-41d4-a716-446655441401';
     
     // This should fail because the RLS policy prevents inserting with a tenant_id
     // that doesn't match the current_tenant context
@@ -369,7 +369,7 @@ describe('withTenant helper', () => {
       throw new Error('appPool not initialized');
     }
     
-    const insertId = '950e8400-e29b-41d4-a716-446655441501';
+    const insertId = '5c2b0000-e29b-41d4-a716-446655441501';
     
     // Try to insert and throw an error mid-transaction
     await expect(

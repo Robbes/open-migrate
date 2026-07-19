@@ -128,8 +128,8 @@ async function waitForImap(host: string, port: number): Promise<void> {
 }
 
 // Fixed UUIDs for testing
-const TEST_TENANT_ID = asTenantId('550e8400-e29b-41d4-a716-446655440001' as never);
-const TEST_MAPPING_ID = asMappingId('550e8400-e29b-41d4-a716-446655440002' as never);
+const TEST_TENANT_ID = asTenantId('5b0b0000-e29b-41d4-a716-446655440001' as never);
+const TEST_MAPPING_ID = asMappingId('5b0b0000-e29b-41d4-a716-446655440002' as never);
 
 /**
  * Database type for drizzle.
@@ -300,8 +300,8 @@ describe('Shadow Pass Integration (T4)', () => {
       ON CONFLICT (id) DO NOTHING
     `);
 
-    const sourceConnId = '650e8400-e29b-41d4-a716-446655440001';
-    const targetConnId = '650e8400-e29b-41d4-a716-446655440002';
+    const sourceConnId = '5b0b0000-e29b-41d4-a716-446655440001';
+    const targetConnId = '5b0b0000-e29b-41d4-a716-446655440002';
     
     await db.execute(sql`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status)
@@ -315,8 +315,8 @@ describe('Shadow Pass Integration (T4)', () => {
       ON CONFLICT (id) DO NOTHING
     `);
 
-    const sourceMailboxId = '750e8400-e29b-41d4-a716-446655440001';
-    const targetMailboxId = '750e8400-e29b-41d4-a716-446655440002';
+    const sourceMailboxId = '5b0b0000-e29b-41d4-a716-446655440001';
+    const targetMailboxId = '5b0b0000-e29b-41d4-a716-446655440002';
     
     await db.execute(sql`
       INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, display_name, status)

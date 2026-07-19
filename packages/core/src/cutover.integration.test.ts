@@ -24,8 +24,8 @@ if (!PG_CONNECTION_STRING) {
 }
 
 // Fixed UUIDs for testing
-const TEST_TENANT_ID = asTenantId('550e8400-e29b-41d4-a716-446655440201' as never);
-const TEST_MAPPING_ID = asMappingId('550e8400-e29b-41d4-a716-446655440202' as never);
+const TEST_TENANT_ID = asTenantId('5e1b0000-e29b-41d4-a716-446655440201' as never);
+const TEST_MAPPING_ID = asMappingId('5e1b0000-e29b-41d4-a716-446655440202' as never);
 
 describe('Cutover Lifecycle (integration)', () => {
   let db: ReturnType<typeof createPgDb>;
@@ -45,7 +45,7 @@ describe('Cutover Lifecycle (integration)', () => {
     await db.execute(sql`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status)
       VALUES (
-        '650e8400-e29b-41d4-a716-446655440201',
+        '5e1b0000-e29b-41d4-a716-446655440201',
         ${TEST_TENANT_ID},
         'source',
         'o365',
@@ -59,7 +59,7 @@ describe('Cutover Lifecycle (integration)', () => {
     await db.execute(sql`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status)
       VALUES (
-        '650e8400-e29b-41d4-a716-446655440202',
+        '5e1b0000-e29b-41d4-a716-446655440202',
         ${TEST_TENANT_ID},
         'target',
         'selfhosted_mail',
@@ -73,9 +73,9 @@ describe('Cutover Lifecycle (integration)', () => {
     await db.execute(sql`
       INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, display_name, status)
       VALUES (
-        '750e8400-e29b-41d4-a716-446655440201',
+        '5e1b0000-e29b-41d4-a716-446655440201',
         ${TEST_TENANT_ID},
-        '650e8400-e29b-41d4-a716-446655440201',
+        '5e1b0000-e29b-41d4-a716-446655440201',
         'inbox-source',
         'user',
         'Inbox',
@@ -87,9 +87,9 @@ describe('Cutover Lifecycle (integration)', () => {
     await db.execute(sql`
       INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, display_name, status)
       VALUES (
-        '750e8400-e29b-41d4-a716-446655440202',
+        '5e1b0000-e29b-41d4-a716-446655440202',
         ${TEST_TENANT_ID},
-        '650e8400-e29b-41d4-a716-446655440202',
+        '5e1b0000-e29b-41d4-a716-446655440202',
         'inbox-target',
         'user',
         'Inbox',
@@ -103,8 +103,8 @@ describe('Cutover Lifecycle (integration)', () => {
       VALUES (
         ${TEST_MAPPING_ID},
         ${TEST_TENANT_ID},
-        '750e8400-e29b-41d4-a716-446655440201',
-        '750e8400-e29b-41d4-a716-446655440202',
+        '5e1b0000-e29b-41d4-a716-446655440201',
+        '5e1b0000-e29b-41d4-a716-446655440202',
         'active',
         'mirror'
       )

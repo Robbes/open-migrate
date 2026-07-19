@@ -20,11 +20,11 @@ if (!PG_CONNECTION_STRING) {
   );
 }
 
-// Fixed UUIDs for testing (valid UUID format)
-const TEST_TENANT_ID = asTenantId('550e8400-e29b-41d4-a716-446655440001' as never);
-const TEST_MAPPING_ID = asMappingId('550e8400-e29b-41d4-a716-446655440002' as never);
-const TEST_TENANT_2_ID = asTenantId('550e8400-e29b-41d4-a716-446655440003' as never);
-const TEST_MAPPING_2_ID = asMappingId('550e8400-e29b-41d4-a716-446655440004' as never);
+// Fixed UUIDs for testing (valid UUID format) - namespace 5a0b for ledger.integration.test.ts
+const TEST_TENANT_ID = asTenantId('5a0b0000-e29b-41d4-a716-446655440001' as never);
+const TEST_MAPPING_ID = asMappingId('5a0b0000-e29b-41d4-a716-446655440002' as never);
+const TEST_TENANT_2_ID = asTenantId('5a0b0000-e29b-41d4-a716-446655440003' as never);
+const TEST_MAPPING_2_ID = asMappingId('5a0b0000-e29b-41d4-a716-446655440004' as never);
 
 describe('PgLedger (integration)', () => {
   let ledger: PgLedger;
@@ -50,7 +50,7 @@ describe('PgLedger (integration)', () => {
     `);
 
     // Insert source connection
-    const sourceConnId = '650e8400-e29b-41d4-a716-446655440001';
+    const sourceConnId = '5a0b0000-e29b-41d4-a716-446655440001';
     await db.execute(sql`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status)
       VALUES (${sourceConnId}, ${TEST_TENANT_ID}, 'source', 'o365', 'O365 Source', '{}', 'connected')
@@ -58,7 +58,7 @@ describe('PgLedger (integration)', () => {
     `);
 
     // Insert target connection
-    const targetConnId = '650e8400-e29b-41d4-a716-446655440002';
+    const targetConnId = '5a0b0000-e29b-41d4-a716-446655440002';
     await db.execute(sql`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status)
       VALUES (${targetConnId}, ${TEST_TENANT_ID}, 'target', 'imap', 'IMAP Target', '{}', 'connected')
@@ -66,7 +66,7 @@ describe('PgLedger (integration)', () => {
     `);
 
     // Insert source mailbox
-    const sourceMailboxId = '750e8400-e29b-41d4-a716-446655440001';
+    const sourceMailboxId = '5a0b0000-e29b-41d4-a716-446655440001';
     await db.execute(sql`
       INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, display_name, status)
       VALUES (${sourceMailboxId}, ${TEST_TENANT_ID}, ${sourceConnId}, 'source@dev.local', 'user', 'Source Mailbox', 'active')
@@ -74,7 +74,7 @@ describe('PgLedger (integration)', () => {
     `);
 
     // Insert target mailbox
-    const targetMailboxId = '750e8400-e29b-41d4-a716-446655440002';
+    const targetMailboxId = '5a0b0000-e29b-41d4-a716-446655440002';
     await db.execute(sql`
       INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, display_name, status)
       VALUES (${targetMailboxId}, ${TEST_TENANT_ID}, ${targetConnId}, 'target@dev.local', 'user', 'Target Mailbox', 'active')
@@ -89,8 +89,8 @@ describe('PgLedger (integration)', () => {
     `);
 
     // Insert second mapping for isolation tests
-    const sourceMailboxId2 = '750e8400-e29b-41d4-a716-446655440003';
-    const targetMailboxId2 = '750e8400-e29b-41d4-a716-446655440004';
+    const sourceMailboxId2 = '5a0b0000-e29b-41d4-a716-446655440003';
+    const targetMailboxId2 = '5a0b0000-e29b-41d4-a716-446655440004';
     await db.execute(sql`
       INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, display_name, status)
       VALUES (${sourceMailboxId2}, ${TEST_TENANT_2_ID}, ${sourceConnId}, 'source2@dev.local', 'user', 'Source Mailbox 2', 'active')
@@ -235,7 +235,7 @@ describe('PgCursorStore (integration)', () => {
     `);
 
     // Insert source connection
-    const sourceConnId = '650e8400-e29b-41d4-a716-446655440001';
+    const sourceConnId = '5a0b0000-e29b-41d4-a716-446655440001';
     await db.execute(sql`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status)
       VALUES (${sourceConnId}, ${TEST_TENANT_ID}, 'source', 'imap', 'IMAP Source', '{}', 'connected')
@@ -243,7 +243,7 @@ describe('PgCursorStore (integration)', () => {
     `);
 
     // Insert target connection
-    const targetConnId = '650e8400-e29b-41d4-a716-446655440002';
+    const targetConnId = '5a0b0000-e29b-41d4-a716-446655440002';
     await db.execute(sql`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status)
       VALUES (${targetConnId}, ${TEST_TENANT_ID}, 'target', 'imap', 'IMAP Target', '{}', 'connected')
@@ -251,7 +251,7 @@ describe('PgCursorStore (integration)', () => {
     `);
 
     // Insert source mailbox
-    const sourceMailboxId = '750e8400-e29b-41d4-a716-446655440001';
+    const sourceMailboxId = '5a0b0000-e29b-41d4-a716-446655440001';
     await db.execute(sql`
       INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, display_name, status)
       VALUES (${sourceMailboxId}, ${TEST_TENANT_ID}, ${sourceConnId}, 'source@dev.local', 'user', 'Source Mailbox', 'active')
@@ -259,7 +259,7 @@ describe('PgCursorStore (integration)', () => {
     `);
 
     // Insert target mailbox
-    const targetMailboxId = '750e8400-e29b-41d4-a716-446655440002';
+    const targetMailboxId = '5a0b0000-e29b-41d4-a716-446655440002';
     await db.execute(sql`
       INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, display_name, status)
       VALUES (${targetMailboxId}, ${TEST_TENANT_ID}, ${targetConnId}, 'target@dev.local', 'user', 'Target Mailbox', 'active')

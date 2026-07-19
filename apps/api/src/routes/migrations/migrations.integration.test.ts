@@ -36,12 +36,12 @@ import app from '../../index.js';
 // import * as schema from '@open-migrate/ledger'; // Not needed - using raw SQL queries
 
 // UUIDs for migration tests
-const MIG_TENANT_A = '950e8400-e29b-41d4-a716-446655443101';
-const MIG_TENANT_B = '950e8400-e29b-41d4-a716-446655443102';
+const MIG_TENANT_A = '5a1b0000-e29b-41d4-a716-446655443101';
+const MIG_TENANT_B = '5a1b0000-e29b-41d4-a716-446655443102';
 
 // Mapping IDs
-const MIG_MAPPING_A = '950e8400-e29b-41d4-a716-446655443201';
-const MIG_MAPPING_B = '950e8400-e29b-41d4-a716-446655443202';
+const MIG_MAPPING_A = '5a1b0000-e29b-41d4-a716-446655443201';
+const MIG_MAPPING_B = '5a1b0000-e29b-41d4-a716-446655443202';
 
 function createTestToken(tenantId: string, role: string = 'member'): string {
   return jwt.sign(
@@ -78,8 +78,8 @@ describe('Migrations Routes - Tenant Isolation', () => {
     ]);
 
     // Create source connections for each tenant
-    const connA = '950e8400-e29b-41d4-a716-446655443301';
-    const connB = '950e8400-e29b-41d4-a716-446655443302';
+    const connA = '5a1b0000-e29b-41d4-a716-446655443301';
+    const connB = '5a1b0000-e29b-41d4-a716-446655443302';
     
     await superuserPool.query(`
       INSERT INTO connection (id, tenant_id, role, kind, display_name, config)
@@ -89,7 +89,7 @@ describe('Migrations Routes - Tenant Isolation', () => {
     `, [connA, MIG_TENANT_A, connB, MIG_TENANT_B]);
 
     // Create mailbox for Tenant A
-    const mailboxA = '950e8400-e29b-41d4-a716-446655443401';
+    const mailboxA = '5a1b0000-e29b-41d4-a716-446655443401';
     await superuserPool.query(`
       INSERT INTO mailbox (id, tenant_id, connection_id, display_name, kind)
       VALUES ($1, $2, $3, 'Inbox A', 'user')
@@ -97,7 +97,7 @@ describe('Migrations Routes - Tenant Isolation', () => {
     `, [mailboxA, MIG_TENANT_A, connA]);
 
     // Create mailbox for Tenant B
-    const mailboxB = '950e8400-e29b-41d4-a716-446655443402';
+    const mailboxB = '5a1b0000-e29b-41d4-a716-446655443402';
     await superuserPool.query(`
       INSERT INTO mailbox (id, tenant_id, connection_id, display_name, kind)
       VALUES ($1, $2, $3, 'Inbox B', 'user')
@@ -209,8 +209,8 @@ describe('Migrations Routes - Tenant Isolation', () => {
   describe('POST /api/migrations', () => {
     it('should create a mapping for tenant A', async () => {
       const newMapping = {
-        sourceMailboxId: '950e8400-e29b-41d4-a716-446655443501',
-        targetMailboxId: '950e8400-e29b-41d4-a716-446655443501',
+        sourceMailboxId: '5a1b0000-e29b-41d4-a716-446655443501',
+        targetMailboxId: '5a1b0000-e29b-41d4-a716-446655443501',
         status: 'active',
         mode: 'mirror',
         pattern: 'shared_s',
@@ -228,8 +228,8 @@ describe('Migrations Routes - Tenant Isolation', () => {
 
     it('should not allow client to specify different tenant_id (security test)', async () => {
       const newMapping = {
-        sourceMailboxId: '950e8400-e29b-41d4-a716-446655443502',
-        targetMailboxId: '950e8400-e29b-41d4-a716-446655443502',
+        sourceMailboxId: '5a1b0000-e29b-41d4-a716-446655443502',
+        targetMailboxId: '5a1b0000-e29b-41d4-a716-446655443502',
         tenantId: MIG_TENANT_B, // Attempt to create for tenant B
         status: 'active',
         mode: 'mirror',
@@ -284,14 +284,14 @@ describe('Migrations Routes - Tenant Isolation', () => {
   describe('DELETE /api/migrations/:id', () => {
     it('should allow tenant A to delete its own mapping', async () => {
       // Create a temporary mapping for deletion test
-      const tempId = '950e8400-e29b-41d4-a716-446655443601';
-      const tempMailbox = '950e8400-e29b-41d4-a716-446655443602';
+      const tempId = '5a1b0000-e29b-41d4-a716-446655443601';
+      const tempMailbox = '5a1b0000-e29b-41d4-a716-446655443602';
       
       await superuserPool.query(`
         INSERT INTO mailbox (id, tenant_id, connection_id, display_name, kind)
         VALUES ($1, $2, $3, 'Temp', 'user')
         ON CONFLICT (id) DO NOTHING
-      `, [tempMailbox, MIG_TENANT_A, '950e8400-e29b-41d4-a716-446655443301']);
+      `, [tempMailbox, MIG_TENANT_A, '5a1b0000-e29b-41d4-a716-446655443301']);
 
       await superuserPool.query(`
         INSERT INTO mailbox_mapping (id, tenant_id, source_mailbox_id, target_mailbox_id, status, mode)

@@ -40,8 +40,8 @@ process.env.APP_DATABASE_URL = getAppUserConnectionString(PG_CONNECTION_STRING);
 import app from '../../index.js';
 
 // UUIDs for API isolation tests (950e8400-e29b-41d4-a716-44665544xxxx)
-const API_TENANT_A = '950e8400-e29b-41d4-a716-446655442101';
-const API_TENANT_B = '950e8400-e29b-41d4-a716-446655442102';
+const API_TENANT_A = '5e2b0000-e29b-41d4-a716-446655442101';
+const API_TENANT_B = '5e2b0000-e29b-41d4-a716-446655442102';
 
 // Generate valid JWT tokens for each tenant
 function createTestToken(tenantId: string, role: string = 'member'): string {
@@ -88,8 +88,8 @@ describe('API Tenant Isolation', () => {
         ($3, $4, 'source', 'o365', 'Tenant B Source', '{}')
       ON CONFLICT (id) DO NOTHING
     `, [
-      '950e8400-e29b-41d4-a716-446655442201', API_TENANT_A,
-      '950e8400-e29b-41d4-a716-446655442202', API_TENANT_B,
+      '5e2b0000-e29b-41d4-a716-446655442201', API_TENANT_A,
+      '5e2b0000-e29b-41d4-a716-446655442202', API_TENANT_B,
     ]);
 
     // Build the Express app
@@ -209,7 +209,7 @@ describe('API Tenant Isolation', () => {
   describe('DELETE /api/tenants/:id', () => {
     it('should allow owner to delete their own tenant', async () => {
       // Create a temporary tenant for deletion test with owner role token
-      const tempId = '950e8400-e29b-41d4-a716-446655442301';
+      const tempId = '5e2b0000-e29b-41d4-a716-446655442301';
       await superuserPool.query(`
         INSERT INTO tenant (id, name, status)
         VALUES ($1, $2, $3)
