@@ -5,6 +5,13 @@
 // 2. Run first pass → record created = N
 // 3. Restart app container
 // 4. Run second pass → assert created = 0 (zero duplicates), cursor advanced
+//
+// PREREQUISITE: this test drives an ALREADY-RUNNING stack. Before bringing the
+// stack up, place a mapping in the (git-ignored) config dir — real mappings are
+// never committed as the default (they auto-load). Use the test fixture:
+//   cp test/e2e/fixtures/selfhost-restart-resume.mapping.json \
+//      deploy/selfhost/config/mapping.json
+//   docker compose -f deploy/selfhost/compose.yml up -d
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execSync } from 'node:child_process';

@@ -43,3 +43,8 @@ temp/
 # npm lockfile (pnpm is used instead)
 package-lock.json
 yarn.lock
+
+# Self-host bundle: real mapping configs are operator-provided and must never be
+# shipped as a committed default (the appliance auto-loads every *.json here).
+# Only the *.example template is tracked. Test fixtures live under test/e2e/.
+deploy/selfhost/config/*.json
