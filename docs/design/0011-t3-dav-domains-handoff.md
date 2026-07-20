@@ -1,7 +1,14 @@
 # Workplan 0011 T3 remainder — non-mail sync domains (handoff)
 
-**Status:** cutover/rollback jobs are now real (this PR). The **calendar/contact/file
-sync domains are still stubbed** — this note scopes that remaining work.
+> ✅ **DONE.** Implemented: `buildDomainDepsFromMapping` now builds the native
+> CalDAV/CardDAV/WebDAV source connectors + engine target writers from DB config +
+> decrypted credentials (the DAV sources gained an optional direct `password`), and
+> `run-delta-sync.ts` runs `runCalendarSync`/`runContactSync`/`runFileSync` per
+> enabled domain with status tracking + metering. This note is kept for the
+> reasoning trail.
+
+**Status:** cutover/rollback jobs are real; the calendar/contact/file sync domains
+are now wired (see banner above). Original scoping below.
 
 ## The gap
 The managed delta/full-sync jobs only sync **mail**. In `apps/worker/src/jobs/run-delta-sync.ts`

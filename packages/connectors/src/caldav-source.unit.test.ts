@@ -643,5 +643,30 @@ END:VCALENDAR`;
 
       expect(() => (source as any).getAuthorizationHeader()).toThrow();
     });
+
+    it('prefers a direct password over passwordEnv (managed path)', () => {
+      process.env.SHOULD_NOT_BE_USED = 'env-password';
+      const source = new CalDAVSource({
+        url: 'https://caldav.example.com/',
+        username: 'testuser',
+        password: 'direct-password',
+        passwordEnv: 'SHOULD_NOT_BE_USED',
+      });
+      const header = (source as any).getAuthorizationHeader();
+      expect(header).toBe(`Basic ${Buffer.from('testuser:direct-password').toString('base64')}`);
+      delete process.env.SHOULD_NOT_BE_USED;
+    });
+
+    it('falls back to passwordEnv when no direct password (self-host path)', () => {
+      process.env.CALDAV_TEST_PW = 'env-password';
+      const source = new CalDAVSource({
+        url: 'https://caldav.example.com/',
+        username: 'testuser',
+        passwordEnv: 'CALDAV_TEST_PW',
+      });
+      const header = (source as any).getAuthorizationHeader();
+      expect(header).toBe(`Basic ${Buffer.from('testuser:env-password').toString('base64')}`);
+      delete process.env.CALDAV_TEST_PW;
+    });
   });
 });
