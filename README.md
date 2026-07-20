@@ -80,6 +80,7 @@ Everything lives in [`docs/`](./docs/). Start with the source of truth: [`docs/a
 ### Key Documentation
 - **Architecture**: [`docs/architecture/solution-architecture.md`](./docs/architecture/solution-architecture.md)
 - **Testing Guide**: [`docs/testing.md`](./docs/testing.md)
+- **Self-host Quickstart**: [`docs/selfhost-quickstart.md`](./docs/selfhost-quickstart.md)
 - **Stalwart Integration**: [`docs/stalwart-integration-fix.md`](./docs/stalwart-integration-fix.md)
 - **Workplans**: [`docs/workplans/`](./docs/workplans/)
 - **Decision Records**: [`docs/adr/`](./docs/adr/)
@@ -94,7 +95,10 @@ runtime (Postgres RLS with a non-owner role, proven cross-tenant at the SQL and 
 API persists real data, Trigger.dev jobs run the real mail sync, and usage metering accrues from
 real runs. Still in flight for managed: billing/payment end-to-end, the web UI verified against the
 API, and the operator compose stack. The **self-host edition** (a single-tenant NAS/Pi appliance
-bundling Postgres) is planned next and not yet runnable. See
+bundling Postgres) is now packaged — a startup migration runner, a real entrypoint, and a
+bundled-Postgres compose stack (`deploy/selfhost/`, see the
+[quickstart](./docs/selfhost-quickstart.md)); the on-a-Docker-host build/verify and the
+restart-resume acceptance gate are the remaining steps. See
 [`docs/workplans/`](./docs/workplans/) for the per-slice Status blocks.
 
 ## Contributing
