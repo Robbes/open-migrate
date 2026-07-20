@@ -107,14 +107,18 @@ export const runRollback = schemaTask({
         await ctxTyped.logger.log('User notification requested but not yet implemented — skipping.');
       }
 
-      // Step 5: Cancel any pending tasks
+      // Step 5: Cancel any pending grace-period task. Best-effort: the rollback
+      // is already committed (steps 2-3), so a missing/failed cancel must NOT
+      // flip a successful rollback to FAILED.
       console.log('Cancelling pending tasks');
       await ctxTyped.logger.log('Cancelling pending tasks...');
-      // TODO: Cancel grace period if scheduled
-      await ctxTyped.cancel({
-        id: `grace-period-${mappingId}`,
-      });
-      await ctxTyped.logger.log('Pending tasks cancelled');
+      try {
+        await ctxTyped.cancel({ id: `grace-period-${mappingId}` });
+        await ctxTyped.logger.log('Pending tasks cancelled');
+      } catch (cancelErr) {
+        const msg = cancelErr instanceof Error ? cancelErr.message : String(cancelErr);
+        await ctxTyped.logger.log(`No pending grace-period task to cancel (or cancel failed): ${msg}`);
+      }
 
       console.log('Rollback completed successfully');
       await ctxTyped.logger.log('Rollback completed successfully');
@@ -142,6 +146,9 @@ export const runRollback = schemaTask({
       }
 
       throw error;
+    } finally {
+      // Always release the Postgres pool (never leak it across job runs).
+      await pool.end();
     }
   },
 });

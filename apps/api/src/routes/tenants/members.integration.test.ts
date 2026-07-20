@@ -254,6 +254,25 @@ describe('Members Route Isolation', () => {
 
       expect(response.status).toBe(403);
     });
+
+    it('should prevent demoting the last owner (would orphan the tenant)', async () => {
+      // ownerAId is the sole owner; demoting them must be rejected.
+      const response = await request
+        .patch(`/api/tenants/${API_TENANT_A}/members/${ownerAId}`)
+        .set('Authorization', `Bearer ${TOKEN_OWNER_A}`)
+        .send({ role: 'member' });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('should prevent an admin from granting the owner role (no self-escalation)', async () => {
+      const response = await request
+        .patch(`/api/tenants/${API_TENANT_A}/members/${memberAId}`)
+        .set('Authorization', `Bearer ${TOKEN_ADMIN_A}`)
+        .send({ role: 'owner' });
+
+      expect(response.status).toBe(403);
+    });
   });
 
   describe('DELETE /api/tenants/:tenantId/members/:memberId', () => {

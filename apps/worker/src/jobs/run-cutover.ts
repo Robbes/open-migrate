@@ -206,6 +206,9 @@ export const runCutover = schemaTask({
       });
 
       throw error;
+    } finally {
+      // Always release the Postgres pool (never leak it across job runs).
+      await pool.end();
     }
   },
 });

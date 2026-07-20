@@ -11,10 +11,17 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import { authenticate, requireRole, getDbPool, withTenantDb } from '../../middleware/auth';
 import type { AuthenticatedRequest } from '../../types/api';
 import { eq, and, count } from 'drizzle-orm';
 import * as schema from '@openmig/ledger';
+import {
+  demotesLastOwner,
+  removesLastOwner,
+  grantsOwnerWithoutPermission,
+  isSelfRemoval,
+} from './member-guards';
 
 const router = Router();
 
@@ -110,7 +117,11 @@ router.post(
       const [newMember] = await withTenantDb(tenantId, getSharedPool(), async (db) => {
         return await db.insert(schema.tenantMember).values({
           tenantId,
-          userId: req.userId || 'pending-invite',
+          // The invitee has no user id until they accept. user_id is NOT NULL and
+          // UNIQUE(tenant_id, user_id), so use a unique placeholder (never the
+          // inviter's id — that both misattributes identity and collides on a
+          // second invite). It's replaced with the real user id on acceptance.
+          userId: `pending:${randomUUID()}`,
           email: body.email,
           role: body.role,
           status: 'invited',
@@ -219,9 +230,18 @@ router.patch(
         });
       }
 
-      // Prevent demoting the last owner
-      const ownerCount = await withTenantDb(tenantId, getSharedPool(), async (db) => {
-        const result = await db.select({ count: count() })
+      // Look up the target member's current role + the tenant's owner count
+      // (both RLS-scoped) to evaluate the guards below.
+      const { target, ownerCount } = await withTenantDb(tenantId, getSharedPool(), async (db) => {
+        const targetRows = await db.select({ role: schema.tenantMember.role })
+          .from(schema.tenantMember)
+          .where(
+            and(
+              eq(schema.tenantMember.id, memberId),
+              eq(schema.tenantMember.tenantId, tenantId),
+            )
+          );
+        const ownerRows = await db.select({ count: count() })
           .from(schema.tenantMember)
           .where(
             and(
@@ -229,13 +249,28 @@ router.patch(
               eq(schema.tenantMember.role, 'owner'),
             )
           );
-        return result[0]?.count ?? 0;
+        return { target: targetRows[0], ownerCount: ownerRows[0]?.count ?? 0 };
       });
 
-      if (body.role === 'owner' && ownerCount === 0) {
+      if (!target) {
+        res.status(404).json({ error: 'Not found', message: 'Member not found' });
+        return;
+      }
+
+      // Granting the owner role is owner-only — an admin must not self-escalate.
+      if (grantsOwnerWithoutPermission(body.role, req.userRole)) {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'Only an owner can grant the owner role',
+        });
+        return;
+      }
+
+      // Never demote the tenant's last owner (would leave it with no owner).
+      if (demotesLastOwner(target.role, body.role, ownerCount)) {
         res.status(400).json({
           error: 'Bad Request',
-          message: 'Cannot remove the last owner',
+          message: 'Cannot demote the last owner',
         });
         return;
       }
@@ -304,9 +339,9 @@ router.delete(
         });
       }
 
-      // Get the member's role first
+      // Get the member's role + user id first (RLS-scoped).
       const memberData = await withTenantDb(tenantId, getSharedPool(), async (db) => {
-        return await db.select({ role: schema.tenantMember.role })
+        return await db.select({ role: schema.tenantMember.role, userId: schema.tenantMember.userId })
           .from(schema.tenantMember)
           .where(
             and(
@@ -324,10 +359,20 @@ router.delete(
         return;
       }
 
-      const memberRole = memberData[0]!.role;
+      const target = memberData[0]!;
 
-      // Prevent removing the last owner
-      if (memberRole === 'owner') {
+      // Prevent removing yourself — compare the member's USER id (not its row id,
+      // which is what :memberId is) to the authenticated user's id.
+      if (isSelfRemoval(req.userId, target.userId)) {
+        res.status(400).json({
+          error: 'Bad Request',
+          message: 'Cannot remove yourself from the tenant',
+        });
+        return;
+      }
+
+      // Prevent removing the last owner.
+      if (target.role === 'owner') {
         const ownerCount = await withTenantDb(tenantId, getSharedPool(), async (db) => {
           const result = await db.select({ count: count() })
             .from(schema.tenantMember)
@@ -340,22 +385,13 @@ router.delete(
           return result[0]?.count ?? 0;
         });
 
-        if (ownerCount === 1) {
+        if (removesLastOwner(target.role, ownerCount)) {
           res.status(400).json({
             error: 'Bad Request',
             message: 'Cannot remove the last owner',
           });
           return;
         }
-      }
-
-      // Prevent removing yourself
-      if (req.userId === memberId) {
-        res.status(400).json({
-          error: 'Bad Request',
-          message: 'Cannot remove yourself from the tenant',
-        });
-        return;
       }
 
       await withTenantDb(tenantId, getSharedPool(), async (db) => {
