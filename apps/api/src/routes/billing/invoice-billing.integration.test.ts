@@ -146,6 +146,41 @@ describe('T5 — invoice generation + Mollie webhook', () => {
       expect(resB.status).toBe(201);
       expect(resB.body.invoice.subtotal).toBe(999); // baseFee only — no A usage leaked
     });
+
+    it('never overwrites a paid invoice on regenerate (finding #1)', async () => {
+      // Generate a draft, then mark it paid with sentinel amounts (as the webhook
+      // would), then seed more usage and regenerate. The paid invoice's stored
+      // amounts + status must be untouched (the setWhere guard), and the call
+      // reports it locked.
+      await seedUsage(TENANT_A, 'compute', 'sync', 1);
+      await request.post('/api/billing/invoices/generate').set('Authorization', `Bearer ${token(TENANT_A)}`).send({ period: PERIOD });
+
+      await superuserPool.query(
+        `UPDATE invoice SET status = 'paid', subtotal = '9999', tax_amount = '2100', total = '12099'
+         WHERE tenant_id = $1 AND period_start = $2`,
+        [TENANT_A, PERIOD_START],
+      );
+
+      // Usage that WOULD change the computed amounts if the invoice were rewritten.
+      await seedUsage(TENANT_A, 'compute', 'sync', 250);
+
+      const res = await request
+        .post('/api/billing/invoices/generate')
+        .set('Authorization', `Bearer ${token(TENANT_A)}`)
+        .send({ period: PERIOD });
+
+      expect(res.status).toBe(201);
+      expect(res.body.invoice.status).toBe('paid');
+      expect(res.body.invoice.locked).toBe(true);
+
+      // The stored (paid) row is byte-for-byte unchanged.
+      const { rows } = await superuserPool.query(
+        `SELECT status, subtotal, tax_amount, total FROM invoice WHERE tenant_id = $1 AND period_start = $2`,
+        [TENANT_A, PERIOD_START],
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ status: 'paid', subtotal: '9999', tax_amount: '2100', total: '12099' });
+    });
   });
 
   describe('POST /api/billing/webhooks/mollie', () => {

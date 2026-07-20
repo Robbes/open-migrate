@@ -22,7 +22,7 @@
  * self-host edition (hard rule 5 — self-host loads no billing code).
  */
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, notInArray } from 'drizzle-orm';
 import * as schema from '@openmig/ledger';
 import { getUsageMetricsForPeriod, type PgDatabase } from '@openmig/ledger';
 import type { TenantId } from '@openmig/shared';
@@ -114,6 +114,11 @@ export async function generateInvoiceForPeriod(
   const metadata = { costByDriver, generatedAt: new Date().toISOString() };
 
   // Upsert the draft invoice — one per (tenant, period) via the unique index.
+  // The `setWhere` guard makes the "never overwrite a paid/void invoice" rule
+  // ATOMIC: if a payment webhook flips the invoice to paid/void between the
+  // SELECT above and this statement, the ON CONFLICT UPDATE is skipped by the
+  // database (not just by the earlier read), so a paid invoice's amounts can
+  // never be rewritten.
   const [invoice] = await db
     .insert(schema.invoice)
     .values({
@@ -138,11 +143,35 @@ export async function generateInvoiceForPeriod(
         metadata,
         updatedAt: new Date(),
       },
+      setWhere: notInArray(schema.invoice.status, ['paid', 'void']),
     })
     .returning({ id: schema.invoice.id, status: schema.invoice.status });
 
   if (!invoice) {
-    throw new Error('invoice upsert returned no row');
+    // The row became paid/void after the SELECT above, so `setWhere` skipped the
+    // update. Re-read and return it untouched (the payment state wins).
+    const [current] = await db
+      .select({ id: schema.invoice.id, status: schema.invoice.status })
+      .from(schema.invoice)
+      .where(
+        and(
+          eq(schema.invoice.tenantId, tenantId),
+          eq(schema.invoice.periodStart, periodStart),
+        ),
+      );
+    if (!current) {
+      throw new Error('invoice upsert returned no row');
+    }
+    return {
+      id: current.id,
+      status: current.status,
+      subtotal,
+      taxAmount,
+      total,
+      currency: 'EUR',
+      costByDriver,
+      locked: true,
+    };
   }
 
   return {

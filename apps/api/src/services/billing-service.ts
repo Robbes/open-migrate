@@ -1,8 +1,10 @@
 /**
  * Billing Service
- * 
- * Handles usage metering, cost calculation, and billing operations.
- * Integrates with Mollie for payment processing.
+ *
+ * Pricing types and the single cost-calculation function (ADR-0014 cost-recovery
+ * pricing, integer cents). The live billing data path is Drizzle-backed
+ * (routes/billing + services/invoice-generation); the previous in-memory
+ * `billingApi` mock was removed once those moved to real persistence.
  */
 
 import { z } from 'zod';
@@ -109,7 +111,8 @@ export const PaymentMethodSchema = z.object({
 
 export type PaymentMethodType = z.infer<typeof PaymentMethodSchema>;
 
-// Cost calculation
+// Cost calculation — integer cents throughout (each component is rounded, so no
+// floating-point drift reaches the invoice).
 export function calculateCost(metrics: Partial<UsageMetrics>, pricing: PricingConfig = defaultPricing): {
   storage: number;
   egress: number;
@@ -121,7 +124,7 @@ export function calculateCost(metrics: Partial<UsageMetrics>, pricing: PricingCo
   const storageCost = Math.round((metrics.storageUsedGB ?? 0) * pricing.storagePricePerGB);
   const egressCost = Math.round((metrics.egressGB ?? 0) * pricing.egressPricePerGB);
   const computeCost = Math.round((metrics.computeHours ?? 0) * pricing.computePricePerHour);
-  
+
   const subtotal = pricing.baseFee + storageCost + egressCost + computeCost;
   const tax = Math.round(subtotal * 0.21); // 21% VAT
   const total = subtotal + tax;
@@ -135,129 +138,3 @@ export function calculateCost(metrics: Partial<UsageMetrics>, pricing: PricingCo
     total,
   };
 }
-
-// Mock database (replace with actual database calls)
-const mockUsageMetrics: Map<string, UsageMetrics> = new Map();
-const mockInvoices: Map<string, Invoice> = new Map();
-const mockPaymentMethods: Map<string, PaymentMethod> = new Map();
-
-export const billingApi = {
-  // Usage Metrics
-  recordUsage: (metrics: Omit<UsageMetrics, 'id' | 'lastUpdated'>) => {
-    const id = `usage-${Date.now()}`;
-    const newMetrics: UsageMetrics = {
-      ...metrics,
-      id,
-      lastUpdated: new Date().toISOString(),
-    };
-    mockUsageMetrics.set(id, newMetrics);
-    return newMetrics;
-  },
-
-  getUsage: (tenantId: string, period: string) => {
-    const key = `${tenantId}-${period}`;
-    return mockUsageMetrics.get(key);
-  },
-
-  listUsage: (tenantId: string) => {
-    return Array.from(mockUsageMetrics.values()).filter(
-      (m) => m.tenantId === tenantId
-    );
-  },
-
-  // Invoices
-  createInvoice: (tenantId: string, period: string, metrics: UsageMetrics) => {
-    const cost = calculateCost(metrics);
-    const invoice: Invoice = {
-      id: `inv-${Date.now()}`,
-      tenantId,
-      period,
-      status: 'draft',
-      ...cost,
-      currency: 'EUR',
-      createdAt: new Date().toISOString(),
-      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-    };
-    mockInvoices.set(invoice.id, invoice);
-    return invoice;
-  },
-
-  getInvoice: (invoiceId: string) => {
-    return mockInvoices.get(invoiceId);
-  },
-
-  listInvoices: (tenantId: string) => {
-    return Array.from(mockInvoices.values())
-      .filter((i) => i.tenantId === tenantId)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  },
-
-  updateInvoiceStatus: (invoiceId: string, status: Invoice['status']) => {
-    const invoice = mockInvoices.get(invoiceId);
-    if (invoice) {
-      invoice.status = status;
-      if (status === 'paid') {
-        invoice.paidAt = new Date().toISOString();
-      }
-      return invoice;
-    }
-    return null;
-  },
-
-  // Payment Methods
-  createPaymentMethod: (tenantId: string, data: Partial<PaymentMethod>) => {
-    const id = `pm-${Date.now()}`;
-    const paymentMethod: PaymentMethod = {
-      id,
-      tenantId,
-      type: data.type || 'card',
-      isDefault: false,
-      createdAt: new Date().toISOString(),
-      ...data,
-    };
-    mockPaymentMethods.set(id, paymentMethod);
-    return paymentMethod;
-  },
-
-  getPaymentMethods: (tenantId: string) => {
-    return Array.from(mockPaymentMethods.values()).filter(
-      (pm) => pm.tenantId === tenantId
-    );
-  },
-
-  setDefaultPaymentMethod: (tenantId: string, paymentMethodId: string) => {
-    // Set all to non-default
-    mockPaymentMethods.forEach((pm) => {
-      if (pm.tenantId === tenantId) {
-        pm.isDefault = false;
-      }
-    });
-    
-    // Set requested as default
-    const pm = mockPaymentMethods.get(paymentMethodId);
-    if (pm && pm.tenantId === tenantId) {
-      pm.isDefault = true;
-      return pm;
-    }
-    return null;
-  },
-
-  // Cost estimation
-  estimateCost: (
-    tenantId: string,
-    metrics: Partial<UsageMetrics>
-  ) => {
-    const defaultMetrics: UsageMetrics = {
-      id: 'estimate',
-      tenantId,
-      period: new Date().toISOString().slice(0, 7),
-      storageUsedGB: metrics.storageUsedGB || 0,
-      egressGB: metrics.egressGB || 0,
-      computeHours: metrics.computeHours || 0,
-      syncCount: metrics.syncCount || 0,
-      lastUpdated: new Date().toISOString(),
-    };
-    
-    return calculateCost(defaultMetrics);
-  },
-};
