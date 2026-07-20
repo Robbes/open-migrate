@@ -12,12 +12,14 @@
  */
 
 import { z } from 'zod';
-import { asTenantId, asMappingId } from '@openmig/shared';
+import { asTenantId, asMappingId, type TargetReindexer } from '@openmig/shared';
 import { schemaTask } from '@trigger.dev/sdk/v3';
-import { CutoverStore } from '@openmig/ledger';
+import { CutoverStore, createLedgerVerificationReader } from '@openmig/ledger';
+import { runShadowPass, runVerification, createRealVerificationDeps } from '@openmig/core';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import * as schemaPg from '@openmig/ledger/schema-pg';
+import { buildDepsFromMapping } from '../build-deps-from-mapping';
 
 // Job input schema
 const CutoverJobSchema = z.object({
@@ -71,35 +73,61 @@ export const runCutover = schemaTask({
         startedBy: 'trigger-job',
       });
 
-      // Step 1: Final delta sync (if not skipped)
+      // Step 1: Final delta sync (if not skipped) — a real mail pass so the
+      // target is current before we verify. Reuses the proven runShadowPass path.
       if (!options.skipFinalSync) {
         console.log('Running final delta sync');
         await ctxTyped.logger.log('Running final delta sync...');
-        // TODO: Implement delta sync
-        // await executeDeltaSync({ tenantId, mappingId });
+        const deps = await buildDepsFromMapping(pool, tenantId, mappingId);
+        const delta = await runShadowPass(deps);
+        await ctxTyped.logger.log(`Final delta sync: ${delta.created} created, ${delta.skipped} skipped`);
       }
 
-      // Step 2: Verification (if not skipped)
+      // Step 2: Verification (if not skipped) — REAL verification against the
+      // ledger (source counts) and the target reindexer (target counts). A FAIL
+      // aborts the cutover; we never fabricate a pass (hard rule 9).
       if (!options.skipVerification) {
         console.log('Running verification checks');
         await ctxTyped.logger.log('Running verification checks...');
-        
-        // Placeholder for real verification - would need actual ledger and target access
-        // TODO: Implement real verification with createRealVerificationDeps()
-        // Note: verificationConfig structure defined for future use
-        const _verificationConfig = {
-          checksumSamplePercentage: 5,
-          minSampleSize: 10,
-          maxSampleSize: 1000,
-          requiredMatchPercentage: 0.99,
-          maxDiscrepancyPercentage: 0.01,
-          verifyMail: true,
-          verifyCalendar: true,
-          verifyContacts: true,
-          verifyFiles: true,
-        };
-        
-        await ctxTyped.logger.log('Verification checks passed');
+
+        const deps = await buildDepsFromMapping(pool, tenantId, mappingId);
+        const verificationReader = createLedgerVerificationReader({ connectionString: dbUrl });
+        const verification = await runVerification(
+          createRealVerificationDeps({
+            tenantId: asTenantId(tenantId),
+            mappingId: asMappingId(mappingId),
+            config: {
+              checksumSamplePercentage: 5,
+              minSampleSize: 10,
+              maxSampleSize: 1000,
+              requiredMatchPercentage: 0.99,
+              maxDiscrepancyPercentage: 0.01,
+              verifyMail: true,
+              verifyCalendar: true,
+              verifyContacts: true,
+              verifyFiles: true,
+            },
+            ledger: deps.ledger,
+            verificationReader,
+            // Concrete JMAP / IMAP-DAV targets implement TargetReindexer (listEntries).
+            targetReindexer: deps.target as unknown as TargetReindexer,
+          }),
+        );
+
+        await ctxTyped.logger.log(
+          `Verification ${verification.overallStatus} (score ${verification.score.toFixed(3)}, ` +
+            `${verification.totalItemsSource} source / ${verification.totalItemsTarget} target, ` +
+            `${verification.totalDiscrepancies} discrepancies)`,
+        );
+
+        if (verification.overallStatus === 'FAIL' || !verification.canProceedToCutover) {
+          // Do NOT proceed to COMPLETED — surface the failure verbatim.
+          throw new Error(
+            `Cutover verification failed: status=${verification.overallStatus}, ` +
+              `score=${verification.score.toFixed(3)}, discrepancies=${verification.totalDiscrepancies}. ` +
+              verification.recommendations.join('; '),
+          );
+        }
       }
 
       // Step 3: Update cutover state to READY_FOR_CUTOVER
