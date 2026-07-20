@@ -20,8 +20,8 @@
   },
   "dependencies": {
     "@azure/msal-node": "^5.4.0",
-    "@trigger.dev/core": "^4.5.1",
-    "@trigger.dev/sdk": "^4.5.1",
+    "@trigger.dev/core": "4.5.4",
+    "@trigger.dev/sdk": "4.5.4",
     "croner": "^10.0.1",
     "jmap-jam": "^0.13.2"
   },

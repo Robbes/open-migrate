@@ -11,7 +11,7 @@
  */
 
 import { z } from 'zod';
-import { schemaTask } from '@trigger.dev/sdk/v3';
+import { schemaTask } from '@trigger.dev/sdk';
 import { CutoverStore } from '@openmig/ledger';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';

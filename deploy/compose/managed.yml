@@ -18,7 +18,7 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
       - ./packages/ledger/migrations:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-openmigrate}"]
@@ -37,7 +37,7 @@ services:
       POSTGRES_PASSWORD: trigger_password
       POSTGRES_DB: triggerdb
     volumes:
-      - trigger_db_data:/var/lib/postgresql/data
+      - trigger_db_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U trigger"]
       interval: 10s
@@ -61,52 +61,64 @@ services:
       - open-migrate-network
 
   trigger-api:
-    # NOTE: pin to a self-host release matching @trigger.dev/sdk (currently ^4.x in
-    # apps/worker) before any real deployment — `latest` is a placeholder (§22.1
-    # wants digest-pinned images). KNOWN GAP: the T3 jobs still import
-    # `@trigger.dev/sdk/v3` while the dep is v4; reconcile before wiring live tasks.
-    image: ghcr.io/triggerdotdev/trigger.dev:latest
+    # Pinned to v4.5.4 to match @trigger.dev/sdk in apps/worker (ADR-0004, §22.1)
+    image: ghcr.io/triggerdotdev/trigger.dev:v4.5.4
     container_name: trigger-api
+    user: root
+    command: sh -c "chown -R node:node /home/node/shared && exec ./scripts/entrypoint.sh"
     environment:
+      # Database
       DATABASE_URL: postgresql://trigger:trigger_password@trigger-db:5432/triggerdb
-      REDIS_URL: redis://trigger-redis:6379
-      ENCRYPTION_KEY: ${TRIGGER_ENCRYPTION_KEY:-dev-key-change-in-production}
-      LOGIN_SECRET: ${TRIGGER_LOGIN_SECRET:-dev-login-secret-change-in-production}
+      DIRECT_URL: postgresql://trigger:trigger_password@trigger-db:5432/triggerdb
+      # Auth secrets
+      SESSION_SECRET: ${TRIGGER_SESSION_SECRET:-0123456789abcdef0123456789abcdef}
+      MAGIC_LINK_SECRET: ${TRIGGER_MAGIC_LINK_SECRET:-fedcba9876543210fedcba9876543210}
+      ENCRYPTION_KEY: ${TRIGGER_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef}
+      LOGIN_SECRET: ${TRIGGER_LOGIN_SECRET:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1}
+      MANAGED_WORKER_SECRET: ${TRIGGER_MANAGED_WORKER_SECRET:-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2}
+      # Origins
+      APP_ORIGIN: ${TRIGGER_APP_ORIGIN:-http://localhost:3090}
+      LOGIN_ORIGIN: ${TRIGGER_LOGIN_ORIGIN:-http://localhost:3090}
+      API_ORIGIN: ${TRIGGER_API_ORIGIN:-http://localhost:3090}
+      # Redis
+      REDIS_HOST: trigger-redis
+      REDIS_PORT: 6379
+      REDIS_TLS_DISABLED: "true"
+      # Registry (for task deployments)
+      DEPLOY_REGISTRY_HOST: localhost:5000
+      DEPLOY_REGISTRY_NAMESPACE: trigger
+      # Object storage (for large payloads)
+      OBJECT_STORE_BASE_URL: http://minio:9000
+      OBJECT_STORE_ACCESS_KEY_ID: admin
+      OBJECT_STORE_SECRET_ACCESS_KEY: very-safe-password
+      # ClickHouse (for task events) - disabled, using Postgres instead
+      CLICKHOUSE_URL: ""
+      EVENT_REPOSITORY_DEFAULT_STORE: postgres
+      # Realtime streams - disabled, using v1 (Redis) instead
+      REALTIME_STREAMS_DEFAULT_VERSION: v1
+      # Bootstrap
+      TRIGGER_BOOTSTRAP_ENABLED: "1"
+      TRIGGER_BOOTSTRAP_WORKER_GROUP_NAME: bootstrap
+      TRIGGER_BOOTSTRAP_WORKER_TOKEN_PATH: /home/node/shared/worker_token
+      # Misc
       PORT: 3000
+      APP_LOG_LEVEL: info
     ports:
       - "${TRIGGER_PORT:-3090}:3000"
+    volumes:
+      - trigger_shared:/home/node/shared
     depends_on:
       trigger-db:
         condition: service_healthy
       trigger-redis:
         condition: service_healthy
-    networks:
-      - open-migrate-network
-
-  trigger-worker:
-    image: ghcr.io/triggerdotdev/trigger.dev:latest
-    container_name: trigger-worker
-    command: ["node", "packages/worker/dist/cli.js", "worker:start"]
-    environment:
-      DATABASE_URL: postgresql://trigger:trigger_password@trigger-db:5432/triggerdb
-      REDIS_URL: redis://trigger-redis:6379
-      ENCRYPTION_KEY: ${TRIGGER_ENCRYPTION_KEY:-dev-key-change-in-production}
-      LOGIN_SECRET: ${TRIGGER_LOGIN_SECRET:-dev-login-secret-change-in-production}
-      PORT: 3001
-    depends_on:
-      trigger-db:
-        condition: service_healthy
-      trigger-redis:
-        condition: service_healthy
-      trigger-api:
-        condition: service_started
     networks:
       - open-migrate-network
 
   # Open Migration API
   api:
     build:
-      context: .
+      context: ../..
       dockerfile: apps/api/Dockerfile
     container_name: open-migrate-api
     environment:
@@ -141,7 +153,7 @@ services:
   # Open Migration Worker
   worker:
     build:
-      context: .
+      context: ../..
       dockerfile: apps/worker/Dockerfile
     container_name: open-migrate-worker
     environment:
@@ -159,7 +171,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      trigger-worker:
+      trigger-api:
         condition: service_started
     networks:
       - open-migrate-network
@@ -167,12 +179,12 @@ services:
   # Web Application
   web:
     build:
-      context: .
+      context: ../..
       dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api}
+        VITE_AUTH_URL: ${VITE_AUTH_URL:-/auth}
     container_name: open-migrate-web
-    environment:
-      VITE_API_URL: ${VITE_API_URL:-http://localhost:3123/api}
-      VITE_AUTH_URL: ${VITE_AUTH_URL:-http://localhost:3123/auth}
     ports:
       - "${WEB_PORT:-3123}:80"
     depends_on:
@@ -188,3 +200,4 @@ volumes:
   postgres_data:
   trigger_db_data:
   redis_data:
+  trigger_shared:
