@@ -15,8 +15,6 @@ import {
   createThrottleLimiterFromMapping,
   type TenantId,
   type MappingId,
-  type Ledger,
-  type CursorStore,
   type SourceConfig,
   type TargetConfig,
 } from '@openmig/shared';
@@ -27,6 +25,9 @@ import {
   type ImapDavTargetConfig, 
 } from '@openmig/connectors';
 import { JmapTargetWriter } from '@openmig/connectors';
+import { CalDAVSource, CarddavSource, WebdavFileSource } from '@openmig/connectors';
+import { CalDAVTargetWriter, CardDAVTargetWriter, WebDAVTargetWriter } from '@openmig/engines';
+import type { CalendarSyncDeps, ContactSyncDeps, FileSyncDeps } from '@openmig/core';
 import { PgLedger, PgCursorStore, createPgDb, withTenant } from '@openmig/ledger';
 import { SecretStore } from '@openmig/core/secret-store';
 import { mailboxMapping } from '@openmig/ledger';
@@ -198,36 +199,110 @@ export async function buildDepsFromMapping(
   };
 }
 
+/** Build a DAV endpoint URL from a stored connection config (url/baseUrl/host+port). */
+function davUrl(config: Record<string, unknown>): string {
+  if (typeof config.url === 'string') return config.url;
+  if (typeof config.baseUrl === 'string') return config.baseUrl;
+  const host = config.host;
+  if (typeof host !== 'string' || !host) {
+    throw new Error('DAV connection config is missing url/baseUrl/host');
+  }
+  const scheme = config.useSsl === false ? 'http' : 'https';
+  const port = typeof config.port === 'number' ? `:${config.port}` : '';
+  return `${scheme}://${host}${port}/`;
+}
+
+/** Load source + target connection config/credentials for a tenant (RLS-enforced). */
+async function loadDomainConnections(
+  pool: Pool,
+  tenantId: string,
+): Promise<{
+  source: { config: Record<string, unknown>; creds: Record<string, string> };
+  target: { config: Record<string, unknown>; creds: Record<string, string> };
+}> {
+  return withTenant(pool, tenantId, async (txDb) => {
+    const load = async (role: 'source' | 'target') => {
+      const rows = await txDb
+        .select()
+        .from(connectionTable)
+        .where(and(eq(connectionTable.tenantId, tenantId), eq(connectionTable.role, role)));
+      const conn = rows[0];
+      if (!conn) {
+        throw new Error(`${role} connection not found for tenant: ${tenantId}`);
+      }
+      const config = (conn.config ?? {}) as Record<string, unknown>;
+      let creds: Record<string, string>;
+      if (conn.secretRef) {
+        creds = SecretStore.decryptCredentials(conn.secretRef);
+      } else if (config.credentials && typeof config.credentials === 'object') {
+        creds = config.credentials as Record<string, string>;
+      } else {
+        throw new Error(`${role} connection has no credentials`);
+      }
+      return { config, creds };
+    };
+    return { source: await load('source'), target: await load('target') };
+  });
+}
+
 /**
- * Build domain-specific dependencies from database-stored connections.
- * For now, delegates to buildDepsFromMapping which handles mail sync.
+ * Build domain-specific sync dependencies from database-stored connections.
+ *
+ * Mail delegates to buildDepsFromMapping (IMAP/JMAP). Calendar/contact/file build
+ * the native DAV source connectors + engine target writers from the stored
+ * connection config + decrypted credentials — credentials are passed directly
+ * (never via env) so the managed path is per-tenant safe. RLS-enforced.
  */
+export function buildDomainDepsFromMapping(pool: Pool, tenantId: string, mappingId: string, domain: 'mail'): Promise<ReconcileDeps>;
+export function buildDomainDepsFromMapping(pool: Pool, tenantId: string, mappingId: string, domain: 'calendar'): Promise<CalendarSyncDeps>;
+export function buildDomainDepsFromMapping(pool: Pool, tenantId: string, mappingId: string, domain: 'contact'): Promise<ContactSyncDeps>;
+export function buildDomainDepsFromMapping(pool: Pool, tenantId: string, mappingId: string, domain: 'file'): Promise<FileSyncDeps>;
 export async function buildDomainDepsFromMapping(
   pool: Pool,
   tenantId: string,
   mappingId: string,
-  _domain: 'mail' | 'calendar' | 'contacts' | 'files'
-): Promise<{
-  tenantId: TenantId;
-  mappingId: MappingId;
-  source: SourceConnector;
-  target: TargetWriter;
-  ledger: Ledger;
-  cursors: CursorStore;
-  concurrency: number;
-}> {
-  // Delegate to buildDepsFromMapping which handles mail sync
-  const deps = await buildDepsFromMapping(pool, tenantId, mappingId);
-  
-  return {
-    tenantId: deps.tenantId,
-    mappingId: deps.mappingId,
-    source: deps.source,
-    target: deps.target,
-    ledger: deps.ledger,
-    cursors: deps.cursors!,
-    concurrency: deps.concurrency!,
-  };
+  domain: 'mail' | 'calendar' | 'contact' | 'file',
+): Promise<ReconcileDeps | CalendarSyncDeps | ContactSyncDeps | FileSyncDeps> {
+  if (domain === 'mail') {
+    return buildDepsFromMapping(pool, tenantId, mappingId);
+  }
+
+  const databaseUrl = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error('DATABASE_URL or TEST_DATABASE_URL must be set');
+  }
+  const db = createPgDb(databaseUrl);
+  const ledger = new PgLedger(db);
+  const cursors = new PgCursorStore(db);
+  const tId = tenantId as TenantId;
+  const mId = mappingId as MappingId;
+
+  const { source: src, target: tgt } = await loadDomainConnections(pool, tenantId);
+  const common = { tenantId: tId, mappingId: mId, ledger, cursors };
+
+  if (domain === 'calendar') {
+    const source = new CalDAVSource({ url: davUrl(src.config), username: src.creds.username ?? '', password: src.creds.password });
+    const target = new CalDAVTargetWriter(
+      { url: davUrl(tgt.config), username: tgt.creds.username ?? '', password: tgt.creds.password ?? '' },
+      { ledger, tenantId: tId, mappingId: mId },
+    );
+    return { ...common, source, target } satisfies CalendarSyncDeps;
+  }
+  if (domain === 'contact') {
+    const source = new CarddavSource({ url: davUrl(src.config), username: src.creds.username ?? '', password: src.creds.password });
+    const target = new CardDAVTargetWriter(
+      { url: davUrl(tgt.config), username: tgt.creds.username ?? '', password: tgt.creds.password ?? '' },
+      { ledger, tenantId: tId, mappingId: mId },
+    );
+    return { ...common, source, target } satisfies ContactSyncDeps;
+  }
+  // file
+  const source = new WebdavFileSource({ url: davUrl(src.config), username: src.creds.username ?? '', password: src.creds.password });
+  const target = new WebDAVTargetWriter(
+    { url: davUrl(tgt.config), username: tgt.creds.username ?? '', password: tgt.creds.password ?? '' },
+    { ledger, tenantId: tId, mappingId: mId },
+  );
+  return { ...common, source, target } satisfies FileSyncDeps;
 }
 
 /**

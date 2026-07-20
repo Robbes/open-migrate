@@ -110,6 +110,9 @@ importers:
       '@mollie/api-client':
         specifier: ^4.6.0
         version: 4.6.0(encoding@0.1.13)
+      '@openmig/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@openmig/ledger':
         specifier: workspace:*
         version: link:../../packages/ledger
@@ -264,6 +267,9 @@ importers:
       '@openmig/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@openmig/engines':
+        specifier: workspace:*
+        version: link:../../packages/engines
       '@openmig/ledger':
         specifier: workspace:*
         version: link:../../packages/ledger

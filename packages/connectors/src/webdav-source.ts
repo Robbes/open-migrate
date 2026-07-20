@@ -581,9 +581,9 @@ export class WebdavFileSource implements FileSource {
    * Password is read from the environment variable specified in config.
    */
   private getAuthorizationHeader(): string {
-    const password = process.env[this.config.passwordEnv];
+    const password = this.config.password ?? (this.config.passwordEnv ? process.env[this.config.passwordEnv] : undefined);
     if (!password) {
-      throw new Error(`Password environment variable ${this.config.passwordEnv} not set`);
+      throw new Error(`No password configured (set config.password or config.passwordEnv)`);
     }
     const credentials = Buffer.from(`${this.config.username}:${password}`).toString('base64');
     return `Basic ${credentials}`;

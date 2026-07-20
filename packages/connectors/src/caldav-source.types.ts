@@ -12,8 +12,10 @@ export interface CalDAVSourceConfig {
   url: string;
   /** Authentication username */
   username: string;
-  /** Environment variable name containing the password or token */
-  passwordEnv: string;
+  /** Environment variable name containing the password or token (self-host/CLI path) */
+  passwordEnv?: string;
+  /** Direct password/token (managed path — credentials decrypted from the DB at runtime). */
+  password?: string;
   /** Optional calendar home set path (if known, otherwise discovered via PROPFIND) */
   calendarHomeSet?: string;
 }

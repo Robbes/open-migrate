@@ -14,7 +14,9 @@ export interface CardDAVSourceConfig {
   /** Authentication username */
   username: string;
   /** Environment variable name containing the password or token */
-  passwordEnv: string;
+  passwordEnv?: string;
+  /** Direct password/token (managed path — credentials decrypted from the DB at runtime). */
+  password?: string;
   /** Optional address book home set path (if known, otherwise discovered via PROPFIND) */
   addressBookHomeSet?: string;
 }

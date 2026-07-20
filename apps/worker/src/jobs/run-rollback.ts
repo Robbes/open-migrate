@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { schemaTask } from '@trigger.dev/sdk';
 import { CutoverStore } from '@openmig/ledger';
 import { drizzle } from 'drizzle-orm/node-postgres';
+import { and, eq } from 'drizzle-orm';
 import { Pool } from 'pg';
 import * as schemaPg from '@openmig/ledger/schema-pg';
 import { asTenantId, asMappingId } from '@openmig/shared';
@@ -69,23 +70,28 @@ export const runRollback = schemaTask({
       await ctxTyped.logger.log(`Rolling back cutover from state: ${state.currentState || state.state}`);
       await ctxTyped.logger.log(`Reason: ${reason}`);
 
-      // Step 1: Restore DNS records (if enabled)
+      // Step 1: DNS is DEFERRED by owner decision (verify-only DNS, 2026-07-16 —
+      // deSEC provider writes not implemented). Do not claim a restore that did
+      // not happen; the operator reverts the MX record manually.
       if (options.restoreDns && options.dnsDomain) {
-        console.log('Restoring DNS records');
-        await ctxTyped.logger.log(`Restoring DNS records for ${options.dnsDomain}...`);
-        // TODO: Implement DNS rollback using DesecProvider
-        // const dnsProvider = new DesecProvider({ token: process.env.DESEC_TOKEN! });
-        // const previousRecords = await dnsProvider.getCurrentState(options.dnsDomain);
-        // await dnsProvider.restoreState(options.dnsDomain, previousRecords);
-        await ctxTyped.logger.log('DNS records restored');
+        await ctxTyped.logger.log(
+          `DNS restore for ${options.dnsDomain} is DEFERRED (verify-only DNS) — revert the MX record manually.`,
+        );
       }
 
-      // Step 2: Restore original data source connections
-      console.log('Restoring original data source connections');
-      await ctxTyped.logger.log('Restoring original data source connections...');
-      // TODO: Implement data source restoration
-      // await restoreDataSources({ tenantId, mappingId });
-      await ctxTyped.logger.log('Data source connections restored');
+      // Step 2: Reactivate the mapping so shadow sync resumes with the original
+      // source authoritative again (the real, in-scope rollback action).
+      console.log('Reactivating mapping (status → active)');
+      await ctxTyped.logger.log('Reactivating mapping so shadow sync resumes...');
+      await db
+        .update(schemaPg.mailboxMapping)
+        .set({ status: 'active', updatedAt: new Date() })
+        .where(
+          and(
+            eq(schemaPg.mailboxMapping.id, mappingId),
+            eq(schemaPg.mailboxMapping.tenantId, tenantId),
+          ),
+        );
 
       // Step 3: Update cutover status to ROLLED_BACK
       console.log('Marking cutover as rolled back');
@@ -96,13 +102,9 @@ export const runRollback = schemaTask({
       });
       await ctxTyped.logger.log('Cutover marked as rolled back');
 
-      // Step 4: Notify users (if enabled)
+      // Step 4: User notification is not yet implemented — say so, don't fake it.
       if (options.notifyUsers) {
-        console.log('Notifying users about rollback');
-        await ctxTyped.logger.log('Notifying users about rollback...');
-        // TODO: Implement user notification
-        // await notifyUsersAboutRollback({ tenantId, mappingId, reason });
-        await ctxTyped.logger.log('User notifications sent');
+        await ctxTyped.logger.log('User notification requested but not yet implemented — skipping.');
       }
 
       // Step 5: Cancel any pending tasks
