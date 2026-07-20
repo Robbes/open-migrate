@@ -33,18 +33,18 @@ interface WebhookPayload {
 }
 
 /**
- * Verify webhook signature
+ * Verify a webhook signature in constant time. Returns false (never throws) for
+ * a malformed/wrong-length signature, so a garbage header yields a clean 401
+ * rather than a 500. Exported for unit testing.
  */
-function verifySignature(payload: string, signature: string, secret: string): boolean {
-  const expectedSignature = crypto
-    .createHmac('sha256', secret)
-    .update(payload)
-    .digest('hex');
-  
-  return crypto.timingSafeEqual(
-    Buffer.from(signature, 'hex'),
-    Buffer.from(expectedSignature, 'hex')
-  );
+export function verifySignature(payload: string, signature: string, secret: string): boolean {
+  const expected = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+  const sigBuf = Buffer.from(signature, 'hex');
+  const expBuf = Buffer.from(expected, 'hex');
+  // timingSafeEqual throws on differing lengths — guard first (an attacker
+  // controls the signature length).
+  if (sigBuf.length !== expBuf.length) return false;
+  return crypto.timingSafeEqual(sigBuf, expBuf);
 }
 
 /**
@@ -55,13 +55,15 @@ function verifySignature(payload: string, signature: string, secret: string): bo
 router.post(
   '/trigger',
   async (req: Request, res: Response) => {
-    const signature = req.headers['x-trigger-signature'] as string;
+    const signature = req.headers['x-trigger-signature'];
     const secret = process.env.TRIGGER_WEBHOOK_SECRET;
-    
-    // Verify signature if secret is configured
-    if (secret && signature) {
+
+    // When a secret is configured, EVERY request must carry a valid signature —
+    // a missing header must NOT bypass verification (that would let anyone forge
+    // a webhook). Without a secret configured we can't verify, so we skip.
+    if (secret) {
       const payload = JSON.stringify(req.body);
-      if (!verifySignature(payload, signature, secret)) {
+      if (typeof signature !== 'string' || !verifySignature(payload, signature, secret)) {
         return res.status(401).json({ error: 'Invalid signature' });
       }
     }
