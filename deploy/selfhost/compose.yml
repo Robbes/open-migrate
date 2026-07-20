@@ -20,7 +20,7 @@ name: open-migrate-selfhost
 
 services:
   postgres:
-    image: postgres:18-alpine
+    image: postgres@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
     container_name: open-migrate-selfhost-db
     restart: unless-stopped
     environment:
@@ -30,7 +30,8 @@ services:
     volumes:
       # Local volume ONLY — never a network filesystem (SMB/NFS) for the DB
       # (corruption risk). See docs/selfhost-quickstart.md.
-      - pgdata:/var/lib/postgresql/data
+      # Postgres 18+ expects data at /var/lib/postgresql (not /var/lib/postgresql/data)
+      - pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-openmigrate} -d ${POSTGRES_DB:-openmigrate}"]
       interval: 10s
@@ -51,29 +52,33 @@ services:
       # live here (600 perms — see the quickstart).
       - .env
     environment:
-      # Single-tenant: the app connects as the owner (RLS unused here). The
-      # bundled Postgres is only reachable on the internal compose network.
+      # Single-tenant: the app connects as the owner (RLS unused here).
       DATABASE_URL: postgresql://${POSTGRES_USER:-openmigrate}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-openmigrate}
       CONFIG_DIR: /data/config
       HOST: 0.0.0.0
-      PORT: 8080
+      PORT: ${SELFHOST_PORT:-8081}
     ports:
       # Status/health endpoint. Bind to localhost by default so the appliance is
       # not exposed on the LAN; override SELFHOST_BIND to publish wider.
-      - "${SELFHOST_BIND:-127.0.0.1}:${SELFHOST_PORT:-8080}:8080"
+      - "${SELFHOST_BIND:-127.0.0.1}:${SELFHOST_PORT:-8081}:${SELFHOST_PORT:-8081}"
     volumes:
-      # Mapping configs (read-only) + a state volume for anything the app writes.
-      - ./config:/data/config:ro
+      # State volume for anything the app writes (cursors, logs, etc.).
+      # Config is baked into the image; override by removing this line and
+      # mounting a custom config volume if needed.
       - appdata:/data/state
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:${SELFHOST_PORT:-8081}/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 30s
       timeout: 5s
       start_period: 40s
       retries: 3
+    dns:
+      - 127.0.0.11
+      - 8.8.8.8
+      - 1.1.1.1
     networks:
       - selfhost
 

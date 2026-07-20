@@ -11,9 +11,17 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseMappingConfigJson, type MappingConfig } from '@openmig/shared';
 
+// Deterministic UUID generation for mailbox_mapping IDs (matches selfhost/index.ts)
+function uuidFromString(seed: string): string {
+  const hash = Buffer.from(seed).toString('hex').slice(0, 32);
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
+}
+
 export interface LoadedMapping {
   readonly path: string;
   readonly config: MappingConfig;
+  /** The database mailbox_mapping ID (deterministically derived from tenantId + mappingId). */
+  readonly mailboxMappingId: string;
 }
 
 /**
@@ -45,7 +53,9 @@ export function loadConfigDir(dir: string): LoadedMapping[] {
       );
     }
     seen.set(config.mappingId, path);
-    loaded.push({ path, config });
+    // Compute the mailbox_mapping ID that will be used in the database
+    const mailboxMappingId = uuidFromString(`${config.tenantId}:mapping:${config.mappingId}`);
+    loaded.push({ path, config, mailboxMappingId });
   }
   return loaded;
 }
