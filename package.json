@@ -12,7 +12,7 @@
     "format": "prettier --check .",
     "format:fix": "prettier --write .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --project unit",
+    "test": "vitest run --project unit --project unit-browser",
     "test:integration": "vitest run --project integration --no-file-parallelism",
     "test:e2e": "vitest run --project e2e",
     "db:generate": "drizzle-kit generate",
