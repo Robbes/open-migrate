@@ -324,6 +324,9 @@ importers:
       imap-simple:
         specifier: ^5.1.0
         version: 5.1.0
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@26.1.0)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.23.0)(yaml@2.9.0)
 
   packages/connectors:
     dependencies:
