@@ -118,6 +118,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-openmigrate}:${POSTGRES_PASSWORD:-openmigrate_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
       APP_DATABASE_URL: postgresql://${APP_DB_USER:-app_user}:${APP_DB_PASSWORD:-app_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
       JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
+      # Required to encrypt/decrypt connection credentials (create-mapping, worker deps).
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:?set a 32-byte key in .env}
       JWT_EXPIRY: ${JWT_EXPIRY:-24h}
       TRIGGER_API_URL: http://trigger-api:3000
       TRIGGER_API_KEY: ${TRIGGER_API_KEY:-dev-api-key}
@@ -148,6 +150,8 @@ services:
       # RLS-enforced tenant data path.
       DATABASE_URL: postgresql://${POSTGRES_USER:-openmigrate}:${POSTGRES_PASSWORD:-openmigrate_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
       APP_DATABASE_URL: postgresql://${APP_DB_USER:-app_user}:${APP_DB_PASSWORD:-app_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
+      # Same key as the API — the worker decrypts connection credentials.
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:?set a 32-byte key in .env}
       TRIGGER_API_URL: http://trigger-api:3000
       TRIGGER_API_KEY: ${TRIGGER_API_KEY:-dev-api-key}
       IMAP_TIMEOUT: ${IMAP_TIMEOUT:-300}
