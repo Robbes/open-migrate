@@ -1,0 +1,20 @@
+{
+  "_note": "Self-host mapping example (workplan 0010). Copy to a real name ending in .json in this directory (e.g. mapping.json) and edit. Files ending in .example are NOT loaded. Every *.json here is scheduled on startup. Credentials are referenced by ENV VAR NAME (tokenFromEnv / passwordFromEnv), never inline — set those variables in deploy/selfhost/.env.",
+  "tenantId": "00000000-0000-4000-8000-000000000001",
+  "mappingId": "11111111-1111-4111-8111-111111111111",
+  "schedule": { "cron": "*/15 * * * *" },
+  "source": {
+    "type": "imap-oauth2",
+    "host": "outlook.office365.com",
+    "port": 993,
+    "user": "you@example.com",
+    "auth": { "kind": "xoauth2", "tokenFromEnv": "SOURCE_OAUTH_TOKEN" }
+  },
+  "target": {
+    "type": "jmap",
+    "baseUrl": "https://mail.example.net/jmap",
+    "user": "you@example.net",
+    "auth": { "kind": "basic", "passwordFromEnv": "TARGET_JMAP_PASSWORD" }
+  },
+  "_note_domains": "The appliance runs all four domains (mail/calendar/contacts/files). The mail domain uses the top-level source/target above. To also sync calendar/contacts/files, add a \"domains\" block with caldav/carddav/webdav source+target entries per domain, each { enabled, source, target }. See docs/selfhost-quickstart.md and packages/shared/src/config.ts for the schema."
+}

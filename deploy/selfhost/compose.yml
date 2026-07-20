@@ -1,0 +1,86 @@
+# Self-host appliance stack (workplan 0010 T3).
+#
+# Two services: a small bundled Postgres and the single-tenant app. Bring it up
+# on a NAS / mini-PC / Pi with:
+#
+#   cp deploy/selfhost/selfhost.env.example deploy/selfhost/.env   # then edit
+#   cp deploy/selfhost/config/mapping.json.example \
+#      deploy/selfhost/config/mapping.json                          # then edit
+#   docker compose -f deploy/selfhost/compose.yml up -d
+#
+# The app self-migrates on startup (advisory lock, T1) against the bundled
+# Postgres, schedules the mappings in deploy/selfhost/config/, and serves
+# /healthz + /status on the published port. After `docker compose restart app`
+# it resumes incrementally from cursors with zero duplicates (T5 gate).
+#
+# HARD RULE 5: no managed-only service here — no Trigger.dev, no billing. The
+# app runs the worker's multi-domain orchestration in-process.
+
+name: open-migrate-selfhost
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: open-migrate-selfhost-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-openmigrate}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/selfhost/.env}
+      POSTGRES_DB: ${POSTGRES_DB:-openmigrate}
+    volumes:
+      # Local volume ONLY — never a network filesystem (SMB/NFS) for the DB
+      # (corruption risk). See docs/selfhost-quickstart.md.
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-openmigrate} -d ${POSTGRES_DB:-openmigrate}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - selfhost
+
+  app:
+    build:
+      context: ../..
+      dockerfile: apps/selfhost/Dockerfile
+    image: ${SELFHOST_IMAGE:-ghcr.io/robbes/open-migrate-selfhost:edge}
+    container_name: open-migrate-selfhost-app
+    restart: unless-stopped
+    env_file:
+      # tokenFromEnv/passwordFromEnv secrets referenced by the mapping configs
+      # live here (600 perms — see the quickstart).
+      - .env
+    environment:
+      # Single-tenant: the app connects as the owner (RLS unused here). The
+      # bundled Postgres is only reachable on the internal compose network.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-openmigrate}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-openmigrate}
+      CONFIG_DIR: /data/config
+      HOST: 0.0.0.0
+      PORT: 8080
+    ports:
+      # Status/health endpoint. Bind to localhost by default so the appliance is
+      # not exposed on the LAN; override SELFHOST_BIND to publish wider.
+      - "${SELFHOST_BIND:-127.0.0.1}:${SELFHOST_PORT:-8080}:8080"
+    volumes:
+      # Mapping configs (read-only) + a state volume for anything the app writes.
+      - ./config:/data/config:ro
+      - appdata:/data/state
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    networks:
+      - selfhost
+
+networks:
+  selfhost:
+    driver: bridge
+
+volumes:
+  pgdata:
+  appdata:
