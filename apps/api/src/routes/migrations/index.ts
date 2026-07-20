@@ -13,6 +13,8 @@ import type { AuthenticatedRequest } from '../../types/api';
 import { eq, and, desc } from 'drizzle-orm';
 import * as schema from '@openmig/ledger';
 import { SecretStore } from '@openmig/core/secret-store';
+import { getTriggerClient } from '@openmig/scheduler';
+import { resolveSyncJob, resolveCutoverJob } from './job-resolution';
 
 /** Take the first row of a RETURNING result or fail loudly (no silent nulls). */
 function firstOrThrow<T>(rows: T[], what: string): T {
@@ -629,17 +631,18 @@ router.post(
         return;
       }
 
-      // TODO: Trigger Trigger.dev job
-      // This is the T3 scope - wiring the actual job trigger
-      // For T2, we just validate the route is protected and return a mock response
+      // Enqueue the real Trigger.dev task with an id-only, tenant-scoped payload
+      // (the mapping was just verified to belong to this tenant above).
+      const { taskId, payload } = resolveSyncJob(tenantId, mappingId, body);
+      const run = await getTriggerClient().tasks.trigger(taskId, payload, {
+        tags: [`tenant:${tenantId}`, `mapping:${mappingId}`],
+      });
 
-      // Mock response - actual trigger will be implemented in T3
-      res.json({
+      res.status(202).json({
         success: true,
-        runId: `run-${Date.now()}`,
-        jobType: body.type,
+        runId: run.id,
+        jobType: taskId,
         triggeredAt: new Date().toISOString(),
-        note: 'Sync trigger is a placeholder - actual Trigger.dev integration in T3',
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -706,17 +709,17 @@ router.post(
         return;
       }
 
-      // TODO: Trigger Trigger.dev cutover job
-      // This is the T3 scope - wiring the actual job trigger
-      // For T2, we just validate the route is protected and return a mock response
+      // Enqueue the real Trigger.dev cutover task (id-only, tenant-scoped payload).
+      const { taskId, payload } = resolveCutoverJob(tenantId, mappingId, body);
+      const run = await getTriggerClient().tasks.trigger(taskId, payload, {
+        tags: [`tenant:${tenantId}`, `mapping:${mappingId}`, 'type:cutover'],
+      });
 
-      // Mock response - actual trigger will be implemented in T3
-      res.json({
+      res.status(202).json({
         success: true,
-        runId: `run-cutover-${Date.now()}`,
+        runId: run.id,
         triggeredAt: new Date().toISOString(),
         gracePeriodEnd: new Date(Date.now() + body.gracePeriodHours * 3600000).toISOString(),
-        note: 'Cutover trigger is a placeholder - actual Trigger.dev integration in T3',
       });
     } catch (error) {
       if (error instanceof z.ZodError) {

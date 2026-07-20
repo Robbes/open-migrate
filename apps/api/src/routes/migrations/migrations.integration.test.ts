@@ -10,10 +10,19 @@
 // Set JWT_SECRET before importing app
 process.env.JWT_SECRET = 'test-secret-for-migration-tests';
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { Pool } from 'pg';
 import supertest from 'supertest';
 import jwt from 'jsonwebtoken';
+
+// Mock the Trigger.dev client so the real sync/cutover endpoints can be tested
+// without a live orchestrator: capture the enqueue call and return a stub run.
+const { triggerMock } = vi.hoisted(() => ({
+  triggerMock: vi.fn(async () => ({ id: 'run_mock_test' })),
+}));
+vi.mock('@openmig/scheduler', () => ({
+  getTriggerClient: () => ({ tasks: { trigger: triggerMock } }),
+}));
 
 const PG_CONNECTION_STRING = process.env.TEST_DATABASE_URL;
 if (!PG_CONNECTION_STRING) {
@@ -330,44 +339,74 @@ describe('Migrations Routes - Tenant Isolation', () => {
   });
 
   describe('POST /api/migrations/:id/sync', () => {
-    it('should accept sync request for tenant A mapping', async () => {
+    it('enqueues the real delta-sync task with an id-only, tenant-scoped payload', async () => {
+      triggerMock.mockClear();
       const response = await request
         .post(`/api/migrations/${MIG_MAPPING_A}/sync`)
         .set('Authorization', `Bearer ${TOKEN_TENANT_A}`)
-        .send({ mode: 'incremental' });
+        .send({ type: 'delta' });
 
-      // This is a placeholder - actual Trigger.dev integration is T3
-      expect([200, 501]).toContain(response.status);
+      expect(response.status).toBe(202);
+      expect(response.body.runId).toBe('run_mock_test');
+      expect(response.body.jobType).toBe('run-delta-sync');
+      expect(triggerMock).toHaveBeenCalledTimes(1);
+      expect(triggerMock).toHaveBeenCalledWith(
+        'run-delta-sync',
+        { tenantId: MIG_TENANT_A, mappingId: MIG_MAPPING_A },
+        expect.anything(),
+      );
+    });
+
+    it('enqueues the full-sync task when type is full', async () => {
+      triggerMock.mockClear();
+      const response = await request
+        .post(`/api/migrations/${MIG_MAPPING_A}/sync`)
+        .set('Authorization', `Bearer ${TOKEN_TENANT_A}`)
+        .send({ type: 'full' });
+
+      expect(response.status).toBe(202);
+      expect(response.body.jobType).toBe('run-full-sync');
+      expect(triggerMock).toHaveBeenCalledWith('run-full-sync', expect.anything(), expect.anything());
     });
 
     it('should prevent tenant B from triggering sync on tenant A mapping (CROSS-TENANT TEST)', async () => {
+      triggerMock.mockClear();
       const response = await request
         .post(`/api/migrations/${MIG_MAPPING_A}/sync`)
         .set('Authorization', `Bearer ${TOKEN_TENANT_B}`)
-        .send({ mode: 'full' });
+        .send({ type: 'full' });
 
-      expect([200, 404, 501]).toContain(response.status);
+      expect(response.status).toBe(404); // ownership check fails before any enqueue
+      expect(triggerMock).not.toHaveBeenCalled();
     });
   });
 
   describe('POST /api/migrations/:id/cutover', () => {
-    it('should accept cutover request for tenant A mapping', async () => {
+    it('enqueues the real cutover task for tenant A mapping', async () => {
+      triggerMock.mockClear();
       const response = await request
         .post(`/api/migrations/${MIG_MAPPING_A}/cutover`)
         .set('Authorization', `Bearer ${TOKEN_TENANT_A}`)
-        .send({ pattern: 'shared_s' });
+        .send({ gracePeriodHours: 12 });
 
-      // Placeholder - actual implementation is T3
-      expect([200, 501]).toContain(response.status);
+      expect(response.status).toBe(202);
+      expect(response.body.runId).toBe('run_mock_test');
+      expect(triggerMock).toHaveBeenCalledWith(
+        'run-cutover',
+        expect.objectContaining({ tenantId: MIG_TENANT_A, mappingId: MIG_MAPPING_A }),
+        expect.anything(),
+      );
     });
 
     it('should prevent tenant B from triggering cutover on tenant A mapping (CROSS-TENANT TEST)', async () => {
+      triggerMock.mockClear();
       const response = await request
         .post(`/api/migrations/${MIG_MAPPING_A}/cutover`)
         .set('Authorization', `Bearer ${TOKEN_TENANT_B}`)
-        .send({ pattern: 'distribution_d' });
+        .send({ gracePeriodHours: 12 });
 
-      expect([200, 404, 501]).toContain(response.status);
+      expect(response.status).toBe(404);
+      expect(triggerMock).not.toHaveBeenCalled();
     });
   });
 
