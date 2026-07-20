@@ -38,6 +38,7 @@
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "catalog:",
     "eslint": "10.6.0",
+    "jsdom": "^27.0.0",
     "pg": "catalog:",
     "prettier": "3.9.4",
     "supertest": "^7.2.2",
