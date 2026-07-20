@@ -86,6 +86,9 @@ importers:
       prettier:
         specifier: 3.9.4
         version: 3.9.4
+      jsdom:
+        specifier: ^25.0.0
+        version: 25.0.1
       supertest:
         specifier: ^7.2.2
         version: 7.2.2
