@@ -267,6 +267,9 @@ importers:
       '@openmig/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@openmig/engines':
+        specifier: workspace:*
+        version: link:../../packages/engines
       '@openmig/ledger':
         specifier: workspace:*
         version: link:../../packages/ledger

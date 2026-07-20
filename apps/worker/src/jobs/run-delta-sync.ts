@@ -10,9 +10,9 @@
 import { z } from 'zod';
 import { schemaTask } from '@trigger.dev/sdk/v3';
 import { Pool } from 'pg';
-import { runShadowPass } from '@openmig/core';
+import { runShadowPass, runCalendarSync, runContactSync, runFileSync } from '@openmig/core';
 import type { TenantId, MappingId } from '@openmig/shared';
-import { buildDepsFromMapping } from '../build-deps-from-mapping';
+import { buildDepsFromMapping, buildDomainDepsFromMapping } from '../build-deps-from-mapping';
 import { 
   withTenant, 
   PgMigrationStatusStore,
@@ -90,57 +90,66 @@ export const runDeltaSync = schemaTask({
 
         try {
           if (domain === 'email') {
-            // SECURITY: Build deps with tenant scoping (RLS enforced)
-            // buildDepsFromMapping wraps all DB ops in withTenant()
+            // SECURITY: Build deps with tenant scoping (RLS enforced).
+            // buildDepsFromMapping wraps all DB ops in withTenant() and manages
+            // the email domain's migration_status itself.
             const deps = await buildDepsFromMapping(pool, tenantId, mappingId);
-            
-            // Run the actual shadow pass with real source/target
             const result = await runShadowPass(deps);
-
             console.log(`Mail sync completed: ${result.created} created, ${result.skipped} skipped`);
-            
-            // Record usage metrics inside tenant context
-            await withTenant(pool, tenantId, async (db) => {
-              // Get migration status for timing info
-              const statusStore = new PgMigrationStatusStore(db);
-              const statusList = await statusStore.getStatus(tenantId, mappingId);
-              const domainStatus = statusList.find(s => s.domain === domain);
-              
-              if (domainStatus && domainStatus.completedAt) {
-                // Record compute usage (duration)
-                await recordComputeForRun(db, {
-                  tenantId,
-                  mappingId,
-                  domain,
-                  startedAt: new Date(domainStatus.startedAt),
-                  completedAt: new Date(domainStatus.completedAt),
-                  periodStart,
-                  periodEnd,
-                }, PRICING);
-                
-                // Record API call (one sync operation)
-                await recordApiCallForRun(db, {
-                  tenantId,
-                  mappingId,
-                  domain,
-                  periodStart,
-                  periodEnd,
-                });
-              }
-            });
-            
-            // Status is already updated within buildDepsFromMapping's withTenant context
-            // The ledger client is already scoped
           } else {
-            // Other domains (calendar, contact, file) - stub for now
-            console.log(`Domain ${domain} not yet implemented`);
-            // TODO: Implement domain-specific sync with buildDomainDepsFromMapping
+            // Native DAV domains (calendar/contact/file) via the generalized
+            // domain-sync loop. Track migration_status explicitly (mirrors the
+            // worker's runAllDomains) so status pages + metering see the run.
+            await withTenant(pool, tenantId, async (db) => {
+              await new PgMigrationStatusStore(db).markInProgress(tenantId, mappingId, domain);
+            });
+            let result: { created: number; skipped: number };
+            if (domain === 'calendar') {
+              result = await runCalendarSync(await buildDomainDepsFromMapping(pool, tenantId, mappingId, 'calendar'));
+            } else if (domain === 'contact') {
+              result = await runContactSync(await buildDomainDepsFromMapping(pool, tenantId, mappingId, 'contact'));
+            } else {
+              result = await runFileSync(await buildDomainDepsFromMapping(pool, tenantId, mappingId, 'file'));
+            }
+            await withTenant(pool, tenantId, async (db) => {
+              await new PgMigrationStatusStore(db).markCompleted(tenantId, mappingId, domain);
+            });
+            console.log(`${domain} sync completed: ${result.created} created, ${result.skipped} skipped`);
           }
+
+          // Metering (all domains): record compute + one sync op from the run's
+          // migration_status timing. Guarded — skips cleanly if status is absent.
+          await withTenant(pool, tenantId, async (db) => {
+            const statusStore = new PgMigrationStatusStore(db);
+            const statusList = await statusStore.getStatus(tenantId, mappingId);
+            const domainStatus = statusList.find((s) => s.domain === domain);
+            if (domainStatus && domainStatus.completedAt) {
+              await recordComputeForRun(db, {
+                tenantId,
+                mappingId,
+                domain,
+                startedAt: new Date(domainStatus.startedAt),
+                completedAt: new Date(domainStatus.completedAt),
+                periodStart,
+                periodEnd,
+              }, PRICING);
+              await recordApiCallForRun(db, { tenantId, mappingId, domain, periodStart, periodEnd });
+            }
+          });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
           console.error(`Domain ${domain} sync failed:`, errorMessage);
-          
-          // Re-throw to let Trigger.dev handle the failure
+          // Mark the domain failed (best-effort) before surfacing the error.
+          if (domain !== 'email') {
+            try {
+              await withTenant(pool, tenantId, async (db) => {
+                await new PgMigrationStatusStore(db).markFailed(tenantId, mappingId, domain, errorMessage);
+              });
+            } catch (statusErr) {
+              console.error('Failed to mark domain status failed:', statusErr);
+            }
+          }
+          // Re-throw so Trigger.dev records the failure (hard rule 9 — no masking).
           throw error;
         }
       }

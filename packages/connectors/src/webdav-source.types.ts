@@ -16,7 +16,9 @@ export interface WebDAVSourceConfig {
   /** Authentication username */
   username: string;
   /** Environment variable name containing the password */
-  passwordEnv: string;
+  passwordEnv?: string;
+  /** Direct password/token (managed path — credentials decrypted from the DB at runtime). */
+  password?: string;
   /** Root path for file storage (optional) */
   rootPath?: string;
 }
