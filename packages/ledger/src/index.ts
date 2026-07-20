@@ -9,3 +9,4 @@ export * from './cutover-store';
 export * from './verification-queries';
 export * from './migration-status-store';
 export * from './usage-metering';
+export * from './migrate';

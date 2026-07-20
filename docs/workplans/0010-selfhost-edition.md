@@ -4,7 +4,7 @@
 
 | Task | Status | Evidence |
 |---|---|---|
-| T1 startup migration runner (Postgres advisory lock) | ⬜ Pending | — |
+| T1 startup migration runner (Postgres advisory lock) | ✅ Done | `packages/ledger/src/migrate.ts` — `runMigrations({connectionString})` enumerates `migrations/*.sql` (zero-padded → linear order), applies pending ones under advisory lock `727_0010`, records each in a `schema_migrations` table (one txn per migration), and **refuses to start** when the DB's highest applied version exceeds the highest the build ships (§22.1 downgrade guard). Idempotent re-run = no-op; runs as owner/superuser (0008/0009 create roles+RLS). Exported from `@openmig/ledger`. **Tests:** `migrate.integration.test.ts` (fresh→latest, re-run no-op, concurrent double-start applies once, newer-schema refusal) — each on a throwaway DB it creates/drops. **Gates:** lint + typecheck green (integration in CI). |
 | T2 selfhost entrypoint app | ⬜ Pending | — |
 | T3 all-in-one packaging (compose w/ bundled Postgres + multi-arch image) | ⬜ Pending | — |
 | T4 secrets & config for self-host | ⬜ Pending | — |
