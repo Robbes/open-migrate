@@ -11,6 +11,9 @@
   "bin": {
     "worker": "./src/index.ts"
   },
+  "scripts": {
+    "test": "vitest run"
+  },
   "dependencies": {
     "@openmig/connectors": "workspace:*",
     "@openmig/engines": "workspace:*",
@@ -27,6 +30,7 @@
   "devDependencies": {
     "@types/imap-simple": "^4.2.10",
     "drizzle-orm": "catalog:",
-    "imap-simple": "^5.1.0"
+    "imap-simple": "^5.1.0",
+    "vitest": "^3.2.7"
   }
 }

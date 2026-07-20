@@ -76,23 +76,27 @@ export const runFullSync = schemaTask({
       // Note: For full sync, we intentionally pass undefined for cursors
       // to force a complete rescan of all items
       const deps = await buildDepsFromMapping(pool, tenantId, mappingId);
-      
-      // Run the full shadow pass (without cursors = full scan)
-      const result = await runShadowPass({
-        ...deps,
-        cursors: undefined, // Force full scan by not using cursors
-      });
+      try {
+        // Run the full shadow pass (without cursors = full scan)
+        const result = await runShadowPass({
+          ...deps,
+          cursors: undefined, // Force full scan by not using cursors
+        });
 
-      console.log(`Full sync completed: ${result.scanned} scanned, ${result.created} created, ${result.skipped} skipped`);
+        console.log(`Full sync completed: ${result.scanned} scanned, ${result.created} created, ${result.skipped} skipped`);
 
-      return {
-        success: true,
-        tenantId: typedPayload.tenantId,
-        mappingId: typedPayload.mappingId,
-        scanned: result.scanned,
-        created: result.created,
-        skipped: result.skipped,
-      };
+        return {
+          success: true,
+          tenantId: typedPayload.tenantId,
+          mappingId: typedPayload.mappingId,
+          scanned: result.scanned,
+          created: result.created,
+          skipped: result.skipped,
+        };
+      } finally {
+        // Release the deps' Postgres pool (never leak it across runs).
+        await deps.close();
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error('Full sync failed:', errorMessage);

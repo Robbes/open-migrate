@@ -94,8 +94,13 @@ export const runDeltaSync = schemaTask({
             // buildDepsFromMapping wraps all DB ops in withTenant() and manages
             // the email domain's migration_status itself.
             const deps = await buildDepsFromMapping(pool, tenantId, mappingId);
-            const result = await runShadowPass(deps);
-            console.log(`Mail sync completed: ${result.created} created, ${result.skipped} skipped`);
+            try {
+              const result = await runShadowPass(deps);
+              console.log(`Mail sync completed: ${result.created} created, ${result.skipped} skipped`);
+            } finally {
+              // Release the deps' Postgres pool (never leak it across runs).
+              await deps.close();
+            }
           } else {
             // Native DAV domains (calendar/contact/file) via the generalized
             // domain-sync loop. Track migration_status explicitly (mirrors the
@@ -103,13 +108,18 @@ export const runDeltaSync = schemaTask({
             await withTenant(pool, tenantId, async (db) => {
               await new PgMigrationStatusStore(db).markInProgress(tenantId, mappingId, domain);
             });
+            // Build + run + release the deps' pool per domain. Literal domain
+            // args pick the right overload; the finally never leaks the pool.
             let result: { created: number; skipped: number };
             if (domain === 'calendar') {
-              result = await runCalendarSync(await buildDomainDepsFromMapping(pool, tenantId, mappingId, 'calendar'));
+              const deps = await buildDomainDepsFromMapping(pool, tenantId, mappingId, 'calendar');
+              try { result = await runCalendarSync(deps); } finally { await deps.close(); }
             } else if (domain === 'contact') {
-              result = await runContactSync(await buildDomainDepsFromMapping(pool, tenantId, mappingId, 'contact'));
+              const deps = await buildDomainDepsFromMapping(pool, tenantId, mappingId, 'contact');
+              try { result = await runContactSync(deps); } finally { await deps.close(); }
             } else {
-              result = await runFileSync(await buildDomainDepsFromMapping(pool, tenantId, mappingId, 'file'));
+              const deps = await buildDomainDepsFromMapping(pool, tenantId, mappingId, 'file');
+              try { result = await runFileSync(deps); } finally { await deps.close(); }
             }
             await withTenant(pool, tenantId, async (db) => {
               await new PgMigrationStatusStore(db).markCompleted(tenantId, mappingId, domain);

@@ -37,6 +37,7 @@ import {
 import { PgLedger, PgCursorStore, createPgDb, withTenant } from '@openmig/ledger';
 import { SecretStore } from '@openmig/core/secret-store';
 import { mailboxMapping } from '@openmig/ledger';
+import { withClose, type WithClose } from './deps-lifecycle';
 
 /**
  * Build dependencies from database-stored connections with encrypted credentials.
@@ -59,7 +60,7 @@ export async function buildDepsFromMapping(
   pool: Pool,
   tenantId: string,
   mappingId: string
-): Promise<ReconcileDeps> {
+): Promise<WithClose<ReconcileDeps>> {
   // SECURITY: Fail closed if tenantId is missing or invalid
   if (!tenantId || typeof tenantId !== 'string') {
     throw new Error('tenantId is required and must be a valid UUID');
@@ -193,16 +194,20 @@ export async function buildDepsFromMapping(
   // Create ledger and cursor store
   const ledger = new PgLedger(db);
   const cursors = new PgCursorStore(db);
-  
-  return {
-    tenantId: tenantId as ReconcileDeps['tenantId'],
-    mappingId: mappingId as ReconcileDeps['mappingId'],
-    source,
-    target,
-    ledger,
-    cursors,
-    concurrency: mappingConfig.concurrency ?? 4,
-  };
+
+  // Attach close() so the caller releases the pool after the pass (never leak it).
+  return withClose(
+    {
+      tenantId: tenantId as ReconcileDeps['tenantId'],
+      mappingId: mappingId as ReconcileDeps['mappingId'],
+      source,
+      target,
+      ledger,
+      cursors,
+      concurrency: mappingConfig.concurrency ?? 4,
+    },
+    db,
+  );
 }
 
 /** Build a DAV endpoint URL from a stored connection config (url/baseUrl/host+port). */
@@ -259,16 +264,16 @@ async function loadDomainConnections(
  * connection config + decrypted credentials — credentials are passed directly
  * (never via env) so the managed path is per-tenant safe. RLS-enforced.
  */
-export function buildDomainDepsFromMapping(pool: Pool, tenantId: string, mappingId: string, domain: 'mail'): Promise<ReconcileDeps>;
-export function buildDomainDepsFromMapping(pool: Pool, tenantId: string, mappingId: string, domain: 'calendar'): Promise<CalendarSyncDeps>;
-export function buildDomainDepsFromMapping(pool: Pool, tenantId: string, mappingId: string, domain: 'contact'): Promise<ContactSyncDeps>;
-export function buildDomainDepsFromMapping(pool: Pool, tenantId: string, mappingId: string, domain: 'file'): Promise<FileSyncDeps>;
+export function buildDomainDepsFromMapping(pool: Pool, tenantId: string, mappingId: string, domain: 'mail'): Promise<WithClose<ReconcileDeps>>;
+export function buildDomainDepsFromMapping(pool: Pool, tenantId: string, mappingId: string, domain: 'calendar'): Promise<WithClose<CalendarSyncDeps>>;
+export function buildDomainDepsFromMapping(pool: Pool, tenantId: string, mappingId: string, domain: 'contact'): Promise<WithClose<ContactSyncDeps>>;
+export function buildDomainDepsFromMapping(pool: Pool, tenantId: string, mappingId: string, domain: 'file'): Promise<WithClose<FileSyncDeps>>;
 export async function buildDomainDepsFromMapping(
   pool: Pool,
   tenantId: string,
   mappingId: string,
   domain: 'mail' | 'calendar' | 'contact' | 'file',
-): Promise<ReconcileDeps | CalendarSyncDeps | ContactSyncDeps | FileSyncDeps> {
+): Promise<WithClose<ReconcileDeps | CalendarSyncDeps | ContactSyncDeps | FileSyncDeps>> {
   if (domain === 'mail') {
     return buildDepsFromMapping(pool, tenantId, mappingId);
   }
@@ -289,25 +294,35 @@ export async function buildDomainDepsFromMapping(
   const srcEndpoint = { url: davUrl(src.config), username: src.creds.username ?? '', password: src.creds.password ?? '' };
   const tgtEndpoint = { url: davUrl(tgt.config), username: tgt.creds.username ?? '', password: tgt.creds.password ?? '' };
 
+  // Attach close() so the caller releases the pool after the pass (never leak it).
   if (domain === 'calendar') {
-    return {
-      ...common,
-      source: buildCalendarSource(srcEndpoint),
-      target: buildCalendarTarget(tgtEndpoint, targetDeps),
-    } satisfies CalendarSyncDeps;
+    return withClose(
+      {
+        ...common,
+        source: buildCalendarSource(srcEndpoint),
+        target: buildCalendarTarget(tgtEndpoint, targetDeps),
+      } satisfies CalendarSyncDeps,
+      db,
+    );
   }
   if (domain === 'contact') {
-    return {
-      ...common,
-      source: buildContactSource(srcEndpoint),
-      target: buildContactTarget(tgtEndpoint, targetDeps),
-    } satisfies ContactSyncDeps;
+    return withClose(
+      {
+        ...common,
+        source: buildContactSource(srcEndpoint),
+        target: buildContactTarget(tgtEndpoint, targetDeps),
+      } satisfies ContactSyncDeps,
+      db,
+    );
   }
-  return {
-    ...common,
-    source: buildFileSource(srcEndpoint),
-    target: buildFileTarget(tgtEndpoint, targetDeps),
-  } satisfies FileSyncDeps;
+  return withClose(
+    {
+      ...common,
+      source: buildFileSource(srcEndpoint),
+      target: buildFileTarget(tgtEndpoint, targetDeps),
+    } satisfies FileSyncDeps,
+    db,
+  );
 }
 
 /**
