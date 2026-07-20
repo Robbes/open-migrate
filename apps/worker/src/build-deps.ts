@@ -26,13 +26,11 @@ import {
   type SourceConfig,
   type TargetConfig,
 } from '@openmig/shared';
-import { 
-  ImapSource, 
-  ImapDavMailTarget, 
-  type ImapDavTargetConfig, 
+import {
+  ImapSource,
+  ImapDavMailTarget,
+  type ImapDavTargetConfig,
   createTokenProvider,
-  GraphCalendarSource,
-  GraphContactsSource,
 } from '@openmig/connectors';
 import { JmapTargetWriter } from '@openmig/connectors';
 import { PgLedger } from '@openmig/ledger';
@@ -75,11 +73,15 @@ export async function buildDeps(config: MappingConfig): Promise<WithClose<Reconc
   // Build throttle limiter from domain configuration
   const throttleLimiter = buildThrottleLimiter(config);
 
+  // The mail domain uses its per-domain config (`domains.mail`) when present,
+  // else the top-level source/target (see resolveMailConfig).
+  const { source: mailSource, target: mailTarget, concurrency } = resolveMailConfig(config);
+
   // Build source connector from config
-  const source = buildSourceConnector(config.source, throttleLimiter);
+  const source = buildSourceConnector(mailSource, throttleLimiter);
 
   // Build target writer from config
-  const target = buildTargetWriter(config.target);
+  const target = buildTargetWriter(mailTarget);
 
   // Attach close() so the caller releases the pool after the pass (never leak it).
   return withClose(
@@ -90,10 +92,30 @@ export async function buildDeps(config: MappingConfig): Promise<WithClose<Reconc
       target,
       ledger,
       cursors,
-      concurrency: config.concurrency ?? 4,
+      concurrency,
     },
     db,
   );
+}
+
+/**
+ * The effective mail source/target/concurrency for a mapping: the per-domain
+ * `domains.mail` config when the mapping provides one, falling back to the
+ * top-level `source`/`target`. Previously the top-level was always used, so a
+ * `domains.mail.source`/`target` was silently ignored; a top-level-only mapping
+ * is unaffected. Pure — exported for unit testing.
+ */
+export function resolveMailConfig(config: MappingConfig): {
+  source: SourceConfig;
+  target: TargetConfig;
+  concurrency: number;
+} {
+  const mail = config.domains?.mail;
+  return {
+    source: mail?.source ?? config.source,
+    target: mail?.target ?? config.target,
+    concurrency: mail?.concurrency ?? config.concurrency ?? 4,
+  };
 }
 
 /**
@@ -188,89 +210,11 @@ function buildImapSource(sourceConfig: MappingConfig['source'], throttleLimiter?
   return new ImapSource(imapConfig);
 }
 
-/**
- * Build a Graph Calendar source connector.
- * Exported for external use (prefix with _ to silence unused warning in this module).
- */
-function _buildGraphCalendarSource(sourceConfig: MappingConfig['source'], throttleLimiter?: ThrottleLimiter) {
-  if (sourceConfig.type !== 'graph-calendar') {
-    throw new Error(`Expected graph-calendar source, got: ${sourceConfig.type}`);
-  }
-  
-  // Get OAuth2 credentials from environment
-  const tenantId = process.env.OAUTH2_TENANT_ID;
-  const clientId = process.env.OAUTH2_CLIENT_ID;
-  const clientSecret = process.env.OAUTH2_CLIENT_SECRET;
-  const refreshToken = process.env.OAUTH2_REFRESH_TOKEN;
-  
-  if (!tenantId || !clientId) {
-    throw new Error(
-      'Graph Calendar requires OAUTH2_TENANT_ID and OAUTH2_CLIENT_ID environment variables'
-    );
-  }
-  
-  const tokenProviderConfig: TokenProviderConfig = {
-    tokenEndpoint: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
-    clientId,
-    clientSecret,
-    tenantId,
-    scope: 'https://graph.microsoft.com/.default',
-    refreshToken,
-  };
-  
-  const tokenProvider = createTokenProvider(tokenProviderConfig);
-  
-  return new GraphCalendarSource(
-    tokenProvider,
-    tenantId,
-    {
-      baseUrl: sourceConfig.baseUrl,
-      throttleLimiter,
-    }
-  );
-}
-
-/**
- * Build a Graph Contacts source connector.
- * Exported for external use (prefix with _ to silence unused warning in this module).
- */
-function _buildGraphContactsSource(sourceConfig: MappingConfig['source'], throttleLimiter?: ThrottleLimiter) {
-  if (sourceConfig.type !== 'graph-contacts') {
-    throw new Error(`Expected graph-contacts source, got: ${sourceConfig.type}`);
-  }
-  
-  // Get OAuth2 credentials from environment
-  const tenantId = process.env.OAUTH2_TENANT_ID;
-  const clientId = process.env.OAUTH2_CLIENT_ID;
-  const clientSecret = process.env.OAUTH2_CLIENT_SECRET;
-  const refreshToken = process.env.OAUTH2_REFRESH_TOKEN;
-  
-  if (!tenantId || !clientId) {
-    throw new Error(
-      'Graph Contacts requires OAUTH2_TENANT_ID and OAUTH2_CLIENT_ID environment variables'
-    );
-  }
-  
-  const tokenProviderConfig: TokenProviderConfig = {
-    tokenEndpoint: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
-    clientId,
-    clientSecret,
-    tenantId,
-    scope: 'https://graph.microsoft.com/.default',
-    refreshToken,
-  };
-  
-  const tokenProvider = createTokenProvider(tokenProviderConfig);
-  
-  return new GraphContactsSource(
-    tokenProvider,
-    tenantId,
-    {
-      baseUrl: sourceConfig.baseUrl,
-      throttleLimiter,
-    }
-  );
-}
+// NOTE: Microsoft Graph calendar/contacts sources are not wired into the
+// file-config path (only imap-oauth2 mail + caldav/carddav/webdav DAV domains
+// are). The previous `_buildGraph*` scaffolding here was dead code; supporting
+// Graph sources is a future feature, tracked separately. `buildSourceConnector`
+// throws a clear "Unsupported source type" until then.
 
 /**
  * Build a target writer from the mapping config.

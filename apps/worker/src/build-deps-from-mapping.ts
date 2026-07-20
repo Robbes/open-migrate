@@ -34,6 +34,7 @@ import {
   buildFileSource,
   buildFileTarget,
 } from './dav-factories';
+import { davEndpointFromCreds } from './dav-endpoint';
 import { PgLedger, PgCursorStore, createPgDb, withTenant } from '@openmig/ledger';
 import { SecretStore } from '@openmig/core/secret-store';
 import { mailboxMapping } from '@openmig/ledger';
@@ -210,19 +211,6 @@ export async function buildDepsFromMapping(
   );
 }
 
-/** Build a DAV endpoint URL from a stored connection config (url/baseUrl/host+port). */
-function davUrl(config: Record<string, unknown>): string {
-  if (typeof config.url === 'string') return config.url;
-  if (typeof config.baseUrl === 'string') return config.baseUrl;
-  const host = config.host;
-  if (typeof host !== 'string' || !host) {
-    throw new Error('DAV connection config is missing url/baseUrl/host');
-  }
-  const scheme = config.useSsl === false ? 'http' : 'https';
-  const port = typeof config.port === 'number' ? `:${config.port}` : '';
-  return `${scheme}://${host}${port}/`;
-}
-
 /** Load source + target connection config/credentials for a tenant (RLS-enforced). */
 async function loadDomainConnections(
   pool: Pool,
@@ -283,46 +271,53 @@ export async function buildDomainDepsFromMapping(
     throw new Error('DATABASE_URL or TEST_DATABASE_URL must be set');
   }
   const db = createPgDb(databaseUrl);
-  const ledger = new PgLedger(db);
-  const cursors = new PgCursorStore(db);
-  const tId = tenantId as TenantId;
-  const mId = mappingId as MappingId;
+  // If anything below throws before we hand pool ownership to the caller (via
+  // withClose), release the pool here so a failed build never leaks it.
+  try {
+    const ledger = new PgLedger(db);
+    const cursors = new PgCursorStore(db);
+    const tId = tenantId as TenantId;
+    const mId = mappingId as MappingId;
 
-  const { source: src, target: tgt } = await loadDomainConnections(pool, tenantId);
-  const common = { tenantId: tId, mappingId: mId, ledger, cursors };
-  const targetDeps = { ledger, tenantId: tId, mappingId: mId };
-  const srcEndpoint = { url: davUrl(src.config), username: src.creds.username ?? '', password: src.creds.password ?? '' };
-  const tgtEndpoint = { url: davUrl(tgt.config), username: tgt.creds.username ?? '', password: tgt.creds.password ?? '' };
+    const { source: src, target: tgt } = await loadDomainConnections(pool, tenantId);
+    const common = { tenantId: tId, mappingId: mId, ledger, cursors };
+    const targetDeps = { ledger, tenantId: tId, mappingId: mId };
+    const srcEndpoint = davEndpointFromCreds('source', src.config, src.creds);
+    const tgtEndpoint = davEndpointFromCreds('target', tgt.config, tgt.creds);
 
-  // Attach close() so the caller releases the pool after the pass (never leak it).
-  if (domain === 'calendar') {
+    // Attach close() so the caller releases the pool after the pass (never leak it).
+    if (domain === 'calendar') {
+      return withClose(
+        {
+          ...common,
+          source: buildCalendarSource(srcEndpoint),
+          target: buildCalendarTarget(tgtEndpoint, targetDeps),
+        } satisfies CalendarSyncDeps,
+        db,
+      );
+    }
+    if (domain === 'contact') {
+      return withClose(
+        {
+          ...common,
+          source: buildContactSource(srcEndpoint),
+          target: buildContactTarget(tgtEndpoint, targetDeps),
+        } satisfies ContactSyncDeps,
+        db,
+      );
+    }
     return withClose(
       {
         ...common,
-        source: buildCalendarSource(srcEndpoint),
-        target: buildCalendarTarget(tgtEndpoint, targetDeps),
-      } satisfies CalendarSyncDeps,
+        source: buildFileSource(srcEndpoint),
+        target: buildFileTarget(tgtEndpoint, targetDeps),
+      } satisfies FileSyncDeps,
       db,
     );
+  } catch (err) {
+    await db.close();
+    throw err;
   }
-  if (domain === 'contact') {
-    return withClose(
-      {
-        ...common,
-        source: buildContactSource(srcEndpoint),
-        target: buildContactTarget(tgtEndpoint, targetDeps),
-      } satisfies ContactSyncDeps,
-      db,
-    );
-  }
-  return withClose(
-    {
-      ...common,
-      source: buildFileSource(srcEndpoint),
-      target: buildFileTarget(tgtEndpoint, targetDeps),
-    } satisfies FileSyncDeps,
-    db,
-  );
 }
 
 /**
