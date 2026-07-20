@@ -1,0 +1,74 @@
+# Simplified managed deployment without Trigger.dev
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: open-migrate-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-openmigrate}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openmigrate_password}
+      POSTGRES_DB: ${POSTGRES_DB:-openmigrate}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-openmigrate}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - open-migrate-network
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    container_name: open-migrate-api
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3001
+      DATABASE_URL: postgresql://${POSTGRES_USER:-openmigrate}:${POSTGRES_PASSWORD:-openmigrate_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
+      APP_DATABASE_URL: postgresql://${APP_DB_USER:-app_user}:${APP_DB_PASSWORD:-app_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
+      JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:?set a 32-byte key in .env}
+      JWT_EXPIRY: ${JWT_EXPIRY:-24h}
+      TRIGGER_API_URL: http://localhost:3090
+      TRIGGER_API_KEY: ${TRIGGER_API_KEY:-dev-api-key}
+      MOLLIE_API_KEY: ${MOLLIE_API_KEY:-}
+      MOLLIE_WEBHOOK_SECRET: ${MOLLIE_WEBHOOK_SECRET:-}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3123}
+      WEB_URL: ${WEB_URL:-http://localhost:3123}
+      API_URL: ${API_URL:-http://localhost:3001}
+    ports:
+      - "${API_PORT:-3001}:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - open-migrate-network
+
+  # Worker - invoked per-migration, not a long-running service
+  # To run a migration: docker compose -f deploy/compose/managed-simple.yml run --rm worker --config /mappings/my-mapping.json
+  # Note: worker image is built but not started as a service
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api}
+        VITE_AUTH_URL: ${VITE_AUTH_URL:-/auth}
+    container_name: open-migrate-web
+    ports:
+      - "${WEB_PORT:-3123}:80"
+    depends_on:
+      - api
+    networks:
+      - open-migrate-network
+
+networks:
+  open-migrate-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

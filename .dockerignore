@@ -1,0 +1,15 @@
+# Keep build context small and avoid copying host build artifacts / secrets.
+**/node_modules
+**/dist
+**/build
+**/coverage
+**/.turbo
+**/*.log
+.git
+.github
+test-logs
+**/.env
+**/.env.*
+!**/.env.example
+**/*.local
+.DS_Store

@@ -13,7 +13,7 @@
 
 import { z } from 'zod';
 import { asTenantId, asMappingId, type TargetReindexer } from '@openmig/shared';
-import { schemaTask } from '@trigger.dev/sdk/v3';
+import { schemaTask } from '@trigger.dev/sdk';
 import { CutoverStore, createLedgerVerificationReader } from '@openmig/ledger';
 import { runShadowPass, runVerification, createRealVerificationDeps } from '@openmig/core';
 import { drizzle } from 'drizzle-orm/node-postgres';

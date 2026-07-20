@@ -8,7 +8,7 @@
  */
 
 import { z } from 'zod';
-import { schemaTask } from '@trigger.dev/sdk/v3';
+import { schemaTask } from '@trigger.dev/sdk';
 import { Pool } from 'pg';
 import { runShadowPass, runCalendarSync, runContactSync, runFileSync } from '@openmig/core';
 import type { TenantId, MappingId } from '@openmig/shared';
