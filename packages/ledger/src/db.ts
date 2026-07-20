@@ -40,39 +40,47 @@ export async function withTenant<T>(
   fn: (db: PgDatabase) => Promise<T>
 ): Promise<T> {
   const client = await pool.connect();
-  
+  // Set once ROLLBACK fails: the client may be left in an aborted transaction
+  // (possibly still carrying app.current_tenant), so it must be DESTROYED rather
+  // than returned to the pool for the next tenant to reuse.
+  let releaseError: Error | undefined;
+
   try {
     // Begin transaction
     await client.query('BEGIN');
-    
+
     // Create a drizzle instance bound to this client (for transaction)
     const txDb = drizzlePg(client, { schema: schemaPg });
-    
+
     // Set tenant context - use set_config with bind param for safety
     // The third parameter `true` makes it transaction-local (equivalent to SET LOCAL)
     await client.query("SELECT set_config('app.current_tenant', $1, true)", [tenantId]);
-    
+
     // Run the function with the transaction-scoped db
     const result = await fn(txDb as unknown as PgDatabase);
-    
+
     // Commit transaction
     await client.query('COMMIT');
-    
+
     return result;
   } catch (error) {
     // Rollback on error
     try {
       await client.query('ROLLBACK');
     } catch (rollbackError) {
-      // Log rollback error but don't mask the original error
+      // Log rollback error but don't mask the original error. Mark the client
+      // for destruction so a broken/aborted connection is never reused.
       console.error('Rollback failed after error:', rollbackError);
+      releaseError = rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
     }
-    
+
     // Re-throw the original error (never swallow it - hard rule 9)
     throw error;
   } finally {
-    // Always release the client back to the pool
-    client.release();
+    // Release the client. On a failed rollback, pass the error so pg DISCARDS
+    // the client instead of returning it to the pool (prevents RLS-context or
+    // aborted-transaction bleed into the next request).
+    client.release(releaseError);
   }
 }
 
