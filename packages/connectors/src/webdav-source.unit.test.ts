@@ -521,7 +521,7 @@ describe('WebdavFileSource', () => {
       
       const getAuthHeader = (source as any).getAuthorizationHeader.bind(source);
       
-      expect(() => getAuthHeader()).toThrow('Password environment variable WEBDAV_PASSWORD not set');
+      expect(() => getAuthHeader()).toThrow('No password configured (set config.password or config.passwordEnv)');
     });
   });
 
