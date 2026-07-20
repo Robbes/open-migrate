@@ -12,6 +12,21 @@ import { authenticate, getDbPool, withTenantDb } from '../../middleware/auth';
 import type { AuthenticatedRequest } from '../../types/api';
 import { eq, and, desc } from 'drizzle-orm';
 import * as schema from '@openmig/ledger';
+import { SecretStore } from '@openmig/core/secret-store';
+
+/** Take the first row of a RETURNING result or fail loudly (no silent nulls). */
+function firstOrThrow<T>(rows: T[], what: string): T {
+  const row = rows[0];
+  if (!row) {
+    throw new Error(`failed to create ${what}`);
+  }
+  return row;
+}
+
+/** Map the web source type to a connection.kind (protocol-based). */
+function sourceKindFor(sourceType: 'imap' | 'oauth2' | 'graph'): 'imap' | 'o365' {
+  return sourceType === 'imap' ? 'imap' : 'o365';
+}
 
 /** Map a ledger `run` row to the API/web Run shape. */
 type LedgerRun = typeof schema.run.$inferSelect;
@@ -135,7 +150,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
       mappings: mappings.map((m) => ({
         id: m.id,
         tenant_id: tenantId,
-        name: m.mode, // Using mode as name placeholder
+        name: m.name ?? m.mode, // real name (falls back to mode for legacy rows)
         sourceType: 'imap',
         targetType: 'jmap',
         status: m.status,
@@ -172,38 +187,112 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res: Response) 
       return;
     }
 
-    // Note: Pool is retrieved for potential future use, but full mapping creation is TODO
-    const _pool = getSharedPool();
+    // Persist the full chain in one tenant-scoped transaction (RLS-enforced):
+    // source + target connection (with ENCRYPTED credentials), a mailbox per
+    // connection, the mailbox_mapping, and one scope_selection row per domain.
+    const created = await withTenantDb(tenantId, getSharedPool(), async (db) => {
+      // Never store plaintext secrets — encrypt via SecretStore. secret_ref is a
+      // text column read back by decryptCredentials(string) → parseEncryptedSecret,
+      // which expects the inner EncryptedSecret ({v,n,t,c}) JSON, so store `.encrypted`.
+      const sourceSecret = JSON.stringify(
+        SecretStore.encryptCredentials({
+          username: body.sourceConfig.username,
+          ...(body.sourceConfig.password ? { password: body.sourceConfig.password } : {}),
+        }).encrypted,
+      );
+      const targetSecret = JSON.stringify(
+        SecretStore.encryptCredentials({
+          username: body.targetConfig.username,
+          password: body.targetConfig.password,
+        }).encrypted,
+      );
 
-    // Note: This is a simplified implementation. A real mapping would need:
-    // 1. Create source mailbox (or reference existing)
-    // 2. Create target mailbox (or reference existing)
-    // 3. Create the mailbox_mapping linking them
-    // For now, we'll create a minimal mapping record
-    
-    // TODO: Full mapping creation requires mailbox setup
-    // This is a placeholder that creates just the mapping structure
-    // In production, this would create connection/mailbox/mapping records
-    
-    // For now, return a mock response indicating the route is wired but
-    // full implementation requires mailbox/connection setup (T3 scope)
-    const mockMapping = {
-      id: `mapping-${Date.now()}`,
+      const sourceConn = firstOrThrow(
+        await db
+          .insert(schema.connection)
+          .values({
+            tenantId,
+            role: 'source',
+            kind: sourceKindFor(body.sourceType),
+            displayName: `${body.name} (source)`,
+            config: { host: body.sourceConfig.host, port: body.sourceConfig.port, useSsl: body.sourceConfig.useSsl },
+            secretRef: sourceSecret,
+          })
+          .returning({ id: schema.connection.id }),
+        'source connection',
+      );
+
+      const targetConn = firstOrThrow(
+        await db
+          .insert(schema.connection)
+          .values({
+            tenantId,
+            role: 'target',
+            // targetType values (jmap/imap/caldav/carddav/webdav) are all valid connection kinds.
+            kind: body.targetType,
+            displayName: `${body.name} (target)`,
+            config: { host: body.targetConfig.host, port: body.targetConfig.port, useSsl: body.targetConfig.useSsl },
+            secretRef: targetSecret,
+          })
+          .returning({ id: schema.connection.id }),
+        'target connection',
+      );
+
+      const sourceMailbox = firstOrThrow(
+        await db
+          .insert(schema.mailbox)
+          .values({ tenantId, connectionId: sourceConn.id, kind: 'user', externalId: 'primary', primaryAddress: body.sourceConfig.username })
+          .returning({ id: schema.mailbox.id }),
+        'source mailbox',
+      );
+
+      const targetMailbox = firstOrThrow(
+        await db
+          .insert(schema.mailbox)
+          .values({ tenantId, connectionId: targetConn.id, kind: 'user', externalId: 'primary', primaryAddress: body.targetConfig.username })
+          .returning({ id: schema.mailbox.id }),
+        'target mailbox',
+      );
+
+      const mapping = firstOrThrow(
+        await db
+          .insert(schema.mailboxMapping)
+          .values({
+            tenantId,
+            sourceMailboxId: sourceMailbox.id,
+            targetMailboxId: targetMailbox.id,
+            mode: body.mode ?? 'mirror',
+            status: body.status ?? 'active',
+            pattern: body.pattern,
+            name: body.name,
+            schedule: body.syncConfig.schedule,
+          })
+          .returning(),
+        'mapping',
+      );
+
+      if (body.syncConfig.domains.length > 0) {
+        await db.insert(schema.scopeSelection).values(
+          body.syncConfig.domains.map((domain) => ({ tenantId, mappingId: mapping.id, domain, included: true })),
+        );
+      }
+
+      return mapping;
+    });
+
+    res.status(201).json({
+      id: created.id,
       tenantId,
-      name: body.name,
+      name: created.name,
       sourceType: body.sourceType,
       targetType: body.targetType,
-      sourceConfig: body.sourceConfig,
-      targetConfig: body.targetConfig,
-      syncConfig: body.syncConfig,
-      status: 'draft',
-      mode: 'mirror',
-      pattern: undefined,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    res.status(201).json(mockMapping);
+      status: created.status,
+      mode: created.mode,
+      pattern: created.pattern ?? undefined,
+      syncConfig: { domains: body.syncConfig.domains, schedule: created.schedule ?? undefined },
+      createdAt: created.createdAt.toISOString(),
+      updatedAt: created.updatedAt.toISOString(),
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       res.status(400).json({

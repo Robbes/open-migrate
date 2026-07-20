@@ -44,6 +44,9 @@ export const connection = pgTable(
         'carddav',
         'webdav',
         'selfhosted_mail',
+        // JMAP is the primary target protocol (Stalwart / La Suite / mosa.cloud).
+        // The DB CHECK (0001_init.sql) already allows it; keep the TS enum in sync.
+        'jmap',
       ],
     }).notNull(),
     displayName: text('display_name').notNull(),
@@ -109,6 +112,9 @@ export const mailboxMapping = pgTable(
     })
       .notNull()
       .default('active'),
+    // User-facing name + optional cron schedule (migration 0013).
+    name: text('name'),
+    schedule: text('schedule'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

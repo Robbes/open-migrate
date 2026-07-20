@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@mollie/api-client": "^4.6.0",
+    "@openmig/core": "workspace:*",
     "@openmig/ledger": "workspace:*",
     "@openmig/scheduler": "workspace:*",
     "@openmig/shared": "workspace:*",
