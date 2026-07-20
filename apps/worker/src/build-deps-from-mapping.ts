@@ -25,9 +25,15 @@ import {
   type ImapDavTargetConfig, 
 } from '@openmig/connectors';
 import { JmapTargetWriter } from '@openmig/connectors';
-import { CalDAVSource, CarddavSource, WebdavFileSource } from '@openmig/connectors';
-import { CalDAVTargetWriter, CardDAVTargetWriter, WebDAVTargetWriter } from '@openmig/engines';
 import type { CalendarSyncDeps, ContactSyncDeps, FileSyncDeps } from '@openmig/core';
+import {
+  buildCalendarSource,
+  buildCalendarTarget,
+  buildContactSource,
+  buildContactTarget,
+  buildFileSource,
+  buildFileTarget,
+} from './dav-factories';
 import { PgLedger, PgCursorStore, createPgDb, withTenant } from '@openmig/ledger';
 import { SecretStore } from '@openmig/core/secret-store';
 import { mailboxMapping } from '@openmig/ledger';
@@ -279,30 +285,29 @@ export async function buildDomainDepsFromMapping(
 
   const { source: src, target: tgt } = await loadDomainConnections(pool, tenantId);
   const common = { tenantId: tId, mappingId: mId, ledger, cursors };
+  const targetDeps = { ledger, tenantId: tId, mappingId: mId };
+  const srcEndpoint = { url: davUrl(src.config), username: src.creds.username ?? '', password: src.creds.password ?? '' };
+  const tgtEndpoint = { url: davUrl(tgt.config), username: tgt.creds.username ?? '', password: tgt.creds.password ?? '' };
 
   if (domain === 'calendar') {
-    const source = new CalDAVSource({ url: davUrl(src.config), username: src.creds.username ?? '', password: src.creds.password });
-    const target = new CalDAVTargetWriter(
-      { url: davUrl(tgt.config), username: tgt.creds.username ?? '', password: tgt.creds.password ?? '' },
-      { ledger, tenantId: tId, mappingId: mId },
-    );
-    return { ...common, source, target } satisfies CalendarSyncDeps;
+    return {
+      ...common,
+      source: buildCalendarSource(srcEndpoint),
+      target: buildCalendarTarget(tgtEndpoint, targetDeps),
+    } satisfies CalendarSyncDeps;
   }
   if (domain === 'contact') {
-    const source = new CarddavSource({ url: davUrl(src.config), username: src.creds.username ?? '', password: src.creds.password });
-    const target = new CardDAVTargetWriter(
-      { url: davUrl(tgt.config), username: tgt.creds.username ?? '', password: tgt.creds.password ?? '' },
-      { ledger, tenantId: tId, mappingId: mId },
-    );
-    return { ...common, source, target } satisfies ContactSyncDeps;
+    return {
+      ...common,
+      source: buildContactSource(srcEndpoint),
+      target: buildContactTarget(tgtEndpoint, targetDeps),
+    } satisfies ContactSyncDeps;
   }
-  // file
-  const source = new WebdavFileSource({ url: davUrl(src.config), username: src.creds.username ?? '', password: src.creds.password });
-  const target = new WebDAVTargetWriter(
-    { url: davUrl(tgt.config), username: tgt.creds.username ?? '', password: tgt.creds.password ?? '' },
-    { ledger, tenantId: tId, mappingId: mId },
-  );
-  return { ...common, source, target } satisfies FileSyncDeps;
+  return {
+    ...common,
+    source: buildFileSource(srcEndpoint),
+    target: buildFileTarget(tgtEndpoint, targetDeps),
+  } satisfies FileSyncDeps;
 }
 
 /**

@@ -23,6 +23,8 @@ import {
   type ContactTargetWriter,
   type FileSource,
   type FileTargetWriter,
+  type SourceConfig,
+  type TargetConfig,
 } from '@openmig/shared';
 import { 
   ImapSource, 
@@ -36,6 +38,15 @@ import { JmapTargetWriter } from '@openmig/connectors';
 import { PgLedger } from '@openmig/ledger';
 import { PgCursorStore } from '@openmig/ledger';
 import { createPgDb } from '@openmig/ledger';
+import {
+  type DavEndpoint,
+  buildCalendarSource,
+  buildCalendarTarget,
+  buildContactSource,
+  buildContactTarget,
+  buildFileSource,
+  buildFileTarget,
+} from './dav-factories';
 
 /**
  * Build the complete dependency bundle for a shadow pass.
@@ -411,96 +422,64 @@ export function buildDomainDeps(
   }
 
   // Build source connector based on domain type
-  let source: CalendarSource | ContactSource | FileSource;
   const sourceConfig = domainConfig.source;
-  const _throttleLimiter = buildThrottleLimiter(config);
-
-  switch (sourceConfig.type) {
-    case 'caldav': {
-      // CalDAV source - auth can be 'login' or 'xoauth2'
-      let caldavPassword: string;
-      if (sourceConfig.auth.kind === 'login') {
-        caldavPassword = process.env[sourceConfig.auth.passwordFromEnv] ?? '';
-      } else if (sourceConfig.auth.kind === 'xoauth2') {
-        caldavPassword = process.env[sourceConfig.auth.tokenFromEnv] ?? '';
-      } else {
-        throw new Error(`Unsupported CalDAV auth kind: ${(sourceConfig.auth as {kind: string}).kind}`);
-      }
-      const _caldavPassword = caldavPassword;
-      source = {
-        // Placeholder - actual CalDAV source implementation would go here
-        // For now, we use a mock that throws (since we don't have a full CalDAV source implementation)
-        listFolders: async () => [],
-        listSince: async () => ({ items: [], nextCursor: { value: '' } }),
-      } as CalendarSource;
-      break;
-    }
-    case 'carddav':
-      // CardDAV source
-      source = {
-        listFolders: async () => [],
-        listSince: async () => ({ items: [], nextCursor: { value: '' } }),
-      } as ContactSource;
-      break;
-    case 'webdav':
-      // WebDAV source
-      source = {
-        listFolders: async () => [],
-        listSince: async () => ({ items: [], nextCursor: { value: '' } }),
-      } as FileSource;
-      break;
-    default:
-      throw new Error(`Unsupported source type for ${domain}: ${(sourceConfig as {type: string}).type}`);
-  }
-
-  // Build target writer based on domain type
-  let target: CalendarTargetWriter | ContactTargetWriter | FileTargetWriter;
   const targetConfig = domainConfig.target;
+  const tenantId = config.tenantId as TenantId;
+  const mappingId = config.mappingId as MappingId;
+  const targetDeps = { ledger, tenantId, mappingId };
 
-  switch (targetConfig.type) {
-    case 'caldav': {
-      let caldavTargetPassword: string;
-      if (targetConfig.auth.kind === 'login') {
-        caldavTargetPassword = process.env[targetConfig.auth.passwordFromEnv] ?? '';
-      } else if (targetConfig.auth.kind === 'xoauth2') {
-        caldavTargetPassword = process.env[targetConfig.auth.tokenFromEnv] ?? '';
-      } else {
-        throw new Error(`Unsupported CalDAV target auth kind: ${(targetConfig.auth as {kind: string}).kind}`);
-      }
-      const _caldavTargetPassword = caldavTargetPassword;
-      target = {
-        // Placeholder - actual CalDAV target writer would go here
-        ensureCalendar: async () => '',
-        upsertCalendarEvent: async () => ({ targetId: '', created: false }),
-        findCalendarByNaturalKey: async () => undefined,
-      } as CalendarTargetWriter;
+  // Build the real native DAV connectors from the file config + env-resolved
+  // credentials (shared with the managed DB path via dav-factories).
+  let source: CalendarSource | ContactSource | FileSource;
+  let target: CalendarTargetWriter | ContactTargetWriter | FileTargetWriter;
+  switch (domain) {
+    case 'calendar':
+      source = buildCalendarSource(davEndpoint(sourceConfig, 'caldav', 'source'));
+      target = buildCalendarTarget(davEndpoint(targetConfig, 'caldav', 'target'), targetDeps);
       break;
-    }
-    case 'carddav':
-      target = {
-        ensureContactFolder: async () => '',
-        upsertContact: async () => ({ targetId: '', created: false }),
-        findContactByNaturalKey: async () => undefined,
-      } as ContactTargetWriter;
+    case 'contact':
+      source = buildContactSource(davEndpoint(sourceConfig, 'carddav', 'source'));
+      target = buildContactTarget(davEndpoint(targetConfig, 'carddav', 'target'), targetDeps);
       break;
-    case 'webdav':
-      target = {
-        ensureDirectory: async () => '',
-        upsertFile: async () => ({ targetId: '', created: false }),
-        findFileByNaturalKey: async () => undefined,
-      } as FileTargetWriter;
+    case 'file':
+      source = buildFileSource(davEndpoint(sourceConfig, 'webdav', 'source'));
+      target = buildFileTarget(davEndpoint(targetConfig, 'webdav', 'target'), targetDeps);
       break;
-    default:
-      throw new Error(`Unsupported target type for ${domain}: ${(targetConfig as {type: string}).type}`);
   }
 
   return {
-    tenantId: config.tenantId as TenantId,
-    mappingId: config.mappingId as MappingId,
+    tenantId,
+    mappingId,
     source,
     target,
     ledger,
     cursors,
     concurrency: domainConfig.concurrency ?? config.concurrency ?? 4,
   };
+}
+
+/** Resolve a file-config DAV endpoint (url/user + env-based credential) for a factory. */
+function davEndpoint(
+  cfg: SourceConfig | TargetConfig,
+  expected: 'caldav' | 'carddav' | 'webdav',
+  role: 'source' | 'target',
+): DavEndpoint {
+  if (cfg.type !== expected) {
+    throw new Error(`Expected ${expected} ${role}, got ${(cfg as { type: string }).type}`);
+  }
+  const c = cfg as { url: string; user: string; auth: { kind: string; passwordFromEnv?: string; tokenFromEnv?: string } };
+  const envName =
+    c.auth.kind === 'login' || c.auth.kind === 'basic'
+      ? c.auth.passwordFromEnv
+      : c.auth.kind === 'xoauth2'
+        ? c.auth.tokenFromEnv
+        : undefined;
+  if (!envName) {
+    throw new Error(`Unsupported ${expected} ${role} auth kind: ${c.auth.kind}`);
+  }
+  const password = process.env[envName];
+  if (!password) {
+    throw new Error(`${expected} ${role} credential env var ${envName} is not set`);
+  }
+  return { url: c.url, username: c.user, password };
 }

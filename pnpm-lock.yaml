@@ -169,7 +169,27 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/node@20.19.43)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.23.0)(yaml@2.9.0)
 
-  apps/selfhost: {}
+  apps/selfhost:
+    dependencies:
+      '@openmig/ledger':
+        specifier: workspace:*
+        version: link:../../packages/ledger
+      '@openmig/scheduler':
+        specifier: workspace:*
+        version: link:../../packages/scheduler
+      '@openmig/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@openmig/worker':
+        specifier: workspace:*
+        version: link:../worker
+    devDependencies:
+      tsx:
+        specifier: ^4.6.0
+        version: 4.23.0
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@26.1.0)(jiti@1.21.7)(jsdom@25.0.1)(tsx@4.23.0)(yaml@2.9.0)
 
   apps/web:
     dependencies:
