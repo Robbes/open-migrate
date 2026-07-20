@@ -19,6 +19,8 @@
       "@openmig/ledger/*": ["./packages/ledger/src/*"],
       "@openmig/core": ["./packages/core/src/index.ts"],
       "@openmig/core/*": ["./packages/core/src/*"],
+      "@openmig/worker/orchestration": ["./apps/worker/src/orchestration.ts"],
+      "@openmig/scheduler/in-process": ["./packages/scheduler/src/scheduler.ts"],
       "@openmig/connectors": ["./packages/connectors/src/index.ts"],
       "@openmig/connectors/*": ["./packages/connectors/src/*"],
       "@openmig/engines": ["./packages/engines/src/index.ts"],
