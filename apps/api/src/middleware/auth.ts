@@ -136,15 +136,74 @@ async function verifyManagedToken(token: string): Promise<JwtPayload> {
   }
 }
 
+/** Thrown when neither JWT_SECRET nor JWT_ISSUER is configured in production. */
+class AuthNotConfiguredError extends Error {
+  constructor() {
+    super('JWT verification not configured (JWT_SECRET or JWT_ISSUER required)');
+    this.name = 'AuthNotConfiguredError';
+  }
+}
+
+/**
+ * Choose the verification mode. The managed **JWKS** path (JWT_ISSUER) takes
+ * precedence over a symmetric JWT_SECRET: if an operator configures JWKS, a
+ * lingering JWT_SECRET must NOT silently downgrade verification to the shared
+ * secret (which the managed compose ships with a known default). Self-host uses
+ * JWT_SECRET; with neither configured we're in dev mode. Pure — exported for tests.
+ */
+export function selectAuthMode(jwtIssuer?: string, jwtSecret?: string): 'managed' | 'local' | 'dev' {
+  if (jwtIssuer) return 'managed';
+  if (jwtSecret) return 'local';
+  return 'dev';
+}
+
+function assertRequiredClaims(payload: JwtPayload): void {
+  if (!payload.sub || !payload.tenantId || !payload.role || !payload.email) {
+    throw new Error('Missing required claims in token payload');
+  }
+}
+
+/**
+ * Verify a bearer token and return its validated payload. Single source of truth
+ * for both `authenticate` and `optionalAuth` so neither can accidentally trust an
+ * unverified token. Throws on any verification/claim/config failure.
+ */
+async function verifyToken(token: string): Promise<JwtPayload> {
+  const mode = selectAuthMode(process.env.JWT_ISSUER, process.env.JWT_SECRET);
+
+  if (mode === 'managed') {
+    return await verifyManagedToken(token);
+  }
+
+  if (mode === 'local') {
+    // Pin the algorithm — never let the token's own header pick the algorithm.
+    const payload = jwt.verify(token, process.env.JWT_SECRET!, { algorithms: ['HS256'] }) as JwtPayload;
+    assertRequiredClaims(payload);
+    return payload;
+  }
+
+  // Dev mode: no verifier configured. Forbidden in production.
+  if (process.env.NODE_ENV === 'production') {
+    throw new AuthNotConfiguredError();
+  }
+  console.warn('JWT verification disabled - development mode');
+  const decoded = decodeJwt(token) as unknown as JwtPayload;
+  if (!decoded || typeof decoded !== 'object') {
+    throw new Error('Invalid token format');
+  }
+  assertRequiredClaims(decoded);
+  return decoded;
+}
+
 /**
  * Authentication middleware
- * 
+ *
  * Validates JWT token from Authorization header and attaches
  * user context to the request object.
- * 
- * Security: 
- * - Self-hosted: Verifies signature with JWT_SECRET
- * - Managed: Verifies signature with remote JWKS, validates iss/aud/exp
+ *
+ * Security:
+ * - Managed (JWT_ISSUER): Verifies signature with remote JWKS, validates iss/aud/exp
+ * - Self-hosted (JWT_SECRET): Verifies HS256 signature with the local secret
  * - Dev: Only in non-production, logs warning
  */
 export async function authenticate(
@@ -165,43 +224,8 @@ export async function authenticate(
 
     const token = authHeader.substring(7);
 
-    // Determine JWT verification method based on environment
-    const jwtSecret = process.env.JWT_SECRET;
-    const jwtIssuer = process.env.JWT_ISSUER;
-
-    let payload: JwtPayload;
-
-    if (jwtSecret) {
-      // Self-hosted: Verify with local secret
-      payload = jwt.verify(token, jwtSecret) as JwtPayload;
-    } else if (jwtIssuer) {
-      // Managed: Verify with issuer JWKS - SIGNATURE VERIFICATION REQUIRED
-      payload = await verifyManagedToken(token);
-    } else {
-      // Development mode: Accept any valid-looking JWT
-      // NEVER allow this in production
-      if (process.env.NODE_ENV === 'production') {
-        res.status(500).json({
-          error: 'Server Configuration Error',
-          message: 'JWT verification not configured (JWT_SECRET or JWT_ISSUER required)',
-        });
-        return;
-      }
-      
-      console.warn('JWT verification disabled - development mode');
-      const decoded = decodeJwt(token);
-      if (!decoded || typeof decoded !== 'object') {
-        throw new Error('Invalid token format');
-      }
-      
-      // Validate required claims exist even in dev mode
-      const decodedPayload = decoded as unknown as JwtPayload;
-      if (!decodedPayload.sub || !decodedPayload.tenantId || !decodedPayload.role || !decodedPayload.email) {
-        throw new Error('Missing required claims in token payload');
-      }
-      
-      payload = decodedPayload;
-    }
+    // Verify the token (managed JWKS wins over a local secret — see selectAuthMode).
+    const payload = await verifyToken(token);
 
     // Attach user context to request
     const authenticatedReq = req as AuthenticatedRequest;
@@ -215,15 +239,21 @@ export async function authenticate(
 
     next();
   } catch (error) {
-    if (error instanceof jwt.JsonWebTokenError) {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Invalid token',
+    if (error instanceof AuthNotConfiguredError) {
+      res.status(500).json({
+        error: 'Server Configuration Error',
+        message: error.message,
       });
     } else if (error instanceof jwt.TokenExpiredError) {
+      // Must be checked BEFORE JsonWebTokenError — TokenExpiredError extends it.
       res.status(401).json({
         error: 'Unauthorized',
         message: 'Token expired',
+      });
+    } else if (error instanceof jwt.JsonWebTokenError) {
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Invalid token',
       });
     } else if (error instanceof Error) {
       // Handle jose errors and other verification failures
@@ -272,19 +302,9 @@ export async function optionalAuth(
 
   try {
     const token = authHeader.substring(7);
-    const jwtSecret = process.env.JWT_SECRET;
-
-    let payload: JwtPayload;
-
-    if (jwtSecret) {
-      payload = jwt.verify(token, jwtSecret) as JwtPayload;
-    } else {
-      const decoded = jwt.decode(token);
-      if (!decoded) {
-        throw new Error('Invalid token');
-      }
-      payload = decoded as JwtPayload;
-    }
+    // Same verification as authenticate() — never trust an unverified token
+    // (the previous jwt.decode fallback attached forged claims in managed mode).
+    const payload = await verifyToken(token);
 
     const authenticatedReq = req as AuthenticatedRequest;
     authenticatedReq.userId = payload.sub;
@@ -293,7 +313,7 @@ export async function optionalAuth(
 
     next();
   } catch (_error) {
-    // Token invalid, but continue without authentication
+    // Token missing/invalid — continue without authentication.
     next();
   }
 }
