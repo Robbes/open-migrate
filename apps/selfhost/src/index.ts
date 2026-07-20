@@ -28,6 +28,82 @@ import { buildStatusReport, type MappingStatusInput } from './status';
 const DEFAULT_CONFIG_DIR = '/data/config';
 const DEFAULT_SCHEDULE = '*/15 * * * *'; // every 15 minutes if a mapping omits one
 
+// UUID generation for selfhost (deterministic based on input for idempotency)
+function uuidFromString(seed: string): string {
+  const hash = Buffer.from(seed).toString('hex').slice(0, 32);
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
+}
+
+/**
+ * Ensure all necessary database records exist for a mapping.
+ * Creates connection, mailbox, and mailbox_mapping records if they don't exist.
+ * This is needed because migration_status has FK constraints on mailbox_mapping.
+ * 
+ * NOTE: The client passed in should already have app.current_tenant set.
+ */
+async function ensureMappingRecords(
+  client: { query: (text: string, params?: unknown[]) => Promise<{ rows: unknown[] }> },
+  tenantId: string,
+  mailboxMappingId: string,
+  sourceUser: string,
+  targetUser: string,
+) {
+  console.log(`[selfhost] ensuring mapping records for ${mailboxMappingId}...`);
+  
+    // 1. Ensure connection records exist (source and target)
+    const sourceConnectionId = uuidFromString(`${tenantId}:source:imap`);
+    const targetConnectionId = uuidFromString(`${tenantId}:target:jmap`);
+
+    // Insert source connection (ignore if exists)
+    await client.query(
+      `INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (id) DO NOTHING`,
+      [sourceConnectionId, tenantId, 'source', 'imap', 'Source IMAP', JSON.stringify({ type: 'imap', host: 'stalwart', port: 143, security: 'none' }), 'connected']
+    );
+    console.log(`[selfhost] ensured source connection ${sourceConnectionId}`);
+
+    // Insert target connection (ignore if exists)
+    await client.query(
+      `INSERT INTO connection (id, tenant_id, role, kind, display_name, config, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (id) DO NOTHING`,
+      [targetConnectionId, tenantId, 'target', 'jmap', 'Target JMAP', JSON.stringify({ type: 'jmap', host: 'stalwart', port: 8080, security: 'none' }), 'connected']
+    );
+    console.log(`[selfhost] ensured target connection ${targetConnectionId}`);
+
+    // 2. Ensure mailbox records exist (source and target)
+    const sourceMailboxId = uuidFromString(`${tenantId}:mailbox:source:${sourceUser}`);
+    const targetMailboxId = uuidFromString(`${tenantId}:mailbox:target:${targetUser}`);
+
+    // Insert source mailbox (ignore if exists)
+    await client.query(
+      `INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, primary_address, display_name, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (id) DO NOTHING`,
+      [sourceMailboxId, tenantId, sourceConnectionId, sourceUser, 'user', sourceUser, sourceUser, 'active']
+    );
+    console.log(`[selfhost] ensured source mailbox ${sourceMailboxId}`);
+
+    // Insert target mailbox (ignore if exists)
+    await client.query(
+      `INSERT INTO mailbox (id, tenant_id, connection_id, external_id, kind, primary_address, display_name, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (id) DO NOTHING`,
+      [targetMailboxId, tenantId, targetConnectionId, targetUser, 'user', targetUser, targetUser, 'active']
+    );
+    console.log(`[selfhost] ensured target mailbox ${targetMailboxId}`);
+
+    // 3. Ensure mailbox_mapping record exists (ignore if exists)
+    await client.query(
+      `INSERT INTO mailbox_mapping (id, tenant_id, source_mailbox_id, target_mailbox_id, mode, status)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (id) DO NOTHING`,
+      [mailboxMappingId, tenantId, sourceMailboxId, targetMailboxId, 'mirror', 'active']
+    );
+    console.log(`[selfhost] ensured mailbox_mapping ${mailboxMappingId}`);
+}
+
 export interface SelfhostOptions {
   readonly databaseUrl?: string;
   readonly configDir?: string;
@@ -64,9 +140,59 @@ export async function start(options: SelfhostOptions = {}): Promise<SelfhostHand
   const scheduler = new InProcessScheduler();
   const handles: ScheduleHandle[] = [];
 
+  // Helper to run a function with tenant context set for RLS
+  const withTenantContext = async <T>(
+    tenantId: string,
+    fn: (client: { query: (text: string, params?: unknown[]) => Promise<{ rows: unknown[] }> }) => Promise<T>
+  ): Promise<T> => {
+    const client = await db.$pool.connect();
+    try {
+      await client.query("SELECT set_config('app.current_tenant', $1, true)", [tenantId]);
+      return await fn(client);
+    } finally {
+      client.release();
+    }
+  };
+
   const runMapping = (m: LoadedMapping) => async () => {
     try {
-      const results = await runAllDomains(m.config, statusStore);
+      console.log(`[selfhost] ${m.config.mappingId}: starting pass...`);
+      
+      // Ensure tenant exists and mapping records are set up with tenant context
+      await withTenantContext(m.config.tenantId as string, async (client) => {
+        // Ensure tenant exists before running (idempotent)
+        await client.query(
+          `INSERT INTO tenant (id, name, status, settings)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (id) DO NOTHING`,
+          [m.config.tenantId, `Tenant ${m.config.tenantId.slice(0, 8)}`, 'active', '{}']
+        );
+        console.log(`[selfhost] ${m.config.mappingId}: tenant ensured`);
+        
+        // Ensure all necessary database records exist (connection, mailbox, mailbox_mapping)
+        const sourceUser = m.config.source.type === 'imap-oauth2'
+          ? m.config.source.user 
+          : 'unknown';
+        const targetUser = m.config.target.type === 'jmap' ? m.config.target.user : 'unknown';
+        console.log(`[selfhost] ${m.config.mappingId}: ensuring mapping records...`);
+        await ensureMappingRecords(
+          client,
+          m.config.tenantId as string,
+          m.mailboxMappingId,
+          sourceUser,
+          targetUser,
+        );
+        console.log(`[selfhost] ${m.config.mappingId}: mapping records ensured`);
+      });
+      
+      // Use the mailbox_mapping ID (not the config mappingId) for migration_status
+      const configWithCorrectMappingId = {
+        ...m.config,
+        mappingId: m.mailboxMappingId,
+      };
+      
+      console.log(`[selfhost] ${m.config.mappingId}: running domains...`);
+      const results = await runAllDomains(configWithCorrectMappingId, statusStore);
       const created = results.reduce((n, r) => n + r.created, 0);
       console.log(`[selfhost] ${m.config.mappingId}: pass complete (${created} created)`);
     } catch (err) {
@@ -92,7 +218,7 @@ export async function start(options: SelfhostOptions = {}): Promise<SelfhostHand
         for (const m of mappings) {
           const statuses = await statusStore.getStatus(
             m.config.tenantId as TenantId,
-            m.config.mappingId as MappingId,
+            m.mailboxMappingId as MappingId,
           );
           inputs.push({ mappingId: m.config.mappingId, statuses });
         }

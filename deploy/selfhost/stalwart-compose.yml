@@ -1,0 +1,26 @@
+# Stalwart test stack for selfhost e2e tests
+name: open-migrate-stalwart-test
+
+services:
+  stalwart:
+    image: stalwartlabs/stalwart:v0.16.10
+    container_name: open-migrate-stalwart-test
+    restart: unless-stopped
+    environment:
+      STALWART_HOSTNAME: '0.0.0.0'
+      STALWART_RECOVERY_MODE: '1'
+      STALWART_RECOVERY_ADMIN: 'admin:provision_password'
+    volumes:
+      - stalwart-data:/opt/stalwart/data
+    ports:
+      - "8080:8080"  # JMAP/management
+      - "993:993"    # IMAPS
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/.well-known/jmap"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  stalwart-data:

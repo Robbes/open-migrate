@@ -20,24 +20,31 @@ export class PgMigrationStatusStore implements MigrationStatusStore {
     this.db = db;
   }
 
+  /** Ensure the tenant exists (idempotent). Called before scheduling mappings. */
+  async ensureTenant(tenantId: TenantId, tenantName: string = 'Default tenant'): Promise<void> {
+    await this.db
+      .insert(schemaPg.tenant)
+      .values({
+        id: tenantId,
+        name: tenantName,
+        status: 'active',
+        settings: {},
+      })
+      .onConflictDoNothing();
+  }
+
   async initDomainStatus(
     tenantId: TenantId,
     mappingId: MappingId,
     domain: 'email' | 'calendar' | 'contact' | 'file',
   ): Promise<void> {
     // Idempotent upsert: insert if not exists, otherwise no-op
-    await this.db
-      .insert(schemaPg.migrationStatus)
-      .values({
-        id: sql`gen_random_uuid()`,
-        tenantId,
-        mappingId,
-        domain,
-        state: 'pending',
-        startedAt: sql`now()`,
-        updatedAt: sql`now()`,
-      })
-      .onConflictDoNothing();
+    // Using raw SQL to ensure correct handling of composite unique constraint
+    await this.db.execute(
+      sql`INSERT INTO migration_status (id, tenant_id, mapping_id, domain, state, started_at, updated_at)
+          VALUES (gen_random_uuid(), ${tenantId}, ${mappingId}, ${domain}, 'pending', now(), now())
+          ON CONFLICT (tenant_id, mapping_id, domain) DO NOTHING`
+    );
   }
 
   async markInProgress(
