@@ -29,15 +29,6 @@ function getSharedPool() {
 // Mount members routes
 router.use('/:tenantId/members', membersRoutes);
 // Schema validation
-const CreateTenantSchema = z.object({
-  name: z.string().min(1).max(255),
-  slug: z.string().min(1).max(50).regex(/^[a-z0-9-]+$/),
-  settings: z.object({
-    maxMappings: z.number().default(10),
-    maxUsers: z.number().default(5),
-  }).optional(),
-});
-
 const UpdateTenantSchema = z.object({
   name: z.string().min(1).max(255).optional(),
   settings: z.object({
@@ -97,66 +88,20 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response) =
 
 /**
  * POST /api/tenants
- * 
- * Create a new tenant
+ *
+ * Tenant creation is a cross-tenant BOOTSTRAP operation and cannot run through a
+ * tenant-scoped request: RLS (`tenant_isolation_insert`, migration 0011) requires
+ * the new row's id to equal `app.current_tenant`, which a freshly-created tenant
+ * never satisfies. Rather than attempt a doomed insert and return an opaque 500,
+ * be honest — tenants are provisioned via the onboarding/seed path, not here.
  */
-router.post('/', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const body = CreateTenantSchema.parse(req.body);
-    const tenantId = req.tenantId;
-
-    if (!tenantId) {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Tenant ID not found in authentication context',
-      });
-      return;
-    }
-
-    const pool = getSharedPool();
-
-    // Create tenant in database with RLS enforcement via withTenantDb
-    const [newTenant] = await withTenantDb(tenantId, pool, async (db) => {
-      return await db.insert(schema.tenant).values({
-        name: body.name,
-        status: 'active',
-        settings: body.settings || {
-          maxMappings: 10,
-          maxUsers: 5,
-        },
-      }).returning();
-    });
-
-    if (!newTenant) {
-      res.status(500).json({
-        error: 'Database error',
-        message: 'Failed to create tenant',
-      });
-      return;
-    }
-
-    res.status(201).json({
-      id: newTenant.id,
-      name: newTenant.name,
-      slug: (newTenant.settings as Record<string, unknown>)?.slug || body.slug,
-      ownerId: req.userId,
-      settings: newTenant.settings,
-      createdAt: newTenant.createdAt,
-    });
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      res.status(400).json({
-        error: 'Validation error',
-        details: error.errors,
-      });
-    } else {
-      console.error('Error creating tenant:', error);
-      res.status(500).json({
-        error: 'Internal server error',
-        message: 'Failed to create tenant',
-      });
-    }
-  }
+router.post('/', authenticate, (_req: AuthenticatedRequest, res: Response) => {
+  res.status(501).json({
+    error: 'Not Implemented',
+    message:
+      'Tenant creation is not available through the tenant-scoped API. Provision ' +
+      'tenants via the onboarding/seed flow (a privileged, non-tenant-scoped path).',
+  });
 });
 
 /**
@@ -226,6 +171,7 @@ router.get('/:tenantId', authenticate, async (req: AuthenticatedRequest, res: Re
 router.put(
   '/:tenantId',
   authenticate,
+  requireRole('owner', 'admin'),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       const body = UpdateTenantSchema.parse(req.body);

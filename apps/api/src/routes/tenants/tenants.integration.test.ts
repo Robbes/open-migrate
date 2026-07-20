@@ -189,20 +189,45 @@ describe('API Tenant Isolation', () => {
 
       const response = await request
         .put(`/api/tenants/${API_TENANT_A}`)
-        .set('Authorization', `Bearer ${TOKEN_TENANT_A}`)
+        // Admin token: the route now requires owner/admin (see below), and this
+        // case verifies the server IGNORES a client-provided tenantId.
+        .set('Authorization', `Bearer ${TOKEN_ADMIN_A}`)
         .send(updateData);
 
       // Server should ignore client-provided tenantId and use auth context
       // The route should either accept it (ignoring tenantId) or reject it
       // Either way, the tenant should remain API_TENANT_A
       expect([200, 400]).toContain(response.status);
-      
+
       // Verify the tenant wasn't changed to tenant B
       const check = await superuserPool.query(
         'SELECT id FROM tenant WHERE id = $1',
         [API_TENANT_A]
       );
       expect(check.rows.length).toBe(1); // Tenant A still exists
+    });
+
+    it('should forbid a non-admin member from updating the tenant', async () => {
+      const response = await request
+        .put(`/api/tenants/${API_TENANT_A}`)
+        .set('Authorization', `Bearer ${TOKEN_TENANT_A}`) // role: member
+        .send({ name: 'Member Should Not Rename' });
+
+      expect(response.status).toBe(403);
+
+      const check = await superuserPool.query('SELECT name FROM tenant WHERE id = $1', [API_TENANT_A]);
+      expect(check.rows[0].name).not.toBe('Member Should Not Rename');
+    });
+  });
+
+  describe('POST /api/tenants', () => {
+    it('is not available through the tenant-scoped API (501, not a silent 500)', async () => {
+      const response = await request
+        .post('/api/tenants')
+        .set('Authorization', `Bearer ${TOKEN_ADMIN_A}`)
+        .send({ name: 'New Tenant', slug: 'new-tenant' });
+
+      expect(response.status).toBe(501);
     });
   });
 
