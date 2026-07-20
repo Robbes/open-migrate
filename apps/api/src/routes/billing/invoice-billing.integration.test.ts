@@ -148,11 +148,10 @@ describe('T5 — invoice generation + Mollie webhook', () => {
     });
 
     it('never overwrites a paid invoice on regenerate (finding #1)', async () => {
-      // Generate a draft, then mark it paid with sentinel amounts (as the webhook
-      // would), then seed more usage and regenerate. The paid invoice's stored
-      // amounts + status must be untouched (the setWhere guard), and the call
-      // reports it locked.
-      await seedUsage(TENANT_A, 'compute', 'sync', 1);
+      // Generate a draft (base fee only), then mark it paid with sentinel amounts
+      // (as the webhook would), then seed usage and regenerate. The paid invoice's
+      // stored amounts + status must be untouched (the setWhere guard), and the
+      // call reports it locked.
       await request.post('/api/billing/invoices/generate').set('Authorization', `Bearer ${token(TENANT_A)}`).send({ period: PERIOD });
 
       await superuserPool.query(
