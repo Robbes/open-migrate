@@ -60,18 +60,40 @@ export async function runAllDomains(
     await statusStore.markInProgress(tenantId, mappingId, domain);
 
     try {
+      // Each builder opens a Postgres pool; always release it after the pass
+      // (finally) so a long-running scheduler never leaks a pool per domain.
       if (domain === 'email') {
-        const result = await runShadowPass(await buildDeps(config));
-        results.push({ domain, scanned: result.scanned, created: result.created, skipped: result.skipped, failed: 0 });
+        const deps = await buildDeps(config);
+        try {
+          const result = await runShadowPass(deps);
+          results.push({ domain, scanned: result.scanned, created: result.created, skipped: result.skipped, failed: 0 });
+        } finally {
+          await deps.close();
+        }
       } else if (domain === 'calendar') {
-        const result = await runCalendarSync(buildDomainDeps(config, 'calendar'));
-        results.push({ domain, scanned: result.scanned, created: result.created, skipped: result.skipped, failed: result.failed });
+        const deps = buildDomainDeps(config, 'calendar');
+        try {
+          const result = await runCalendarSync(deps);
+          results.push({ domain, scanned: result.scanned, created: result.created, skipped: result.skipped, failed: result.failed });
+        } finally {
+          await deps.close();
+        }
       } else if (domain === 'contact') {
-        const result = await runContactSync(buildDomainDeps(config, 'contact'));
-        results.push({ domain, scanned: result.scanned, created: result.created, skipped: result.skipped, failed: result.failed });
+        const deps = buildDomainDeps(config, 'contact');
+        try {
+          const result = await runContactSync(deps);
+          results.push({ domain, scanned: result.scanned, created: result.created, skipped: result.skipped, failed: result.failed });
+        } finally {
+          await deps.close();
+        }
       } else {
-        const result = await runFileSync(buildDomainDeps(config, 'file'));
-        results.push({ domain, scanned: result.scanned, created: result.created, skipped: result.skipped, failed: result.failed });
+        const deps = buildDomainDeps(config, 'file');
+        try {
+          const result = await runFileSync(deps);
+          results.push({ domain, scanned: result.scanned, created: result.created, skipped: result.skipped, failed: result.failed });
+        } finally {
+          await deps.close();
+        }
       }
 
       await statusStore.markCompleted(tenantId, mappingId, domain);

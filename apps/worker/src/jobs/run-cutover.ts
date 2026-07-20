@@ -79,8 +79,12 @@ export const runCutover = schemaTask({
         console.log('Running final delta sync');
         await ctxTyped.logger.log('Running final delta sync...');
         const deps = await buildDepsFromMapping(pool, tenantId, mappingId);
-        const delta = await runShadowPass(deps);
-        await ctxTyped.logger.log(`Final delta sync: ${delta.created} created, ${delta.skipped} skipped`);
+        try {
+          const delta = await runShadowPass(deps);
+          await ctxTyped.logger.log(`Final delta sync: ${delta.created} created, ${delta.skipped} skipped`);
+        } finally {
+          await deps.close(); // release the deps' pool
+        }
       }
 
       // Step 2: Verification (if not skipped) — REAL verification against the
@@ -91,42 +95,49 @@ export const runCutover = schemaTask({
         await ctxTyped.logger.log('Running verification checks...');
 
         const deps = await buildDepsFromMapping(pool, tenantId, mappingId);
-        const verificationReader = createLedgerVerificationReader({ connectionString: dbUrl });
-        const verification = await runVerification(
-          createRealVerificationDeps({
-            tenantId: asTenantId(tenantId),
-            mappingId: asMappingId(mappingId),
-            config: {
-              checksumSamplePercentage: 5,
-              minSampleSize: 10,
-              maxSampleSize: 1000,
-              requiredMatchPercentage: 0.99,
-              maxDiscrepancyPercentage: 0.01,
-              verifyMail: true,
-              verifyCalendar: true,
-              verifyContacts: true,
-              verifyFiles: true,
-            },
-            ledger: deps.ledger,
-            verificationReader,
-            // Concrete JMAP / IMAP-DAV targets implement TargetReindexer (listEntries).
-            targetReindexer: deps.target as unknown as TargetReindexer,
-          }),
-        );
-
-        await ctxTyped.logger.log(
-          `Verification ${verification.overallStatus} (score ${verification.score.toFixed(3)}, ` +
-            `${verification.totalItemsSource} source / ${verification.totalItemsTarget} target, ` +
-            `${verification.totalDiscrepancies} discrepancies)`,
-        );
-
-        if (verification.overallStatus === 'FAIL' || !verification.canProceedToCutover) {
-          // Do NOT proceed to COMPLETED — surface the failure verbatim.
-          throw new Error(
-            `Cutover verification failed: status=${verification.overallStatus}, ` +
-              `score=${verification.score.toFixed(3)}, discrepancies=${verification.totalDiscrepancies}. ` +
-              verification.recommendations.join('; '),
+        try {
+          const verificationReader = createLedgerVerificationReader({ connectionString: dbUrl });
+          const verification = await runVerification(
+            createRealVerificationDeps({
+              tenantId: asTenantId(tenantId),
+              mappingId: asMappingId(mappingId),
+              config: {
+                checksumSamplePercentage: 5,
+                minSampleSize: 10,
+                maxSampleSize: 1000,
+                requiredMatchPercentage: 0.99,
+                maxDiscrepancyPercentage: 0.01,
+                verifyMail: true,
+                verifyCalendar: true,
+                verifyContacts: true,
+                verifyFiles: true,
+              },
+              ledger: deps.ledger,
+              verificationReader,
+              // Concrete JMAP / IMAP-DAV targets implement TargetReindexer (listEntries).
+              targetReindexer: deps.target as unknown as TargetReindexer,
+            }),
           );
+
+          await ctxTyped.logger.log(
+            `Verification ${verification.overallStatus} (score ${verification.score.toFixed(3)}, ` +
+              `${verification.totalItemsSource} source / ${verification.totalItemsTarget} target, ` +
+              `${verification.totalDiscrepancies} discrepancies)`,
+          );
+
+          if (verification.overallStatus === 'FAIL' || !verification.canProceedToCutover) {
+            // Do NOT proceed to COMPLETED — surface the failure verbatim.
+            throw new Error(
+              `Cutover verification failed: status=${verification.overallStatus}, ` +
+                `score=${verification.score.toFixed(3)}, discrepancies=${verification.totalDiscrepancies}. ` +
+                verification.recommendations.join('; '),
+            );
+          }
+        } finally {
+          // Release the deps' pool (never leak it). NOTE: createLedgerVerificationReader
+          // opens its own pool and the LedgerVerificationReader port has no disposer
+          // yet — a separate follow-up; cutover is an infrequent, manual operation.
+          await deps.close();
         }
       }
 

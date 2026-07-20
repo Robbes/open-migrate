@@ -47,12 +47,13 @@ import {
   buildFileSource,
   buildFileTarget,
 } from './dav-factories';
+import { withClose, type WithClose } from './deps-lifecycle';
 
 /**
  * Build the complete dependency bundle for a shadow pass.
  * This wires together all the components needed for the worker to run.
  */
-export async function buildDeps(config: MappingConfig): Promise<ReconcileDeps> {
+export async function buildDeps(config: MappingConfig): Promise<WithClose<ReconcileDeps>> {
   // Extract database connection from environment
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
@@ -80,15 +81,19 @@ export async function buildDeps(config: MappingConfig): Promise<ReconcileDeps> {
   // Build target writer from config
   const target = buildTargetWriter(config.target);
 
-  return {
-    tenantId: config.tenantId as unknown as ReconcileDeps['tenantId'],
-    mappingId: config.mappingId as unknown as ReconcileDeps['mappingId'],
-    source,
-    target,
-    ledger,
-    cursors,
-    concurrency: config.concurrency ?? 4,
-  };
+  // Attach close() so the caller releases the pool after the pass (never leak it).
+  return withClose(
+    {
+      tenantId: config.tenantId as unknown as ReconcileDeps['tenantId'],
+      mappingId: config.mappingId as unknown as ReconcileDeps['mappingId'],
+      source,
+      target,
+      ledger,
+      cursors,
+      concurrency: config.concurrency ?? 4,
+    },
+    db,
+  );
 }
 
 /**
@@ -350,7 +355,7 @@ function buildTargetWriter(targetConfig: MappingConfig['target']): TargetWriter 
 export function buildDomainDeps(
   config: MappingConfig,
   domain: 'calendar'
-): {
+): WithClose<{
   tenantId: TenantId;
   mappingId: MappingId;
   source: CalendarSource;
@@ -358,11 +363,11 @@ export function buildDomainDeps(
   ledger: Ledger;
   cursors?: CursorStore;
   concurrency?: number;
-};
+}>;
 export function buildDomainDeps(
   config: MappingConfig,
   domain: 'contact'
-): {
+): WithClose<{
   tenantId: TenantId;
   mappingId: MappingId;
   source: ContactSource;
@@ -370,11 +375,11 @@ export function buildDomainDeps(
   ledger: Ledger;
   cursors?: CursorStore;
   concurrency?: number;
-};
+}>;
 export function buildDomainDeps(
   config: MappingConfig,
   domain: 'file'
-): {
+): WithClose<{
   tenantId: TenantId;
   mappingId: MappingId;
   source: FileSource;
@@ -382,11 +387,11 @@ export function buildDomainDeps(
   ledger: Ledger;
   cursors?: CursorStore;
   concurrency?: number;
-};
+}>;
 export function buildDomainDeps(
   config: MappingConfig,
   domain: 'calendar' | 'contact' | 'file'
-): {
+): WithClose<{
   tenantId: TenantId;
   mappingId: MappingId;
   source: CalendarSource | ContactSource | FileSource;
@@ -394,7 +399,7 @@ export function buildDomainDeps(
   ledger: Ledger;
   cursors?: CursorStore;
   concurrency?: number;
-} {
+}> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     throw new Error('DATABASE_URL environment variable is required');
@@ -447,15 +452,18 @@ export function buildDomainDeps(
       break;
   }
 
-  return {
-    tenantId,
-    mappingId,
-    source,
-    target,
-    ledger,
-    cursors,
-    concurrency: domainConfig.concurrency ?? config.concurrency ?? 4,
-  };
+  return withClose(
+    {
+      tenantId,
+      mappingId,
+      source,
+      target,
+      ledger,
+      cursors,
+      concurrency: domainConfig.concurrency ?? config.concurrency ?? 4,
+    },
+    db,
+  );
 }
 
 /** Resolve a file-config DAV endpoint (url/user + env-based credential) for a factory. */
