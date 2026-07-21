@@ -24,8 +24,10 @@ export default defineConfig({
       {
         test: {
           name: 'unit-browser',
-          include: ['apps/web/**/*.unit.test.ts'],
+          // Include .tsx so web component tests (jsdom + testing-library) run in CI too.
+          include: ['apps/web/**/*.unit.test.{ts,tsx}'],
           environment: 'jsdom',
+          setupFiles: ['./apps/web/src/test-setup.ts'],
         },
       },
       {
