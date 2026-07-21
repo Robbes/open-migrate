@@ -27,7 +27,7 @@ pnpm install
 
 ### Running Tests
 ```bash
-# Unit tests (no dependencies)
+# Unit tests (root config boots a throwaway Postgres via Testcontainers → needs Docker)
 pnpm test
 
 # Integration tests (requires Docker)
