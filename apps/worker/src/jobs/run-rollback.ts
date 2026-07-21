@@ -28,7 +28,7 @@ const RollbackJobSchema = z.object({
     restoreDns: z.boolean().default(true),
     notifyUsers: z.boolean().default(true),
     dnsDomain: z.string().optional(),
-  }).default({}),
+  }).prefault({}),
 });
 
 type RollbackJobPayload = z.infer<typeof RollbackJobSchema>;

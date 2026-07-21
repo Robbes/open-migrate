@@ -219,7 +219,7 @@ router.post('/estimate', authenticate, async (req: AuthenticatedRequest, res: Re
     if (error instanceof z.ZodError) {
       res.status(400).json({
         error: 'Validation error',
-        details: error.errors,
+        details: error.issues,
       });
     } else {
       console.error('Error estimating cost:', error);
@@ -575,7 +575,7 @@ router.post('/payment-methods', authenticate, async (req: AuthenticatedRequest, 
     if (error instanceof z.ZodError) {
       res.status(400).json({
         error: 'Validation error',
-        details: error.errors,
+        details: error.issues,
       });
     } else {
       console.error('Error creating payment method:', error);

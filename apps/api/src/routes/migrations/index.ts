@@ -299,7 +299,7 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res: Response) 
     if (error instanceof z.ZodError) {
       res.status(400).json({
         error: 'Validation error',
-        details: error.errors,
+        details: error.issues,
       });
     } else {
       console.error('Error creating mapping:', error);
@@ -500,7 +500,7 @@ router.put(
       if (error instanceof z.ZodError) {
         res.status(400).json({
           error: 'Validation error',
-          details: error.errors,
+          details: error.issues,
         });
       } else {
         console.error('Error updating mapping:', error);
@@ -648,7 +648,7 @@ router.post(
       if (error instanceof z.ZodError) {
         res.status(400).json({
           error: 'Validation error',
-          details: error.errors,
+          details: error.issues,
         });
       } else {
         console.error('Error triggering sync:', error);
@@ -725,7 +725,7 @@ router.post(
       if (error instanceof z.ZodError) {
         res.status(400).json({
           error: 'Validation error',
-          details: error.errors,
+          details: error.issues,
         });
       } else {
         console.error('Error triggering cutover:', error);

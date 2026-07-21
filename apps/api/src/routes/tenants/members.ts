@@ -134,7 +134,7 @@ router.post(
       if (error instanceof z.ZodError) {
         res.status(400).json({
           error: 'Validation error',
-          details: error.errors,
+          details: error.issues,
         });
       } else {
         console.error('Error inviting member:', error);
@@ -305,7 +305,7 @@ router.patch(
       if (error instanceof z.ZodError) {
         res.status(400).json({
           error: 'Validation error',
-          details: error.errors,
+          details: error.issues,
         });
       } else {
         console.error('Error updating member:', error);
