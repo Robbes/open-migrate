@@ -30,7 +30,7 @@ const FullSyncJobSchema = z.object({
   options: z.object({
     maxItems: z.number().optional(),
     forceFullScan: z.boolean().default(true), // Always force full scan for full-sync job
-  }).default({}),
+  }).prefault({}),
 });
 
 type FullSyncJobPayload = z.infer<typeof FullSyncJobSchema>;

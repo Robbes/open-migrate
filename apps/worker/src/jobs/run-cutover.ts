@@ -31,7 +31,7 @@ const CutoverJobSchema = z.object({
     gracePeriodHours: z.number().default(24),
     dnsDomain: z.string().optional(),
     targetMailServer: z.string().optional(),
-  }).default({}),
+  }).prefault({}),
 });
 
 type CutoverJobPayload = z.infer<typeof CutoverJobSchema>;
