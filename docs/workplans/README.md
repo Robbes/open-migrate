@@ -30,6 +30,7 @@ Verified state:
 | [0010](./0010-selfhost-edition.md) | Self-host edition | 🟡 **T1–T4 + T6 done & merged; T5 e2e written, needs a seeded run.** (PRs #62/#63 packaging+docs, #64 pool-leak, #65/#70/#73 review+T5). `apps/selfhost/src/index.ts` is now a **real entrypoint** (migrate → load config dir → `InProcessScheduler` → `/healthz`+`/status` → graceful shutdown, all four domains, zero managed leakage); startup migration runner (`packages/ledger/src/migrate.ts`), bundled-Postgres compose + Dockerfile, env-file secrets all present. **Only open:** T5's zero-duplicates assertion needs a **seeded, non-zero source** run on a Docker host (§5 acceptance centerpiece). **Postgres-only (ADR-0023).** |
 | [0011](./0011-managed-edition-hardening.md) | Managed edition hardening | 🟡 **T1–T6 done & merged; only T7 remains.** T1 runtime RLS, T2 real API persistence, T3 Trigger.dev wiring, T4 usage metering, T5 billing + Mollie webhook e2e, T6 web on the real API. The **T3 remainder is now closed** (PR #67): cal/contact/file domains wired via `buildDomainDepsFromMapping`, and `run-cutover.ts`/`run-rollback.ts` are real (final pass + verification gate that aborts on FAIL; honest rollback). Post-#56 review PRs hardened it further — tenant-authz RLS gate (#71), auth JWKS precedence (#69), members-rollback (#68), billing-webhook (#66). **Remaining:** T7 — app-tier Dockerfiles + live `compose up` DoD verification (draft on PR #57, needs a Docker host); only DNS provider **writes** stay deferred (2026-07-16 verify-only decision). |
 | [0012](./0012-cutover-completion-summary.md) | Cutover completion summary | 📄 History doc for the 0009 cutover work (not a forward plan). |
+| [0013](./0013-discovery-preview-confirm.md) | Pre-sync discovery, preview & confirm | ⬜ **Drafted, not started.** Read-only per-domain counts (mail/cal/contacts/files) + the §11.2 scope manifest with a **"Start migration"** green light that flips the mapping `paused`→`active` (reuses the schedule-driven model). Background discovery job + poll. **Both editions get a confirm screen** — managed React wizard step; self-host a minimal appliance-served static page (hard rule 5). Decisions locked with the owner 2026-07-21. |
 
 ## What landed this cycle
 **The 0010 self-host edition, plus 0011 hardening (PRs #57–#73).** Self-host went from a
@@ -59,7 +60,10 @@ be done in a Docker-free CI runner):
    app` / second-pass against `deploy/selfhost/compose.yml` and capture that `/status` `itemsSynced`
    does **not** grow (the §5 zero-duplicates centerpiece). Everything else in 0010 is done.
 3. **0009 T3** — DoH-resolver upgrade (small; anytime) closes out cutover.
-4. Later: rich Graph extractor (SharePoint), discovery/drift decision queue + UI, Proton path.
+4. **0013 (discovery/preview & confirm)** — drafted; the pre-sync counts + scope manifest + "Start
+   migration" green light. Fully testable without Docker (unit + jsdom component tests).
+5. Later: rich Graph extractor (SharePoint), the §11.1 drift **decision queue** + policy presets
+   (the schema `decision` table already exists), Proton path.
 
 Numbering note: `0001-start-prompt.md` is a historical bootstrap prompt, not a plan. The
 `migration/nextjs-15` branch was **not** adopted (Vite stays; tag `archive/nextjs-15` preserves
