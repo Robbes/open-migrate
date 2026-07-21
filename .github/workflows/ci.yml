@@ -23,7 +23,7 @@ jobs:
     outputs:
       any_changed: ${{ steps.filter.outputs.any_changed }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.5.0
       - name: Get changed files
         id: filter
         uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v44.5.7
@@ -54,7 +54,7 @@ jobs:
     runs-on: ${{ github.event_name == 'push' && 'self-hosted' || 'ubuntu-latest' }}
     # Quality gate for all changes (incl. docs-only)
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.5.0
       - name: Verify only allowed markdown files at repo root
         run: |
           set -e
@@ -104,7 +104,7 @@ jobs:
     runs-on: ${{ github.event_name == 'push' && 'self-hosted' || 'ubuntu-latest' }}
     # Runs on all PRs — fast check before heavier jobs
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.5.0
       - name: Check for cross-file UUID collisions
         run: |
           ./scripts/check-fixture-uuid-collisions.sh
@@ -115,9 +115,9 @@ jobs:
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.any_changed == 'true' }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.5.0
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
       - run: pnpm install --frozen-lockfile
@@ -131,9 +131,9 @@ jobs:
     runs-on: ${{ github.event_name == 'push' && 'self-hosted' || 'ubuntu-latest' }}
     needs: lint
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.5.0
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
           cache: pnpm
@@ -158,9 +158,9 @@ jobs:
     runs-on: ${{ github.event_name == 'push' && 'self-hosted' || 'ubuntu-latest' }}
     needs: unit-tests
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.5.0
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
           cache: pnpm

@@ -28,7 +28,7 @@ jobs:
       security-events: write
       actions: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.5.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.5.0
       # Node.js 24 is pre-installed on the self-hosted runner via apt
       # Install pnpm using the standalone installer
       - name: Install pnpm
@@ -58,7 +58,7 @@ jobs:
 
       - name: Upload SARIF to code scanning
         if: always() && hashFiles('trivy.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v3 # TODO: pin to commit SHA
+        uses: github/codeql-action/upload-sarif@v4 # TODO: pin to commit SHA
         with:
           sarif_file: trivy.sarif
 
@@ -75,6 +75,6 @@ jobs:
 
       - name: Attach SBOM to GitHub release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2 # TODO: pin to commit SHA
+        uses: softprops/action-gh-release@v3 # TODO: pin to commit SHA
         with:
           files: bom.json
