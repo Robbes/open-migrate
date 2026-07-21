@@ -37,7 +37,7 @@
     "@vitest/coverage-v8": "4.1.9",
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "catalog:",
-    "eslint": "10.6.0",
+    "eslint": "10.7.0",
     "jsdom": "^25.0.0",
     "pg": "catalog:",
     "prettier": "3.9.4",
