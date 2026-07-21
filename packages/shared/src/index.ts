@@ -8,6 +8,7 @@ export * from './contact';
 export * from './file';
 export * from './hash';
 export * from './ports';
+export * from './discovery';
 export * from './keywords';
 export * from './specialUse';
 export * from './cursor';
