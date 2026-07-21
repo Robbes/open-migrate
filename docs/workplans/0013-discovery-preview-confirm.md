@@ -8,9 +8,10 @@
 | T2 discovery storage + migration | ⬜ Not started | `migration_discovery` table (per tenant/mapping/domain: collections, items, bytes, `discovered_at`) + Drizzle model + RLS policy; migration `0014_*.sql`. Idempotent upsert on `(tenant_id, mapping_id, domain)`. |
 | T3 `run-discovery` job (both editions) | ⬜ Not started | Read-only discovery job that runs `discover()` across enabled domains inside `withTenant` and writes T2 rows. Managed: Trigger.dev `schemaTask`. Self-host: in-process. Honest error passthrough (§11.2). |
 | T4 API: discover + poll (managed) | ⬜ Not started | `POST /api/migrations/:id/discover` (enqueue) + `GET /api/migrations/:id/discovery` (counts + job state) under RLS. Static **scope manifest** served from a shared module. Integration tests incl. cross-tenant isolation. |
-| T5 mapping lifecycle: draft → active | ⬜ Not started | New mappings created **paused** (pre-confirm); scheduler must NOT dispatch non-`active` mappings (verify + enforce in both schedulers); `POST /api/migrations/:id/start` flips `paused`→`active`. Unit + integration tests. |
-| T6 web "Review & confirm" wizard step | ⬜ Not started | After source/target/domains, a step that triggers discovery, polls, and renders per-domain counts + the §11.2 scope manifest, with a **"Start migration"** button = the green light (calls `/start`). jsdom + testing-library component tests. |
-| T7 gates + docs | ⬜ Not started | `pnpm lint && typecheck && test (&& test:integration)` green; wizard/README docs; SAD §11.2 cross-ref updated ("scope manifest shown before start" now partially implemented). |
+| T5 mapping lifecycle: draft → active (both editions) | ⬜ Not started | New mappings created **paused** (pre-confirm); scheduler must NOT dispatch non-`active` mappings (verify + enforce in both schedulers); managed `POST /api/migrations/:id/start` **and** a self-host activation route both flip `paused`→`active`. Self-host loads config-dir mappings as paused until confirmed. Unit + integration tests. |
+| T6 managed web "Review & confirm" wizard step | ⬜ Not started | After source/target/domains, a step that triggers discovery, polls, and renders per-domain counts + the §11.2 scope manifest, with a **"Start migration"** button = the green light (calls `/start`). jsdom + testing-library component tests. |
+| T7 self-host confirm screen (appliance-served) | ⬜ Not started | A minimal, dependency-light **static page the appliance serves** (`GET /`) that renders the same discovery counts + scope manifest per configured mapping and a **"Start migration"** button → self-host activation endpoint. Self-host mappings load **pending/paused** and only schedule after confirm (§11.2 parity with managed). Hard rule 5: no bundler/managed deps — inline HTML/JS. Unit test the served markup + the activation route. |
+| T8 gates + docs | ⬜ Not started | `pnpm lint && typecheck && test (&& test:integration)` green; wizard + self-host quickstart docs; SAD §11.2 cross-ref updated ("scope manifest shown before start" now partially implemented, both editions). |
 
 > Read `AGENTS.md` and the arch doc first (**§11.2 UI: scope manifest / decision queue**, §11.1 discovery
 > & drift, §9/§14 verification gate). **ADR-0023 Postgres-only.** **Hard rule 5:** no managed-only
@@ -27,6 +28,10 @@
 3. **Discovery = background job + poll.** A read-only, body-free discovery job writes per-domain counts
    to the DB; the wizard polls a results endpoint. Robust for large tenants, reuses the worker/job +
    status infra, and works the same in both editions.
+4. **Both editions get a confirm screen.** Managed gets the React wizard step (T6); self-host gets a
+   minimal appliance-served static page (T7) with the same counts + manifest + "Start migration". So
+   self-host is no longer headless-only for this flow — the operator sees and approves the same
+   information a managed owner does.
 
 ## Why this slice
 
@@ -51,9 +56,10 @@ for each enabled domain, the real read-only counts from their source (collection
 for files) next to the §11.2 scope manifest, and the mapping does **not** sync until they click
 **Start migration** — which flips it `paused`→`active` and the normal schedule takes over. Counts are
 produced by a background discovery job (no request timeout on large tenants) and are RLS-scoped. In
-the self-host edition the same `discover()` + in-process discovery job runs and the counts appear in
-`/status` before the first sync. `pnpm` gates green; discovery is **read-only** (no source mutation,
-no message bodies fetched).
+the self-host edition the same `discover()` + in-process discovery job runs and the appliance serves a
+**minimal static confirm page** (`GET /`) showing the same counts + scope manifest with a "Start
+migration" button; config-dir mappings load **paused** and only schedule once the operator confirms
+there. `pnpm` gates green; discovery is **read-only** (no source mutation, no message bodies fetched).
 
 ## In scope
 
@@ -64,8 +70,9 @@ no message bodies fetched).
   `dav-factories` seam.
 - Managed **API**: enqueue discovery + poll results; a static, versioned **scope manifest** module.
 - **Mapping lifecycle**: create-as-`paused`; scheduler skips non-`active`; `POST …/start` to activate.
-- Web **wizard step**: counts + scope manifest + "Start migration" green light.
-- Self-host: discovery counts surfaced in `/status`; activation is the operator enabling the mapping.
+- Managed web **wizard step**: counts + scope manifest + "Start migration" green light.
+- Self-host **appliance-served confirm page**: a minimal, dependency-light static page (`GET /`) with
+  the same counts + scope manifest + "Start migration", plus the paused-until-confirmed load path.
 
 ## Out of scope (later)
 
@@ -110,15 +117,15 @@ static, versioned §11.2 manifest (migrates / partial / does-not-migrate), serve
 `GET /api/scope-manifest`. Integration tests incl. cross-tenant isolation. **Gate:** lint + typecheck +
 integration.
 
-### T5 — mapping lifecycle: draft → active
+### T5 — mapping lifecycle: draft → active (both editions)
 Create new mappings with `status: 'paused'` (the enum already exists) instead of `'active'`. Make
 **both** schedulers skip non-`active` mappings (verify current behavior first — `InProcessScheduler`
-loader + the managed trigger dispatch — and enforce). Add `POST /api/migrations/:id/start` →
-`status: 'active'` (idempotent; 409 if already `cutover`/`done`). Self-host: the appliance only
-schedules `active` mappings from the config dir. Unit + integration tests (paused mapping never
-dispatched; start activates + schedules). **Gate:** lint + typecheck + integration.
+loader + the managed trigger dispatch — and enforce). Managed: `POST /api/migrations/:id/start` →
+`status: 'active'` (idempotent; 409 if already `cutover`/`done`). Self-host: config-dir mappings load
+**paused** and are activated via the appliance's own start route (T7). Unit + integration tests (paused
+mapping never dispatched; start activates + schedules). **Gate:** lint + typecheck + integration.
 
-### T6 — web "Review & confirm" wizard step
+### T6 — managed web "Review & confirm" wizard step
 New step in `apps/web/src/pages/CreateMapping.tsx` after domains: on entry it `POST …/discover`, polls
 `GET …/discovery`, and renders a per-domain counts table (mailboxes + messages, calendars + events,
 address books + contacts, drives + files + size) next to the scope manifest (`GET /api/scope-manifest`)
@@ -127,18 +134,31 @@ then routes to the mapping detail; a secondary "Save as draft" leaves it `paused
 testing-library component tests (loading → counts render → start calls the endpoint). **Gate:** web
 typecheck + component tests.
 
-### T7 — gates + docs
+### T7 — self-host appliance confirm screen
+Give the headless appliance a **minimal, dependency-light** confirm surface so a self-host operator
+sees and approves the same information — **no bundler, no managed deps** (hard rule 5): the app serves
+a single static HTML+inline-JS page at `GET /` that fetches the counts (a self-host `/discovery`
+equivalent, reusing the T3 in-process job + T2 rows) and the scope manifest, renders them per
+configured mapping, and offers a **"Start migration"** button that `POST`s to a self-host activation
+route flipping the mapping `paused`→`active` (T5). Config-dir mappings load paused until confirmed.
+Keep the page tiny and inlined (the appliance already only serves `/healthz` + `/status`). Unit-test
+the served markup (counts + manifest present) and the activation route (paused → active). **Gate:**
+selfhost unit tests (Docker-free) + the no-managed-leakage guard.
+
+### T8 — gates + docs
 Full `pnpm lint && typecheck && test` (+ `test:integration` where DB-backed); update the wizard section
-of the README/quickstart, and cross-reference SAD §11.2 (mark "scope manifest shown before start" as
-partially implemented, pointing here). Refresh this Status block with evidence. **Gate:** docs-hygiene.
+of the README, the self-host quickstart (the new confirm page + activation flow), and cross-reference
+SAD §11.2 (mark "scope manifest shown before start" as partially implemented in **both** editions,
+pointing here). Refresh this Status block with evidence. **Gate:** docs-hygiene.
 
 ## Depends on / editions
 
 - **Depends on:** 0007 (multi-domain sources — `discover()` extends the same connectors), 0011 T3
   (`buildDomainDepsFromMapping` + RLS wiring — the job reuses it). No open blockers.
-- **Editions:** managed gets the full wizard + API + Trigger.dev discovery job; self-host reuses the
-  same `discover()` + in-process job and surfaces counts in `/status` (no wizard — the operator's act
-  of enabling the mapping is the green light). Hard rule 5 holds: discovery has no managed-only deps.
+- **Editions (both get the screen):** managed gets the React wizard step + API + Trigger.dev discovery
+  job (T4/T6); self-host reuses the same `discover()` + in-process job (T3) and gets its **own minimal
+  appliance-served confirm page** (T7) — no bundler, no managed deps, so hard rule 5 holds. Both flip
+  the mapping `paused`→`active` on confirm (T5). The counts also remain available via `/status` JSON.
 
 ## Notes
 
