@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { mappingApi } from '../services/mapping-service';
 import { useMutation } from '@tanstack/react-query';
+import { ConfirmMigration } from '../components/ConfirmMigration';
 
 type Step = 'source' | 'target' | 'credentials' | 'data-types' | 'schedule' | 'review';
 
@@ -77,11 +78,14 @@ const CreateMapping: React.FC = () => {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(0);
   const [formData, setFormData] = useState<FormData>(initialFormData);
+  // 0013 T6: after the (paused) mapping is created, show the discovery + confirm screen
+  // instead of navigating away — the migration only starts on the explicit green light.
+  const [createdMappingId, setCreatedMappingId] = useState<string | null>(null);
 
   const createMutation = useMutation({
     mutationFn: mappingApi.create,
-    onSuccess: () => {
-      navigate('/mappings');
+    onSuccess: (mapping: { id: string }) => {
+      setCreatedMappingId(mapping.id);
     },
   });
 
@@ -546,6 +550,15 @@ const CreateMapping: React.FC = () => {
         return null;
     }
   };
+
+  // After create, the mapping exists but is PAUSED — show discovery + the green light.
+  if (createdMappingId) {
+    return (
+      <div className="max-w-4xl mx-auto">
+        <ConfirmMigration mappingId={createdMappingId} onStarted={() => navigate('/mappings')} />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl mx-auto">

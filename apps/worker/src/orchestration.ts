@@ -11,9 +11,17 @@
  * entrypoint and calls main()).
  */
 
-import type { MappingConfig, MigrationStatusStore, TenantId, MappingId } from '@openmig/shared';
-import { runShadowPass, runCalendarSync, runContactSync, runFileSync } from '@openmig/core';
+import type {
+  MappingConfig,
+  MigrationStatusStore,
+  DiscoveryStore,
+  DiscoveryDomain,
+  TenantId,
+  MappingId,
+} from '@openmig/shared';
+import { runShadowPass, runCalendarSync, runContactSync, runFileSync, discoverSource } from '@openmig/core';
 import { buildDeps, buildDomainDeps } from './build-deps';
+import { discoverDomains, type DomainDiscoveryTask, type DomainDiscoveryOutcome } from './discovery';
 
 export interface DomainSyncResult {
   domain: 'email' | 'calendar' | 'contact' | 'file';
@@ -109,4 +117,53 @@ export async function runAllDomains(
   }
 
   return results;
+}
+
+/** Best-effort per-item byte size from a listing item (mail/file carry `.size`). */
+function itemBytes(item: unknown): number | undefined {
+  const o = item as { size?: number; item?: { size?: number } };
+  return typeof o.size === 'number' ? o.size : o.item?.size;
+}
+
+/**
+ * Config-driven pre-sync discovery (workplan 0013 T7, self-host path). Counts each enabled domain's
+ * source (read-only, body-free) and persists via {@link DiscoveryStore}. Mirrors runAllDomains'
+ * config-driven deps building; reuses the shared `discoverDomains` orchestration. Trigger.dev-free.
+ */
+export async function discoverAllDomains(
+  config: MappingConfig,
+  store: DiscoveryStore,
+  tenantId: TenantId,
+  mappingId: MappingId,
+): Promise<DomainDiscoveryOutcome[]> {
+  const hasDomainConfig = config.domains && Object.values(config.domains).some((d) => d?.enabled);
+  const runMailOnly = !hasDomainConfig && config.source.type === 'imap-oauth2';
+
+  const enabled: Array<{ domain: DiscoveryDomain; open: () => Promise<{ source: unknown; close: () => Promise<void> }> }> = [];
+  if (config.domains?.mail?.enabled || runMailOnly) {
+    enabled.push({ domain: 'email', open: async () => { const d = await buildDeps(config); return { source: d.source, close: d.close }; } });
+  }
+  if (config.domains?.calendar?.enabled) {
+    enabled.push({ domain: 'calendar', open: async () => { const d = buildDomainDeps(config, 'calendar'); return { source: d.source, close: d.close }; } });
+  }
+  if (config.domains?.contacts?.enabled) {
+    enabled.push({ domain: 'contact', open: async () => { const d = buildDomainDeps(config, 'contact'); return { source: d.source, close: d.close }; } });
+  }
+  if (config.domains?.files?.enabled) {
+    enabled.push({ domain: 'file', open: async () => { const d = buildDomainDeps(config, 'file'); return { source: d.source, close: d.close }; } });
+  }
+
+  const tasks: DomainDiscoveryTask[] = enabled.map(({ domain, open }) => ({
+    domain,
+    run: async () => {
+      const opened = await open();
+      try {
+        return await discoverSource(opened.source as Parameters<typeof discoverSource>[0], { itemBytes });
+      } finally {
+        await opened.close();
+      }
+    },
+  }));
+
+  return discoverDomains(tasks, store, tenantId, mappingId);
 }

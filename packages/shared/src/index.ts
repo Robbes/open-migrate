@@ -9,6 +9,7 @@ export * from './file';
 export * from './hash';
 export * from './ports';
 export * from './discovery';
+export * from './scope-manifest';
 export * from './keywords';
 export * from './specialUse';
 export * from './cursor';

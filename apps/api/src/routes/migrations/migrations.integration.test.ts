@@ -339,6 +339,13 @@ describe('Migrations Routes - Tenant Isolation', () => {
   });
 
   describe('POST /api/migrations/:id/sync', () => {
+    beforeAll(async () => {
+      // The PUT describe block above (intentionally) leaves MIG_MAPPING_A 'paused' to
+      // assert the update took effect. Sync requires an 'active' mapping (0013 T5's
+      // paused-guard) — restore it so these tests exercise sync, not the guard.
+      await superuserPool.query(`UPDATE mailbox_mapping SET status = 'active' WHERE id = $1`, [MIG_MAPPING_A]);
+    });
+
     it('enqueues the real delta-sync task with an id-only, tenant-scoped payload', async () => {
       triggerMock.mockClear();
       const response = await request

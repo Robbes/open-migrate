@@ -123,10 +123,70 @@ export const memberApi = {
 };
 
 // Mapping API
+// --- 0013 discovery / confirm ---
+export const DiscoveryCollectionSchema = z.object({
+  name: z.string(),
+  items: z.number(),
+  bytes: z.number().optional(),
+});
+export const DiscoveryRecordSchema = z.object({
+  domain: z.enum(['email', 'calendar', 'contact', 'file']),
+  collections: z.number(),
+  items: z.number(),
+  bytes: z.number().optional(),
+  perCollection: z.array(DiscoveryCollectionSchema).optional(),
+  discoveredAt: z.string(),
+  lastError: z.string().optional(),
+});
+export const DiscoveryResponseSchema = z.object({
+  mappingId: z.string(),
+  discovered: z.boolean(),
+  domains: z.array(DiscoveryRecordSchema),
+});
+export type DiscoveryRecord = z.infer<typeof DiscoveryRecordSchema>;
+export type DiscoveryResponse = z.infer<typeof DiscoveryResponseSchema>;
+
+export const ScopeManifestEntrySchema = z.object({ item: z.string(), detail: z.string() });
+export const ScopeManifestSchema = z.object({
+  version: z.string(),
+  migrates: z.array(ScopeManifestEntrySchema),
+  partial: z.array(ScopeManifestEntrySchema),
+  doesNotMigrate: z.array(ScopeManifestEntrySchema),
+});
+export type ScopeManifest = z.infer<typeof ScopeManifestSchema>;
+
+export const scopeManifestApi = {
+  get: async (): Promise<ScopeManifest> => {
+    const response = await apiClient.get('/scope-manifest');
+    return ScopeManifestSchema.parse(response.data);
+  },
+};
+
 export const mappingApi = {
   list: async () => {
     const response = await apiClient.get('/migrations');
     return z.array(MappingSchema).parse(response.data.mappings);
+  },
+
+  /** Enqueue read-only discovery for a mapping (0013). */
+  discover: async (mappingId: string, domains?: Array<DiscoveryRecord['domain']>) => {
+    const response = await apiClient.post(
+      `/migrations/${mappingId}/discover`,
+      domains ? { domains } : {},
+    );
+    return response.data;
+  },
+
+  /** Poll the stored per-domain discovery counts (0013). */
+  getDiscovery: async (mappingId: string): Promise<DiscoveryResponse> => {
+    const response = await apiClient.get(`/migrations/${mappingId}/discovery`);
+    return DiscoveryResponseSchema.parse(response.data);
+  },
+
+  /** The green light: activate a paused (draft) mapping (0013). */
+  start: async (mappingId: string) => {
+    const response = await apiClient.post(`/migrations/${mappingId}/start`, {});
+    return response.data;
   },
 
   create: async (data: Partial<Mapping>) => {
