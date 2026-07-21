@@ -141,6 +141,9 @@ jobs:
       - name: Run unit tests (vitest; excludes integration/e2e)
         env:
           SKIP_STALWART: 'true'
+          # Unit tests mock all DAV/HTTP; no unit test reads NEXTCLOUD_* — skip
+          # the ~30s Nextcloud container boot the global setup otherwise does.
+          SKIP_NEXTCLOUD: 'true'
         run: pnpm test -- --coverage
       - name: Upload coverage
         if: always()

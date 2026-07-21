@@ -1,4 +1,19 @@
 import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
+import { useAuthStore } from '../stores/auth-store';
+
+/**
+ * Clear all auth state on an unauthorized response. The token is mirrored in the
+ * raw `auth_token` key AND the zustand-persisted `auth-storage`; clearing only
+ * one leaves `isAuthenticated` stale (the app would look logged-in while every
+ * request 401s). `logout()` resets state + both keys, keeping them consistent.
+ */
+export function onUnauthorized(): void {
+  useAuthStore.getState().logout();
+  const win = globalThis as unknown as { location?: { href: string } };
+  if (win.location) {
+    win.location.href = '/login';
+  }
+}
 
 // Create axios instance with default config
 const apiClient: AxiosInstance = axios.create({
@@ -28,13 +43,8 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Token expired or invalid - redirect to login
-      localStorage.removeItem('auth_token');
-      // Use globalThis to access window in a type-safe way
-      const win = globalThis as unknown as { location?: { href: string } };
-      if (win.location) {
-        win.location.href = '/login';
-      }
+      // Token expired or invalid — clear ALL auth state and redirect to login.
+      onUnauthorized();
     }
     return Promise.reject(error);
   }

@@ -23,8 +23,16 @@ export default defineConfig({
     projects: [
       {
         test: {
+          name: 'unit-browser',
+          include: ['apps/web/**/*.unit.test.ts'],
+          environment: 'jsdom',
+        },
+      },
+      {
+        test: {
           name: 'unit',
-          include: ['**/*.unit.test.ts'],
+          include: ['**/*.unit.test.ts', '!apps/web/**/*.unit.test.ts'],
+          environment: 'node',
         },
       },
       {

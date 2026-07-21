@@ -9,14 +9,18 @@ export class SingleFlight {
   run(key: string, task: () => Promise<void>): Promise<void> {
     const existing = this.inflight.get(key);
     if (existing) return existing;
-    const p = (async () => {
-      try {
-        await task();
-      } finally {
-        this.inflight.delete(key);
-      }
-    })();
+    // Defer task() to a microtask so `set` below always runs before the promise
+    // can settle. A task that throws SYNCHRONOUSLY then becomes a rejection that
+    // is still tracked and cleaned up — never left stuck in the map (which would
+    // permanently wedge this key).
+    const p = Promise.resolve().then(task);
     this.inflight.set(key, p);
+    // Clean up on settle (both branches handled, so the cleanup chain itself
+    // never surfaces an unhandled rejection; callers still see `p` reject).
+    p.then(
+      () => this.inflight.delete(key),
+      () => this.inflight.delete(key),
+    );
     return p;
   }
 
