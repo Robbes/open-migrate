@@ -584,6 +584,34 @@ export const migrationStatus = pgTable(
   ],
 );
 
+// Pre-sync discovery counts per domain (workplan 0013 T2). One row per (tenant, mapping, domain);
+// re-discovery overwrites. Counts are a point-in-time snapshot shown before the owner green-lights.
+export const migrationDiscovery = pgTable(
+  'migration_discovery',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull().references(() => tenant.id, { onDelete: 'cascade' }),
+    mappingId: uuid('mapping_id')
+      .notNull()
+      .references(() => mailboxMapping.id, { onDelete: 'cascade' }),
+    domain: text('domain', { enum: ['email', 'calendar', 'contact', 'file'] }).notNull(),
+    collections: integer('collections').notNull().default(0),
+    items: integer('items').notNull().default(0),
+    bytes: bigint('bytes', { mode: 'number' }),
+    perCollection: jsonb('per_collection'),
+    lastError: text('last_error'),
+    discoveredAt: timestamp('discovered_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('uk_migration_discovery_tenant_mapping_domain').on(
+      t.tenantId,
+      t.mappingId,
+      t.domain,
+    ),
+    index('ix_migration_discovery_tenant_mapping').on(t.tenantId, t.mappingId),
+  ],
+);
+
 // ========================= Tenant Members =========================
 
 export const tenantMember = pgTable(

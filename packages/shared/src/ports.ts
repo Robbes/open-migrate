@@ -1,4 +1,5 @@
 import type { TenantId, MappingId } from './ids';
+import type { DomainDiscovery, DiscoveryRecord, DiscoveryDomain } from './discovery';
 import type { MailFolder, MailItem, RawMessage, MailKeyword } from './mail';
 import type { CalendarFolder, RawCalendarEvent } from './calendar';
 import type { ContactFolder, RawContact } from './contact';
@@ -231,6 +232,29 @@ export interface Ledger {
    * otherwise insert and return the new row.
    */
   recordIfAbsent(record: LedgerRecord): Promise<LedgerRecord>;
+}
+
+/**
+ * Persists per-domain pre-sync discovery counts (workplan 0013 T2). One row per
+ * (tenant, mapping, domain); re-discovery overwrites. Tenant-scoped by RLS.
+ */
+export interface DiscoveryStore {
+  /** Upsert the counts for one domain (clears any prior error). */
+  upsertDiscovery(
+    tenantId: TenantId,
+    mappingId: MappingId,
+    domain: DiscoveryDomain,
+    discovery: DomainDiscovery,
+  ): Promise<void>;
+  /** Record that discovery failed for one domain, keeping the verbatim error (§11.2). */
+  recordDiscoveryError(
+    tenantId: TenantId,
+    mappingId: MappingId,
+    domain: DiscoveryDomain,
+    error: string,
+  ): Promise<void>;
+  /** Read all stored domain discovery rows for a mapping, ordered by domain. */
+  getDiscovery(tenantId: TenantId, mappingId: MappingId): Promise<DiscoveryRecord[]>;
 }
 
 /** Handle to a scheduled job; calling stop() cancels future runs. */

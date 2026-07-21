@@ -8,5 +8,6 @@ export * from './schema-pg';
 export * from './cutover-store';
 export * from './verification-queries';
 export * from './migration-status-store';
+export * from './discovery-store';
 export * from './usage-metering';
 export * from './migrate';
