@@ -49,6 +49,11 @@ Nextcloud) — both in MVP (ADR-0018). The **O365 source stays IMAP+OAuth2/Graph
 ## Safety notes
 - The test O365 source is a **real SMB tenant**: read-only, least-privilege, never write back.
 - The Spark arm64 runner has docker socket + root: trusted workflows only; build multi-arch (amd64+arm64) images.
+- **Running as an agent inside its own container (Docker-outside-of-Docker, e.g. OpenHands with a
+  mounted `docker.sock`)?** Containers you start are siblings on the *host's* daemon, not nested —
+  `localhost` inside your container is not the host's `localhost`. See
+  `docs/stalwart-integration-fix.md` "Running from inside a sandboxed agent container" before
+  concluding a Docker/port failure is a bug here.
 
 ## Skills (all agents)
 Agent-neutral, reusable skills live in `.agents/skills/` — currently `caveman.md` (ultra-terse

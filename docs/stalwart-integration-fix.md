@@ -190,3 +190,54 @@ await db.execute(sql`DELETE FROM cursor WHERE tenant_id = ${TEST_TENANT_ID}`);
 **Implementation**: After each mirror run, assert via IMAP that source@dev.local INBOX still contains exactly the seeded count (3 initially, 4 after delta append).
 
 **Rule**: Always verify source INBOX count after mirror operations to catch cross-account pollution immediately.
+
+## Running from inside a sandboxed agent container (Docker-outside-of-Docker)
+
+**Symptom**: an agent (e.g. an OpenHands sandbox) that itself runs inside a container — with
+`sudo` + a mounted `docker.sock` giving it access to the *host's* Docker daemon — reports Docker
+and "port not available"/connection-refused failures on work that is proven green in this repo's
+own CI. This is a real, distinct environment shape: neither `integration-tests` (GitHub-hosted
+`ubuntu-latest`, a plain VM with a local daemon) nor `e2e.yml` (the self-hosted Spark runner,
+running directly on the host, no extra container layer) ever exercises it, so nothing here
+accounts for it by default.
+
+**Root cause**: when the agent process is itself inside a container and only reaches Docker via a
+mounted socket, every container it starts (directly, or indirectly via Testcontainers /
+`docker compose`) is a **sibling on the host's daemon**, not a child nested inside the agent's own
+container. `localhost`/`127.0.0.1` inside the agent's container is its **own** loopback — a
+different network namespace from the host's, where the sibling container actually publishes its
+mapped port. The `docker` CLI call to start the container succeeds (which is why this looks like a
+Docker problem), then the connection to `getHost()`/`getMappedPort()` times out, because it's
+looking in the wrong namespace. `packages/testing/src/testcontainers-setup.ts` calls
+`container.getHost()` for Postgres, both Stalwart phases, and Nextcloud — all of these are affected,
+not just Stalwart.
+
+**Fixes** (apply in the agent's own container/environment, not in this repo's CI):
+1. Set `TESTCONTAINERS_HOST_OVERRIDE` (Testcontainers-node's official escape hatch for exactly this
+   case) to `host.docker.internal` or the host's real address, so `getHost()` returns something the
+   agent's container can actually reach instead of `localhost`.
+2. Make sure the agent's own container was started with `--add-host=host.docker.internal:host-gateway`
+   — Linux does not wire this up automatically the way Docker Desktop does, so without it
+   `host.docker.internal` won't resolve inside the agent at all.
+3. If the agent's sessions get killed abruptly (common for time-boxed sandboxes), Testcontainers'
+   Ryuk reaper — which also talks over the same mounted socket — can leak containers instead of
+   cleaning them up, and those leftovers block ports/volume names on retry. Either let Ryuk do its
+   job by exiting cleanly, or set `TESTCONTAINERS_RYUK_DISABLED=true` and take on cleanup explicitly
+   (`docker compose down -v --remove-orphans`, stale `stalwart-test-*` volumes) at the **start** of
+   each attempt, not just the end.
+4. Don't assume fixed host ports are free. `deploy/compose/dev.yml`'s Postgres/Stalwart ports and
+   `e2e.yml`'s selfhost-appliance port are all overridable via env vars
+   (`DEV_POSTGRES_PORT`, `DEV_STALWART_JMAP_PORT`, `DEV_STALWART_IMAP_PORT`,
+   `DEV_STALWART_IMAPS_PORT`, `SELFHOST_PORT`) precisely so a shared box — multiple agent sessions,
+   or an agent running alongside other host services — doesn't collide on 5433/8180/143/993/8081.
+   `e2e.yml`'s "Pick free host ports" step is the reference implementation: bind to port 0, read back
+   the OS-assigned free port, close, use that. Do the same in the agent rather than hardcoding a port.
+5. If the agent drives the Testcontainers integration suite directly (not just `e2e.yml`'s compose
+   flow), it also needs `stalwart-cli` on its own `PATH` (or `STALWART_CLI_PATH` set) — a real
+   host-level binary dependency in `testcontainers-setup.ts`'s provisioning phase, separate from the
+   networking issue above.
+
+**Rule**: Before assuming a Docker/port failure inside a nested-container agent is a bug in this
+repo's test setup, check whether it reproduces in a plain (non-nested) Docker environment first —
+if it only fails when Docker is reached via a mounted socket, it's almost certainly one of the five
+items above, not a regression here.

@@ -19,7 +19,9 @@ services:
       POSTGRES_PASSWORD: openmig
       POSTGRES_INITDB_ARGS: -E UTF8
     ports:
-      - "5433:5432"
+      # Overridable so CI/agents running this stack alongside other things on the
+      # same host can pick a free port instead of assuming 5433 is available.
+      - "${DEV_POSTGRES_PORT:-5433}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U openmig -d openmig"]
       interval: 5s
@@ -41,9 +43,12 @@ services:
     tmpfs:
       - /opt/stalwart/data:mode=777
     ports:
-      - "8180:8080"  # JMAP/DAV HTTP API (host:container)
-      - "143:143"    # IMAP (plain)
-      - "993:993"    # IMAPS (TLS)
+      # Overridable (DEV_STALWART_*_PORT) so CI/agents can pick free host ports
+      # instead of assuming these are available — see docs/stalwart-integration-fix.md
+      # "Running from inside a sandboxed agent container".
+      - "${DEV_STALWART_JMAP_PORT:-8180}:8080"   # JMAP/DAV HTTP API (host:container)
+      - "${DEV_STALWART_IMAP_PORT:-143}:143"     # IMAP (plain)
+      - "${DEV_STALWART_IMAPS_PORT:-993}:993"    # IMAPS (TLS)
     healthcheck:
       disable: true
     networks: [dev-network]
