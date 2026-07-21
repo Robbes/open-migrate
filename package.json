@@ -38,6 +38,7 @@
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "catalog:",
     "eslint": "10.7.0",
+    "imap-simple": "^5.1.0",
     "jsdom": "^29.1.1",
     "pg": "catalog:",
     "prettier": "3.9.4",

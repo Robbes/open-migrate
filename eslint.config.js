@@ -6,8 +6,8 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    // Node.js environment for .js and .cjs files
-    files: ['**/*.js', '**/*.cjs'],
+    // Node.js environment for .js, .cjs and .mjs files
+    files: ['**/*.js', '**/*.cjs', '**/*.mjs'],
     languageOptions: {
       globals: {
         process: 'readonly',

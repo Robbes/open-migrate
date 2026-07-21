@@ -1,77 +1,143 @@
 name: E2E (self-hosted)
 
 # ==============================================================================
-# Intentionally SEPARATE from CI (ci.yml: docs-hygiene -> lint -> unit -> integration).
-# Manual-trigger only: it needs the self-hosted Spark runner + the docker-compose
-# stack (Postgres + test mailserver + Nextcloud) and runs the full migration slice
-# incl. the idempotency property test. Do NOT add to the automated chain.
-# Adapted from the team's Java e2e pattern: tooling differs (Drizzle, not Liquibase;
-# `docker compose` v2; a fresh DB volume via `down -v` instead of manual table drops).
+# Intentionally SEPARATE from CI (ci.yml). Manual-trigger only: needs the
+# self-hosted Spark runner + Docker. Drives the workplan 0010 T5 acceptance gate
+# — the self-host appliance's restart-resume idempotency property — end to end:
+#
+#   1. Bring up Stalwart (the dev reference server; serves IMAP + JMAP and
+#      declaratively provisions source@dev.local / target@dev.local), publishing
+#      IMAP :143 and JMAP :8080 on the host so the appliance can reach them via
+#      host.docker.internal (matching test/e2e/fixtures/…mapping.json).
+#   2. SEED the source mailbox with a known N>0 set of messages (the gate is only
+#      meaningful against a non-zero source).
+#   3. Build + start the self-host appliance (deploy/selfhost/compose.yml) with
+#      that fixture mapping and the source/target passwords.
+#   4. Run the Restart-Resume Idempotency Gate e2e: first pass syncs N →
+#      `docker compose restart app` → second pass must NOT grow itemsSynced.
+#
+# ⚠️ This workflow orchestrates Docker + a live mail seed and CANNOT be validated
+# off the runner. Treat the first dispatch as a shakedown run.
+# HARD RULE 5: no managed-only services here (no Trigger.dev / billing).
 # ==============================================================================
 on:
   workflow_dispatch:
+    inputs:
+      seed_count:
+        description: 'Number of messages to seed into the source mailbox'
+        required: false
+        type: number
+        default: 5
 
-# Don't cancel in progress - e2e runs long and should complete
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: false
 
 env:
-  COMPOSE_FILE: deploy/compose/dev.yml
-  COMPOSE_NETWORK: openmig_dev-network
-  RUNNER_CONTAINER: gha-runner-spark   # the Spark self-hosted runner container; adjust if named differently
-  DATABASE_URL: postgres://openmig:openmig@postgres:5432/openmig
-  JMAP_BASE_URL: http://stalwart:8080        # primary target family (JMAP); session at /.well-known/jmap
-  IMAP_HOST: stalwart                         # same server also serves IMAP/CalDAV/CardDAV/WebDAV (second family)
-  NEXTCLOUD_URL: http://nextcloud:80          # secondary DAV/files target
+  DEV_COMPOSE: deploy/compose/dev.yml
+  SELFHOST_COMPOSE: deploy/selfhost/compose.yml
+  # Ports the appliance's fixture mapping expects on host.docker.internal.
+  SELFHOST_PORT: '8081'
+  SELFHOST_BIND: '127.0.0.1'
+  # Dev-stack credentials (match deploy/compose/stalwart-config.json provisioning).
+  SOURCE_IMAP_PASSWORD: source_password
+  TARGET_JMAP_PASSWORD: target_password
+  POSTGRES_PASSWORD: selfhost_e2e_pw
+  # The restart-resume test uses the selfhost stack, not Testcontainers — skip the
+  # heavy DAV/mail containers the root e2e global-setup would otherwise boot.
+  SKIP_STALWART: 'true'
+  SKIP_NEXTCLOUD: 'true'
 
 jobs:
-  e2e:
+  e2e-selfhost:
     runs-on: [self-hosted, linux, arm64]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.5.0
-      - uses: pnpm/action-setup@v4 # TODO: pin to commit SHA
-      - uses: actions/setup-node@v7 # TODO: pin to commit SHA
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      - name: Clean up previous stack (fresh volumes)
-        run: docker compose -f "$COMPOSE_FILE" down -v --remove-orphans 2>/dev/null || true
-
-      - name: Start services
+      - name: Clean up any previous stacks (fresh volumes)
         run: |
-          docker compose -f "$COMPOSE_FILE" up -d --wait
-          docker compose -f "$COMPOSE_FILE" ps
+          docker compose -f "$SELFHOST_COMPOSE" down -v --remove-orphans 2>/dev/null || true
+          docker compose -f "$DEV_COMPOSE" down -v --remove-orphans 2>/dev/null || true
 
-      - name: Attach runner to compose network
-        run: docker network connect "$COMPOSE_NETWORK" "$RUNNER_CONTAINER" || true
+      # Publish Stalwart's IMAP (143) + JMAP (8080) on the host. dev.yml maps JMAP
+      # to 8180 by default; this override lines the ports up with the fixture.
+      - name: Write Stalwart port override
+        run: |
+          cat > /tmp/stalwart-e2e-ports.yml <<'YML'
+          services:
+            stalwart:
+              ports:
+                - "8080:8080"
+                - "143:143"
+          YML
 
-      - name: Wait for target server (Stalwart JMAP/IMAP/DAV)
+      - name: Start Stalwart (source + target)
+        run: |
+          docker compose -f "$DEV_COMPOSE" -f /tmp/stalwart-e2e-ports.yml up -d --wait stalwart || \
+            docker compose -f "$DEV_COMPOSE" -f /tmp/stalwart-e2e-ports.yml up -d stalwart
+          docker compose -f "$DEV_COMPOSE" ps
+
+      - name: Wait for Stalwart JMAP/IMAP readiness
         run: |
           for i in $(seq 1 90); do
-            if (echo > /dev/tcp/stalwart/8080) >/dev/null 2>&1; then echo "Stalwart HTTP/JMAP ready"; break; fi
-            [ "$i" -eq 90 ] && { echo "Stalwart not ready"; docker compose -f "$COMPOSE_FILE" logs stalwart; exit 1; }
+            if curl -sf http://127.0.0.1:8080/.well-known/jmap >/dev/null 2>&1; then echo "Stalwart JMAP ready"; break; fi
+            [ "$i" -eq 90 ] && { echo "Stalwart not ready"; docker compose -f "$DEV_COMPOSE" logs stalwart; exit 1; }
             sleep 2
           done
 
-      - name: Apply ledger migrations (Drizzle) to fresh DB
-        run: pnpm db:migrate   # drizzle-kit migrate against $DATABASE_URL (postgres service on the attached network)
+      - name: Seed the source mailbox (N>0 messages)
+        env:
+          SEED_IMAP_HOST: 127.0.0.1
+          SEED_IMAP_PORT: '143'
+          SEED_IMAP_USER: source@dev.local
+          SEED_IMAP_PASSWORD: ${{ env.SOURCE_IMAP_PASSWORD }}
+          SEED_COUNT: ${{ github.event.inputs.seed_count || '5' }}
+        run: node test/e2e/seed-imap-source.mjs
 
-      - name: Run E2E (incl. idempotency property test)
-        run: pnpm test:e2e     # runs the O365 -> mailserver/Nextcloud slice + asserts a second run converges
+      - name: Prepare appliance config + secrets
+        run: |
+          # Fixture mapping is git-ignored under the config dir on purpose; the
+          # Dockerfile bakes deploy/selfhost/config into the image.
+          cp test/e2e/fixtures/selfhost-restart-resume.mapping.json deploy/selfhost/config/mapping.json
+          cat > deploy/selfhost/.env <<ENV
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          SOURCE_IMAP_PASSWORD=${SOURCE_IMAP_PASSWORD}
+          TARGET_JMAP_PASSWORD=${TARGET_JMAP_PASSWORD}
+          ENV
+          # Let the appliance reach the host-published Stalwart via host.docker.internal.
+          cat > /tmp/selfhost-e2e.yml <<'YML'
+          services:
+            app:
+              extra_hosts:
+                - "host.docker.internal:host-gateway"
+          YML
+
+      - name: Build + start the self-host appliance
+        run: |
+          docker compose -f "$SELFHOST_COMPOSE" -f /tmp/selfhost-e2e.yml up -d --build --wait || \
+            { docker compose -f "$SELFHOST_COMPOSE" logs app; exit 1; }
+          docker compose -f "$SELFHOST_COMPOSE" ps
+
+      - name: Run Restart-Resume Idempotency Gate (0010 T5)
+        run: pnpm test:e2e -- --grep "Restart-Resume"
 
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.0
         with:
-          name: e2e-reports
+          name: selfhost-e2e-reports
           path: '**/reports/'
           retention-days: 7
 
       - name: Cleanup
         if: always()
         run: |
-          docker network disconnect "$COMPOSE_NETWORK" "$RUNNER_CONTAINER" || true
-          docker compose -f "$COMPOSE_FILE" down -v --remove-orphans
+          docker compose -f "$SELFHOST_COMPOSE" down -v --remove-orphans || true
+          docker compose -f "$DEV_COMPOSE" down -v --remove-orphans || true
+          rm -f deploy/selfhost/.env deploy/selfhost/config/mapping.json || true
