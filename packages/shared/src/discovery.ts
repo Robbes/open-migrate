@@ -26,3 +26,15 @@ export interface DiscoveryCollection {
   /** Byte total for this collection, when available. */
   readonly bytes?: number;
 }
+
+/** The four sync domains discovery covers. */
+export type DiscoveryDomain = 'email' | 'calendar' | 'contact' | 'file';
+
+/** A stored discovery result for one domain (T2). Extends the counts with persistence metadata. */
+export interface DiscoveryRecord extends DomainDiscovery {
+  readonly domain: DiscoveryDomain;
+  /** ISO 8601 timestamp of the most recent discovery pass for this domain. */
+  readonly discoveredAt: string;
+  /** Verbatim error from the last pass, if it failed (§11.2 honest passthrough); else absent. */
+  readonly lastError?: string;
+}
