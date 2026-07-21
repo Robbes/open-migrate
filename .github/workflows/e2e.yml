@@ -7,14 +7,20 @@ name: E2E (self-hosted)
 #
 #   1. Bring up Stalwart (the dev reference server; serves IMAP + JMAP and
 #      declaratively provisions source@dev.local / target@dev.local), publishing
-#      IMAP :143 and JMAP :8080 on the host so the appliance can reach them via
-#      host.docker.internal (matching test/e2e/fixtures/…mapping.json).
+#      IMAP + JMAP on the host so the appliance can reach them via
+#      host.docker.internal (mapping.json is generated at runtime — see step 3).
 #   2. SEED the source mailbox with a known N>0 set of messages (the gate is only
 #      meaningful against a non-zero source).
 #   3. Build + start the self-host appliance (deploy/selfhost/compose.yml) with
-#      that fixture mapping and the source/target passwords.
+#      a mapping generated from the fixture and the source/target passwords.
 #   4. Run the Restart-Resume Idempotency Gate e2e: first pass syncs N →
 #      `docker compose restart app` → second pass must NOT grow itemsSynced.
+#
+# Ports: this runner is shared with other work (other manual dispatches, agent
+# sessions, etc. on the same box), so every host port this workflow needs is
+# picked fresh at runtime (see "Pick free host ports" below) instead of assuming
+# 8080/143/993/8081 are free — see docs/stalwart-integration-fix.md "Running
+# from inside a sandboxed agent container" for the failure mode this avoids.
 #
 # ⚠️ This workflow orchestrates Docker + a live mail seed and CANNOT be validated
 # off the runner. Treat the first dispatch as a shakedown run.
@@ -36,8 +42,9 @@ concurrency:
 env:
   DEV_COMPOSE: deploy/compose/dev.yml
   SELFHOST_COMPOSE: deploy/selfhost/compose.yml
-  # Ports the appliance's fixture mapping expects on host.docker.internal.
-  SELFHOST_PORT: '8081'
+  # SELFHOST_PORT is NOT fixed here — it's computed in "Pick free host ports"
+  # below and exported to $GITHUB_ENV so it's free regardless of what else is
+  # running on this box.
   SELFHOST_BIND: '127.0.0.1'
   # Dev-stack credentials (match deploy/compose/stalwart-config.json provisioning).
   SOURCE_IMAP_PASSWORD: source_password
@@ -65,28 +72,50 @@ jobs:
           docker compose -f "$SELFHOST_COMPOSE" down -v --remove-orphans 2>/dev/null || true
           docker compose -f "$DEV_COMPOSE" down -v --remove-orphans 2>/dev/null || true
 
-      # Publish Stalwart's IMAP (143) + JMAP (8080) on the host. dev.yml maps JMAP
-      # to 8180 by default; this override lines the ports up with the fixture.
-      - name: Write Stalwart port override
+      # Pick genuinely free host ports for everything this workflow publishes
+      # (Stalwart JMAP/IMAP/IMAPS, the selfhost appliance), instead of assuming
+      # fixed numbers are available. Each freePort() call binds to port 0 (the
+      # OS hands back an unused ephemeral port), reads it back, then closes —
+      # the same trick Testcontainers uses, which is why the Testcontainers-driven
+      # integration-tests job never hits this class of collision.
+      - name: Pick free host ports
         run: |
-          cat > /tmp/stalwart-e2e-ports.yml <<'YML'
-          services:
-            stalwart:
-              ports:
-                - "8080:8080"
-                - "143:143"
-          YML
+          node -e '
+            const net = require("node:net");
+            const fs = require("node:fs");
+            function freePort() {
+              return new Promise((resolve, reject) => {
+                const srv = net.createServer();
+                srv.on("error", reject);
+                srv.listen(0, "127.0.0.1", () => {
+                  const { port } = srv.address();
+                  srv.close(() => resolve(port));
+                });
+              });
+            }
+            (async () => {
+              const [jmap, imap, imaps, selfhost] = await Promise.all([freePort(), freePort(), freePort(), freePort()]);
+              const lines = [
+                `DEV_STALWART_JMAP_PORT=${jmap}`,
+                `DEV_STALWART_IMAP_PORT=${imap}`,
+                `DEV_STALWART_IMAPS_PORT=${imaps}`,
+                `SELFHOST_PORT=${selfhost}`,
+              ];
+              fs.appendFileSync(process.env.GITHUB_ENV, lines.join("\n") + "\n");
+              console.log("Picked free ports:\n" + lines.join("\n"));
+            })().catch((err) => { console.error(err); process.exit(1); });
+          '
 
       - name: Start Stalwart (source + target)
         run: |
-          docker compose -f "$DEV_COMPOSE" -f /tmp/stalwart-e2e-ports.yml up -d --wait stalwart || \
-            docker compose -f "$DEV_COMPOSE" -f /tmp/stalwart-e2e-ports.yml up -d stalwart
+          docker compose -f "$DEV_COMPOSE" up -d --wait stalwart || \
+            docker compose -f "$DEV_COMPOSE" up -d stalwart
           docker compose -f "$DEV_COMPOSE" ps
 
       - name: Wait for Stalwart JMAP/IMAP readiness
         run: |
           for i in $(seq 1 90); do
-            if curl -sf http://127.0.0.1:8080/.well-known/jmap >/dev/null 2>&1; then echo "Stalwart JMAP ready"; break; fi
+            if curl -sf "http://127.0.0.1:${DEV_STALWART_JMAP_PORT}/.well-known/jmap" >/dev/null 2>&1; then echo "Stalwart JMAP ready"; break; fi
             [ "$i" -eq 90 ] && { echo "Stalwart not ready"; docker compose -f "$DEV_COMPOSE" logs stalwart; exit 1; }
             sleep 2
           done
@@ -94,7 +123,7 @@ jobs:
       - name: Seed the source mailbox (N>0 messages)
         env:
           SEED_IMAP_HOST: 127.0.0.1
-          SEED_IMAP_PORT: '143'
+          SEED_IMAP_PORT: ${{ env.DEV_STALWART_IMAP_PORT }}
           SEED_IMAP_USER: source@dev.local
           SEED_IMAP_PASSWORD: ${{ env.SOURCE_IMAP_PASSWORD }}
           SEED_COUNT: ${{ github.event.inputs.seed_count || '5' }}
@@ -103,8 +132,16 @@ jobs:
       - name: Prepare appliance config + secrets
         run: |
           # Fixture mapping is git-ignored under the config dir on purpose; the
-          # Dockerfile bakes deploy/selfhost/config into the image.
-          cp test/e2e/fixtures/selfhost-restart-resume.mapping.json deploy/selfhost/config/mapping.json
+          # Dockerfile bakes deploy/selfhost/config into the image. Substitute
+          # in the ports picked above rather than assuming the fixture's
+          # committed 143/8080 are free on this host right now.
+          node -e '
+            const fs = require("node:fs");
+            const cfg = JSON.parse(fs.readFileSync("test/e2e/fixtures/selfhost-restart-resume.mapping.json", "utf8"));
+            cfg.source.port = Number(process.env.DEV_STALWART_IMAP_PORT);
+            cfg.target.baseUrl = `http://host.docker.internal:${process.env.DEV_STALWART_JMAP_PORT}/.well-known/jmap`;
+            fs.writeFileSync("deploy/selfhost/config/mapping.json", JSON.stringify(cfg, null, 2));
+          '
           cat > deploy/selfhost/.env <<ENV
           POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
           SOURCE_IMAP_PASSWORD=${SOURCE_IMAP_PASSWORD}
