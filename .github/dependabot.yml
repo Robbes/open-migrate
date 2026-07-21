@@ -1,0 +1,39 @@
+# Dependency lifecycle management. Detection already runs (security-scan.yml: Trivy + pnpm audit,
+# weekly); this closes the loop by opening the actual update PRs so transitive CVEs don't accumulate.
+# Grouped weekly to keep PR noise low; security updates are ungrouped so they land fast.
+version: 2
+updates:
+  # npm/pnpm workspace (root manifest + all packages/* and apps/* via the workspace).
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 10
+    groups:
+      # One PR/week for routine minor+patch bumps across dev + prod deps.
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: chore(deps)
+      prefix-development: chore(deps-dev)
+
+  # GitHub Actions used across .github/workflows (several are pinned by SHA / tagged).
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: ci(actions)

@@ -26,3 +26,19 @@ overrides:
   engine.io-client: ^6.6.0
   "@opentelemetry/core": ">=2.8.0"
   cookie: ">=0.7.0"
+  # Security overrides (transitive CVEs surfaced by Trivy → code-scanning + pnpm audit):
+  #   engine.io  GHSA-r635-g3xr-vw7x (HIGH, prod via @trigger.dev → socket.io)
+  #   brace-expansion GHSA-3jxr-9vmj-r5cp (HIGH, dev/CI: testcontainers, cyclonedx, eslint) — scoped per major
+  #   body-parser GHSA-v422-hmwv-36x6 (LOW, prod via express)
+  # esbuild GHSA-67mh-4wv8-2f99 (MODERATE, dev-only) is intentionally NOT pinned here: its fix ships
+  # in 0.25.0 (no 0.24.3 exists) and forcing that onto drizzle-kit's deprecated @esbuild-kit loader is
+  # risky for a dev-server-only issue — left to Dependabot.
+  body-parser@<1.20.6: ^1.20.6
+  brace-expansion@<1.1.16: ^1.1.16
+  brace-expansion@>=2.0.0 <2.1.2: ^2.1.2
+  engine.io@>=4.1.0 <6.6.7: ^6.6.7
+minimumReleaseAgeExclude:
+  - brace-expansion@2.1.2
+  - brace-expansion@1.1.16
+  - engine.io@6.6.7
+  - body-parser@1.20.6
