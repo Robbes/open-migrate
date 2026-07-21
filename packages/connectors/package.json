@@ -20,9 +20,9 @@
     "./graph-contacts-source.types": "./src/graph-contacts-source.types.ts"
   },
   "dependencies": {
-    "@azure/msal-node": "^5.4.0",
+    "@azure/msal-node": "^5.4.1",
     "@openmig/shared": "workspace:*",
     "imap-simple": "^5.1.0",
-    "jmap-jam": "^0.13.2"
+    "jmap-jam": "^0.13.3"
   }
 }

@@ -19,11 +19,11 @@
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
-    "@azure/msal-node": "^5.4.0",
-    "@trigger.dev/core": "4.5.4",
-    "@trigger.dev/sdk": "4.5.4",
+    "@azure/msal-node": "^5.4.1",
+    "@trigger.dev/core": "4.5.5",
+    "@trigger.dev/sdk": "4.5.5",
     "croner": "^10.0.1",
-    "jmap-jam": "^0.13.2"
+    "jmap-jam": "^0.13.3"
   },
   "devDependencies": {
     "@cyclonedx/cyclonedx-npm": "^6.0.0",
@@ -32,20 +32,20 @@
     "@types/node": "^26.1.0",
     "@types/pg": "catalog:",
     "@types/supertest": "^7.2.1",
-    "@typescript-eslint/eslint-plugin": "^8.63.0",
-    "@typescript-eslint/parser": "^8.63.0",
-    "@vitest/coverage-v8": "4.1.9",
+    "@typescript-eslint/eslint-plugin": "^8.65.0",
+    "@typescript-eslint/parser": "^8.65.0",
+    "@vitest/coverage-v8": "4.1.10",
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "catalog:",
     "eslint": "10.6.0",
     "jsdom": "^29.1.1",
     "pg": "catalog:",
-    "prettier": "3.9.4",
+    "prettier": "3.9.6",
     "supertest": "^7.2.2",
     "testcontainers": "^12.0.4",
     "tsx": "^4",
     "typescript": "5.9.2",
-    "typescript-eslint": "^8.62.1",
+    "typescript-eslint": "^8.65.0",
     "vitest": "3.2.7"
   }
 }
