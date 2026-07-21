@@ -5882,10 +5882,6 @@ snapshots:
   '@types/node@26.1.1':
     dependencies:
       undici-types: 8.3.0
-
-  '@types/node@26.1.1':
-    dependencies:
-      undici-types: 8.3.0
     optional: true
 
   '@types/pg@8.20.0':
