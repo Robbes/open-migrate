@@ -20,6 +20,7 @@ import tenantRoutes from './routes/tenants/index';
 import mappingRoutes from './routes/migrations/index';
 import billingRoutes from './routes/billing/index';
 import billingWebhookRoutes from './routes/billing/webhooks';
+import scopeManifestRoutes from './routes/scope-manifest';
 
 // Re-export for backwards compatibility
 export type { AuthenticatedRequest, JwtPayload };
@@ -47,6 +48,7 @@ app.get('/health', (req: Request, res: Response) => {
 // API Routes
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/tenants', tenantRoutes);
+app.use('/api/scope-manifest', scopeManifestRoutes);
 app.use('/api/migrations', mappingRoutes);
 app.use('/api/billing', billingRoutes);
 // Mount at /webhooks so the route resolves to /api/billing/webhooks/mollie —

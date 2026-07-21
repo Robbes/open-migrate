@@ -92,7 +92,8 @@ describe('POST /api/migrations — real persistence', () => {
       name: 'Acme mail migration',
       sourceType: 'imap',
       targetType: 'jmap',
-      status: 'active',
+      // 0013 T5: new mappings are created paused (draft) until the owner starts them.
+      status: 'paused',
     });
     expect(res.body.id).toBeTruthy();
     expect(res.body.syncConfig.domains).toEqual(['email', 'calendar']);
@@ -111,7 +112,7 @@ describe('POST /api/migrations — real persistence', () => {
     expect(mboxes.rows[0].n).toBe(2);
 
     const mapping = await pool.query(`SELECT name, schedule, status FROM mailbox_mapping WHERE id = $1`, [createdMappingId]);
-    expect(mapping.rows[0]).toMatchObject({ name: 'Acme mail migration', schedule: '*/15 * * * *', status: 'active' });
+    expect(mapping.rows[0]).toMatchObject({ name: 'Acme mail migration', schedule: '*/15 * * * *', status: 'paused' });
 
     const scopes = await pool.query(`SELECT domain FROM scope_selection WHERE mapping_id = $1 ORDER BY domain`, [createdMappingId]);
     expect(scopes.rows.map((r) => r.domain)).toEqual(['calendar', 'email']);

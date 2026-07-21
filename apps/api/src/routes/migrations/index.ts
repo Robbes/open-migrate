@@ -14,6 +14,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import * as schema from '@openmig/ledger';
 import { SecretStore } from '@openmig/core/secret-store';
 import { getTriggerClient } from '@openmig/scheduler';
+import type { DiscoveryDomain, TenantId, MappingId } from '@openmig/shared';
 import { resolveSyncJob, resolveCutoverJob } from './job-resolution';
 
 /** Take the first row of a RETURNING result or fail loudly (no silent nulls). */
@@ -264,7 +265,9 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res: Response) 
             sourceMailboxId: sourceMailbox.id,
             targetMailboxId: targetMailbox.id,
             mode: body.mode ?? 'mirror',
-            status: body.status ?? 'active',
+            // 0013 T5: new mappings land PAUSED (draft) — the owner reviews the discovery
+            // counts + scope manifest and clicks "Start migration" (POST …/start) to activate.
+            status: body.status ?? 'paused',
             pattern: body.pattern,
             name: body.name,
             schedule: body.syncConfig.schedule,
@@ -631,6 +634,16 @@ router.post(
         return;
       }
 
+      // 0013 T5: a paused (draft) mapping must not sync until the owner green-lights it
+      // via POST …/start. Refuse rather than silently kicking off a pass.
+      if (mappings[0]?.status === 'paused') {
+        res.status(409).json({
+          error: 'Conflict',
+          message: 'Mapping is paused — review the discovery counts and start it first (POST /start).',
+        });
+        return;
+      }
+
       // Enqueue the real Trigger.dev task with an id-only, tenant-scoped payload
       // (the mapping was just verified to belong to this tenant above).
       const { taskId, payload } = resolveSyncJob(tenantId, mappingId, body);
@@ -892,5 +905,112 @@ router.get(
     }
   }
 );
+
+/** Load a mapping and confirm it belongs to the tenant (RLS-enforced). Returns null if not found. */
+async function loadMapping(
+  tenantId: string,
+  mappingId: string,
+): Promise<typeof schema.mailboxMapping.$inferSelect | null> {
+  const rows = await withTenantDb(tenantId, getSharedPool(), (db) =>
+    db
+      .select()
+      .from(schema.mailboxMapping)
+      .where(and(eq(schema.mailboxMapping.id, mappingId), eq(schema.mailboxMapping.tenantId, tenantId))),
+  );
+  return rows[0] ?? null;
+}
+
+const DiscoverSchema = z.object({
+  domains: z.array(z.enum(['email', 'calendar', 'contact', 'file'])).optional(),
+});
+
+/**
+ * POST /api/migrations/:mappingId/discover (0013 T4)
+ * Enqueue the read-only discovery job. Counts are written to migration_discovery; poll GET …/discovery.
+ */
+router.post('/:mappingId/discover', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { mappingId } = req.params;
+    const tenantId = req.tenantId;
+    if (!mappingId) return void res.status(400).json({ error: 'mappingId is required' });
+    if (!tenantId) return void res.status(401).json({ error: 'Unauthorized', message: 'Tenant ID not found' });
+
+    const body = DiscoverSchema.parse(req.body ?? {});
+    const mapping = await loadMapping(tenantId, mappingId);
+    if (!mapping) return void res.status(404).json({ error: 'Not found', message: 'Mapping not found' });
+
+    const domains: DiscoveryDomain[] = body.domains ?? ['email', 'calendar', 'contact', 'file'];
+    const run = await getTriggerClient().tasks.trigger(
+      'run-discovery',
+      { tenantId, mappingId, domains },
+      { tags: [`tenant:${tenantId}`, `mapping:${mappingId}`] },
+    );
+    res.status(202).json({ success: true, runId: run.id, jobType: 'run-discovery', triggeredAt: new Date().toISOString() });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation error', details: error.issues });
+    } else {
+      console.error('Error triggering discovery:', error);
+      res.status(500).json({ error: 'Internal server error', message: 'Failed to trigger discovery' });
+    }
+  }
+});
+
+/**
+ * GET /api/migrations/:mappingId/discovery (0013 T4)
+ * Return the stored per-domain discovery counts. `discovered` is false until the first pass lands.
+ */
+router.get('/:mappingId/discovery', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { mappingId } = req.params;
+    const tenantId = req.tenantId;
+    if (!mappingId) return void res.status(400).json({ error: 'mappingId is required' });
+    if (!tenantId) return void res.status(401).json({ error: 'Unauthorized', message: 'Tenant ID not found' });
+
+    const mapping = await loadMapping(tenantId, mappingId);
+    if (!mapping) return void res.status(404).json({ error: 'Not found', message: 'Mapping not found' });
+
+    const domains = await withTenantDb(tenantId, getSharedPool(), (db) =>
+      new schema.PgDiscoveryStore(db).getDiscovery(tenantId as TenantId, mappingId as MappingId),
+    );
+    res.json({ mappingId, discovered: domains.length > 0, domains });
+  } catch (error) {
+    console.error('Error reading discovery:', error);
+    res.status(500).json({ error: 'Internal server error', message: 'Failed to read discovery' });
+  }
+});
+
+/**
+ * POST /api/migrations/:mappingId/start (0013 T5)
+ * The green light: flip a paused (draft) mapping to active so the scheduler picks it up.
+ * Idempotent for an already-active mapping; 409 once it has moved on to cutover/done.
+ */
+router.post('/:mappingId/start', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { mappingId } = req.params;
+    const tenantId = req.tenantId;
+    if (!mappingId) return void res.status(400).json({ error: 'mappingId is required' });
+    if (!tenantId) return void res.status(401).json({ error: 'Unauthorized', message: 'Tenant ID not found' });
+
+    const mapping = await loadMapping(tenantId, mappingId);
+    if (!mapping) return void res.status(404).json({ error: 'Not found', message: 'Mapping not found' });
+
+    if (mapping.status === 'cutover' || mapping.status === 'done') {
+      return void res.status(409).json({ error: 'Conflict', message: `Cannot start a mapping in '${mapping.status}' state` });
+    }
+    if (mapping.status !== 'active') {
+      await withTenantDb(tenantId, getSharedPool(), (db) =>
+        db
+          .update(schema.mailboxMapping)
+          .set({ status: 'active', updatedAt: new Date() })
+          .where(and(eq(schema.mailboxMapping.id, mappingId), eq(schema.mailboxMapping.tenantId, tenantId))),
+      );
+    }
+    res.json({ id: mappingId, status: 'active' });
+  } catch (error) {
+    console.error('Error starting mapping:', error);
+    res.status(500).json({ error: 'Internal server error', message: 'Failed to start mapping' });
+  }
+});
 
 export default router;
