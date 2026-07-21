@@ -35,7 +35,8 @@ describe('GraphDriveSource', () => {
 
     // Setup fetch mock
     fetchMock = vi.fn();
-    global.fetch = fetchMock;
+    // vitest 4 loosened vi.fn()'s inferred type; cast to fetch's signature for the global assignment.
+    global.fetch = fetchMock as unknown as typeof fetch;
     
     // Mock setTimeout to return immediately for faster tests
     vi.spyOn(global, 'setTimeout').mockImplementation((fn: () => void) => {
