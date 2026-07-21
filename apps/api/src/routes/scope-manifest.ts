@@ -8,7 +8,7 @@
 
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { SCOPE_MANIFEST } from '../services/scope-manifest';
+import { SCOPE_MANIFEST } from '@openmig/shared';
 
 const router = Router();
 

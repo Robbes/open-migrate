@@ -1,8 +1,9 @@
 # Self-host quickstart (NAS / mini-PC / Raspberry Pi / Windows-WSL2)
 
 The self-host edition is a **single-tenant appliance**: one small bundled
-Postgres + one app container that migrates itself on startup, runs your mappings
-on an in-process schedule, and serves a local status endpoint. It runs **all four
+Postgres + one app container that migrates itself on startup, discovers what a
+new mapping will move, waits for you to review and confirm it, then runs on an
+in-process schedule and serves a local status endpoint. It runs **all four
 domains** (mail / calendar / contacts / files) with the same engines as the
 managed edition, and loads **none** of the managed-only machinery (no Trigger.dev,
 no billing). Container-first per **ADR-0019**; Postgres-backed per **ADR-0023**.
@@ -92,10 +93,38 @@ curl -s http://127.0.0.1:8080/healthz          # {"status":"ok"}
 docker compose -f deploy/selfhost/compose.yml logs -f app
 ```
 
-The first scheduled pass is a **shadow pass**: it reads the source and writes to
-the target idempotently. Re-runs converge — nothing is duplicated.
+A new mapping loads **paused** — it is not scheduled yet. In the background the
+appliance runs a read-only, body-free **discovery** pass against your source
+(counting mailboxes/messages, calendars/events, address books/contacts,
+drives/files — never fetching content) and stores the counts.
 
-## 5. Read `/status`
+## 5. Review & confirm
+
+Open `http://127.0.0.1:8080/` in a browser (or over the LAN if you set
+`SELFHOST_BIND=0.0.0.0`). For each configured mapping you'll see the discovery
+counts as they land, next to the scope manifest — what migrates, what's
+partial, and what's explicitly **not** migrated (SAD §11.2, "no silent
+omissions"). Nothing has been copied yet. Once you're satisfied, click
+**Start migration** — this flips the mapping `paused`→`active` and the
+in-process scheduler picks it up on its normal cron from then on.
+
+The same information is available as JSON, if you'd rather script it:
+
+```sh
+curl -s http://127.0.0.1:8080/scope-manifest | jq   # what migrates / partial / does not
+curl -s http://127.0.0.1:8080/discovery | jq         # per-mapping discovery counts
+curl -si -X POST http://127.0.0.1:8080/mappings/<mappingId>/start   # green light
+```
+
+`POST /mappings/:id/start` is idempotent (a second click on an already-active
+mapping is a no-op) and refuses with `409` once the mapping has moved on to
+`cutover`/`done`.
+
+The first scheduled pass after confirming is a **shadow pass**: it reads the
+source and writes to the target idempotently. Re-runs converge — nothing is
+duplicated.
+
+## 6. Read `/status`
 
 ```sh
 curl -s http://127.0.0.1:8080/status | jq
