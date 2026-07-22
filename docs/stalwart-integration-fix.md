@@ -355,3 +355,33 @@ was **real and pre-existing**, not a Docker-in-Docker artifact — a sandboxed a
 them because it's the first thing to actually attempt a full, real T5 run end-to-end, not because
 nested Docker caused any of them. Don't reflexively blame DooD for a new failure here; check
 whether it reproduces for any agent, nested or not, first.
+
+## Round 4: the first actual `e2e.yml` dispatch on the bare Spark runner
+
+The first real `e2e.yml` dispatch on the self-hosted runner (not a nested agent sandbox) failed at
+`setup-stalwart.sh` phase 1 with:
+
+```
+Failed to read data store settings at /etc/stalwart/config.json: Permission denied (os error 13)
+```
+
+Note this is **"Permission denied", not "Is a directory"** — i.e. the config bind mount worked
+*structurally* (the runner is a bare host, so the `mktemp`'d file is a real local path that mounts
+as a file, unlike the DooD "creates a directory" trap). The failure is pure Unix permissions:
+`mktemp` makes the file mode **600 owned by the runner's uid**, it's bind-mounted read-only, and
+Stalwart inside the container runs as a **different uid**, so it can't read a `0600` file owned by
+someone else. **Fix**: `setup-stalwart.sh` now `chmod 644`s the config file after writing it. Safe
+because the file carries no secret — just `{"@type":"RocksDb","path":"/opt/stalwart/data"}`; all
+accounts/domains/credentials are provisioned via `stalwart-cli` into the datastore, never in this
+file (per the header rules above).
+
+**Note on bind-mount vs copy for config delivery.** This repo's Testcontainers path uses
+`withCopyContentToContainer` and this doc's header says "NEVER a bind mount". `setup-stalwart.sh`
+deliberately uses a bind mount instead, which is fine **on a bare host** (the file exists locally
+and mounts as a file, and `chmod 644` makes it readable) but would fail **structurally** in a
+Docker-outside-of-Docker sandbox (the host daemon can't see the agent-container-local path → "Is a
+directory"). So `setup-stalwart.sh` is written for the bare runner, which is where `e2e.yml` runs.
+If it ever needs to run by hand inside a DooD sandbox, switch config delivery to a copy-based
+approach (`docker create` → `docker cp` → `docker start`, or a named-volume stage) — do **not**
+pipe via `docker run -d ... < file` (a detached container doesn't attach stdin, so the config lands
+empty → bootstrap mode, i.e. round 2's bug again).
