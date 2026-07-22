@@ -1,0 +1,31 @@
+# Dev/e2e-only override for deploy/selfhost/compose.yml — layer it on top when testing
+# against deploy/selfhost/setup-stalwart.sh's Stalwart instead of a real source/target:
+#
+#   ./deploy/selfhost/setup-stalwart.sh
+#   docker compose -f deploy/selfhost/compose.yml -f deploy/selfhost/compose.dev.yml up -d
+#
+# NEVER used by real self-host operators — deploy/selfhost/compose.yml alone is the
+# product. This file exists only for workplan 0010 T5 and local dev against a Stalwart
+# reference server. It fixes two things a plain `compose.yml up -d` doesn't give you here:
+#
+#   1. `host.docker.internal` doesn't resolve on native Linux without an explicit
+#      `extra_hosts` entry (Docker Desktop adds this automatically; Linux does not).
+#   2. This compose project creates its own network (open-migrate-selfhost_selfhost),
+#      separate from setup-stalwart.sh's `openmig_dev-network` — so a mapping.json that
+#      addresses Stalwart as `stalwart` (by name, not host.docker.internal) needs the
+#      app on that network too. Requires `openmig_dev-network` to already exist (run
+#      setup-stalwart.sh, or `docker compose -f deploy/compose/dev.yml up -d` first).
+services:
+  app:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # List both networks explicitly rather than relying on Compose's list-merge
+    # behavior for this key across -f files — unambiguous either way it merges.
+    networks:
+      - selfhost
+      - dev-network
+
+networks:
+  dev-network:
+    name: openmig_dev-network
+    external: true

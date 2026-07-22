@@ -138,14 +138,17 @@ jobs:
       - name: Prepare appliance config + secrets
         run: |
           # Fixture mapping is git-ignored under the config dir on purpose; the
-          # Dockerfile bakes deploy/selfhost/config into the image. Substitute
-          # in the ports picked above rather than assuming the fixture's
-          # committed defaults are free on this host right now.
+          # Dockerfile bakes deploy/selfhost/config into the image. The appliance
+          # reaches Stalwart over openmig_dev-network by container name (see
+          # deploy/selfhost/compose.dev.yml, applied below) — container-to-container
+          # traffic uses Stalwart's fixed internal ports (8080/993), not whatever
+          # dynamic host port it's published under, so no substitution needed there.
           node -e '
             const fs = require("node:fs");
             const cfg = JSON.parse(fs.readFileSync("test/e2e/fixtures/selfhost-restart-resume.mapping.json", "utf8"));
-            cfg.source.port = Number(process.env.STALWART_IMAPS_PORT);
-            cfg.target.baseUrl = `http://host.docker.internal:${process.env.STALWART_JMAP_PORT}/.well-known/jmap`;
+            cfg.source.host = "stalwart";
+            cfg.source.port = 993;
+            cfg.target.baseUrl = "http://stalwart:8080/.well-known/jmap";
             fs.writeFileSync("deploy/selfhost/config/mapping.json", JSON.stringify(cfg, null, 2));
           '
           cat > deploy/selfhost/.env <<ENV
@@ -153,17 +156,10 @@ jobs:
           SOURCE_IMAP_PASSWORD=${SOURCE_IMAP_PASSWORD}
           TARGET_JMAP_PASSWORD=${TARGET_JMAP_PASSWORD}
           ENV
-          # Let the appliance reach the host-published Stalwart via host.docker.internal.
-          cat > /tmp/selfhost-e2e.yml <<'YML'
-          services:
-            app:
-              extra_hosts:
-                - "host.docker.internal:host-gateway"
-          YML
 
       - name: Build + start the self-host appliance
         run: |
-          docker compose -f "$SELFHOST_COMPOSE" -f /tmp/selfhost-e2e.yml up -d --build --wait || \
+          docker compose -f "$SELFHOST_COMPOSE" -f deploy/selfhost/compose.dev.yml up -d --build --wait || \
             { docker compose -f "$SELFHOST_COMPOSE" logs app; exit 1; }
           docker compose -f "$SELFHOST_COMPOSE" ps
 
@@ -181,7 +177,7 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          docker compose -f "$SELFHOST_COMPOSE" down -v --remove-orphans || true
+          docker compose -f "$SELFHOST_COMPOSE" -f deploy/selfhost/compose.dev.yml down -v --remove-orphans || true
           docker rm -f openmig-dev-stalwart || true
           docker volume rm openmig-dev-stalwart-data || true
           rm -f deploy/selfhost/.env deploy/selfhost/config/mapping.json || true
