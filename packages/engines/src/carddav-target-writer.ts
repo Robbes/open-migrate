@@ -259,7 +259,7 @@ export class CardDAVTargetWriter implements ContactTargetWriter {
     const filename = `${uid}.vcf`;
     const contactPath = `${folderId}${filename}`;
 
-    await this.httpClient.request({
+    const response = await this.httpClient.request({
       method: 'PUT',
       url: this.buildUrl(contactPath),
       body: raw.vcard,
@@ -268,6 +268,10 @@ export class CardDAVTargetWriter implements ContactTargetWriter {
         Authorization: `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64')}`,
       },
     });
+
+    if (response.status !== 201 && response.status !== 204) {
+      throw new Error(`PUT failed for ${contactPath} with status ${response.status}: ${response.body}`);
+    }
 
     return contactPath;
   }

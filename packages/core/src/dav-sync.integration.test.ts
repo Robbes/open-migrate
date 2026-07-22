@@ -208,12 +208,15 @@ describe('Calendar domain sync (real CalDAV target) Integration', () => {
     // NOTE: intentionally no target.connect() call — CalDAVTargetWriter is stateless HTTP
     // (no connect() on the CalendarTargetWriter interface), matching production wiring
     // (dav-factories.ts / runCalendarSync). This is the path that was previously unproven.
+    // concurrency: 1 — the test Nextcloud container writes to a fresh SQLite-backed collection;
+    // concurrent PUTs into a just-created calendar can silently lose one under lock contention.
     const result1 = await runCalendarSync({
       tenantId: CALENDAR_TENANT_ID,
       mappingId: CALENDAR_MAPPING_ID,
       source,
       target,
       ledger,
+      concurrency: 1,
     });
 
     expect(result1.scanned).toBe(EVENT_COUNT);
@@ -238,6 +241,7 @@ describe('Calendar domain sync (real CalDAV target) Integration', () => {
       source,
       target,
       ledger,
+      concurrency: 1,
     });
 
     expect(result2.scanned).toBe(EVENT_COUNT);
@@ -392,12 +396,15 @@ describe('Contact domain sync (real CardDAV target) Integration', () => {
 
     // NOTE: intentionally no target.connect() call — CardDAVTargetWriter is stateless HTTP
     // (no connect() on the ContactTargetWriter interface), matching production wiring.
+    // concurrency: 1 — the test Nextcloud container writes to a fresh SQLite-backed collection;
+    // concurrent PUTs into a just-created address book can silently lose one under lock contention.
     const result1 = await runContactSync({
       tenantId: CONTACT_TENANT_ID,
       mappingId: CONTACT_MAPPING_ID,
       source,
       target,
       ledger,
+      concurrency: 1,
     });
 
     expect(result1.scanned).toBe(CONTACT_COUNT);
@@ -422,6 +429,7 @@ describe('Contact domain sync (real CardDAV target) Integration', () => {
       source,
       target,
       ledger,
+      concurrency: 1,
     });
 
     expect(result2.scanned).toBe(CONTACT_COUNT);

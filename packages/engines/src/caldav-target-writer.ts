@@ -262,7 +262,7 @@ export class CalDAVTargetWriter implements CalendarTargetWriter {
     const filename = `${uid}.ics`;
     const eventPath = `${calendarId}${filename}`;
 
-    await this.httpClient.request({
+    const response = await this.httpClient.request({
       method: 'PUT',
       url: this.buildUrl(eventPath),
       body: raw.icalendar,
@@ -271,6 +271,10 @@ export class CalDAVTargetWriter implements CalendarTargetWriter {
         Authorization: `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64')}`,
       },
     });
+
+    if (response.status !== 201 && response.status !== 204) {
+      throw new Error(`PUT failed for ${eventPath} with status ${response.status}: ${response.body}`);
+    }
 
     return eventPath;
   }
