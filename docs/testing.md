@@ -10,10 +10,12 @@ Canonical doc. Summarises the testing approach; full rationale in
   mapping, Pattern S/D resolution. No I/O.
 - **Connector contract tests**: each source/target adapter against a recorded/standard contract.
 - **Integration** (Testcontainers for Node): the global setup spins up the full stack
-  programmatically — **Postgres** and **Stalwart v0.16.10 (official image, two-phase
-  startup: recovery-mode provisioning, then normal serving)**. No env vars or pre-running dev
-  stack required; ports are dynamic. Tests exercise the ledger, the IMAP source, the JMAP writer,
-  and the shadow-pass property tests (idempotency + delta) end-to-end.
+  programmatically — **Postgres**, **Stalwart v0.16.10 (official image, two-phase
+  startup: recovery-mode provisioning, then normal serving)**, and **Nextcloud** (CalDAV/CardDAV/
+  WebDAV target). No env vars or pre-running dev stack required; ports are dynamic. Tests exercise
+  the ledger, the IMAP/JMAP/imap-dav mail path, and — since issue #114 — the CalDAV/CardDAV/WebDAV
+  **target-write** path (see "Multi-domain target-write coverage" below), all with the
+  idempotency + delta property (first pass creates N, second pass creates 0).
 - **E2E** (docker compose, manual): the real SMB O365 source (read-only, least-privilege) into a
   disposable target; full slice.
 
@@ -163,13 +165,33 @@ describe('CalDAV Reindex', () => {
 
 Use the `*.unit.test.ts` or `*.integration.test.ts` naming convention:
 
-- `caldav-source.unit.test.ts` - CalDAV source connector unit tests
-- `carddav-source.unit.test.ts` - CardDAV source connector unit tests
-- `webdav-source.unit.test.ts` - WebDAV source connector unit tests
-- `generic-sync.idempotency.unit.test.ts` - Generic sync engine idempotency tests
-- `caldav-sync.integration.test.ts` - CalDAV end-to-end integration tests
-- `carddav-sync.integration.test.ts` - CardDAV end-to-end integration tests
-- `webdav-sync.integration.test.ts` - WebDAV end-to-end integration tests
+- `caldav-source.unit.test.ts` / `caldav-source.integration.test.ts` - CalDAV **source** connector
+  (discovery, listSince, cursor round-trip) against Nextcloud.
+- `carddav-source.unit.test.ts` / `carddav-source.integration.test.ts` - CardDAV **source**
+  connector, same shape.
+- `webdav-source.unit.test.ts` / `webdav-source.integration.test.ts` - WebDAV **source** connector,
+  same shape.
+- `generic-sync.idempotency.unit.test.ts` - Generic sync engine idempotency tests.
+- `packages/core/src/dav-sync.integration.test.ts` - **target-write** coverage for all three DAV
+  domains (see "Multi-domain target-write coverage" below).
+
+### Multi-domain target-write coverage (issue #114)
+
+Chasing the 0010 T5 gate surfaced two production "target was never connected" bugs
+(`JmapTargetWriter` #112, `ImapDavMailTarget` #113) that shipped undetected because the DAV
+source-only tests above never exercised the **write** side (`upsertCalendarEvent`/`upsertContact`/
+`upsertFile`) against a real target, and the only test that did (`o365-scenario.e2e.test.ts`) runs
+`dryRun: true` and is secret-gated (never in CI). `packages/core/src/dav-sync.integration.test.ts`
+closes that gap: a synthetic in-memory source (isolating the untested leg) feeds N seeded
+calendar events / contacts / files through `runCalendarSync` / `runContactSync` / `runFileSync`
+into a **real** `CalDAVTargetWriter` / `CardDAVTargetWriter` / `WebDAVTargetWriter` writing to
+Nextcloud, with **no manual `connect()`** (there's no `connect()` on the `*TargetWriter`
+interfaces — this is what masked #112/#113). Each domain asserts: first pass creates N (N>0),
+second pass creates 0, and the items are read back from Nextcloud via the real source connector.
+The IMAP/DAV mail equivalent (the second mail family, alongside JMAP) is
+`apps/worker/src/imap-dav-target.integration.test.ts`'s "Idempotency property" suite, exercising
+`ImapDavMailTarget` through the same lazy-connect path with the same N / 0-on-rerun assertion —
+proven as part of the #113 fix.
 
 ### Native Connector Property Tests
 

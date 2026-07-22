@@ -212,17 +212,21 @@ export class CardDAVTargetWriter implements ContactTargetWriter {
   }
 
   private async createAddressBook(path: string, folder: ContactFolder): Promise<void> {
+    // RFC 5689 Extended MKCOL (required by RFC 6352 §5.2 to create a CardDAV addressbook):
+    // a plain MKCOL with no resourcetype just creates an ordinary WebDAV collection, invisible
+    // to CardDAV discovery (which filters PROPFIND results by the {addressbook} resourcetype).
     const mkcol = `<?xml version="1.0" encoding="utf-8"?>
       <D:mkcol xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav">
         <D:set>
           <D:prop>
+            <D:resourcetype><D:collection/><C:addressbook/></D:resourcetype>
             <D:displayname>${this.escapeXml(folder.name || folder.path)}</D:displayname>
             ${folder.description ? `<C:addressbook-description>${this.escapeXml(folder.description)}</C:addressbook-description>` : ''}
           </D:prop>
         </D:set>
       </D:mkcol>`;
 
-    await this.httpClient.request({
+    const response = await this.httpClient.request({
       method: 'MKCOL',
       url: this.buildUrl(path),
       body: mkcol,
@@ -231,6 +235,10 @@ export class CardDAVTargetWriter implements ContactTargetWriter {
         Authorization: `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64')}`,
       },
     });
+
+    if (response.status !== 201) {
+      throw new Error(`MKCOL failed for ${path} with status ${response.status}: ${response.body}`);
+    }
   }
 
   private extractUidFromVcard(vcard: string): string {
@@ -251,7 +259,7 @@ export class CardDAVTargetWriter implements ContactTargetWriter {
     const filename = `${uid}.vcf`;
     const contactPath = `${folderId}${filename}`;
 
-    await this.httpClient.request({
+    const response = await this.httpClient.request({
       method: 'PUT',
       url: this.buildUrl(contactPath),
       body: raw.vcard,
@@ -260,6 +268,10 @@ export class CardDAVTargetWriter implements ContactTargetWriter {
         Authorization: `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64')}`,
       },
     });
+
+    if (response.status !== 201 && response.status !== 204) {
+      throw new Error(`PUT failed for ${contactPath} with status ${response.status}: ${response.body}`);
+    }
 
     return contactPath;
   }
