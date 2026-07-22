@@ -214,18 +214,22 @@ export class CalDAVTargetWriter implements CalendarTargetWriter {
   }
 
   private async createCalendar(path: string, folder: CalendarFolder): Promise<void> {
+    // RFC 4791 §5.3.1: the MKCALENDAR request body's root element MUST be in the CalDAV
+    // namespace (C:mkcalendar), not DAV: — servers (e.g. SabreDAV, which Nextcloud uses)
+    // deserialize the body by its Clark-notation element name and silently fail to create a
+    // real calendar collection (while still returning success) if the root is misnamed.
     const mkcalendar = `<?xml version="1.0" encoding="utf-8"?>
-      <D:mkcalendar xmlns:D="DAV:">
+      <C:mkcalendar xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
         <D:set>
           <D:prop>
             <D:displayname>${this.escapeXml(folder.name || folder.path)}</D:displayname>
             ${folder.description ? `<C:calendar-description>${this.escapeXml(folder.description)}</C:calendar-description>` : ''}
-            ${folder.color ? `<CR:color>${this.escapeXml(folder.color)}</CR:color>` : ''}
+            ${folder.color ? `<CR:color xmlns:CR="http://apple.com/ns/ical/">${this.escapeXml(folder.color)}</CR:color>` : ''}
           </D:prop>
         </D:set>
-      </D:mkcalendar>`;
+      </C:mkcalendar>`;
 
-    await this.httpClient.request({
+    const response = await this.httpClient.request({
       method: 'MKCALENDAR',
       url: this.buildUrl(path),
       body: mkcalendar,
@@ -234,6 +238,10 @@ export class CalDAVTargetWriter implements CalendarTargetWriter {
         Authorization: `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64')}`,
       },
     });
+
+    if (response.status !== 201) {
+      throw new Error(`MKCALENDAR failed for ${path} with status ${response.status}: ${response.body}`);
+    }
   }
 
   private extractUidFromIcalendar(icalendar: string): string {
