@@ -83,8 +83,13 @@ wait_for_jmap() {
 
 echo "[setup-stalwart] Phase 1: recovery mode (provisioning)..."
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+# --user root: named Docker volumes are created root-owned, but the Stalwart image runs as a
+# non-root user, so without this it can't write to /opt/stalwart/data ("Permission denied ...
+# /opt/stalwart/data/LOG"). This mirrors packages/testing/src/testcontainers-setup.ts, which
+# runs its Stalwart containers with .withUser('root') for exactly the same reason.
 docker run -d \
   --name "$CONTAINER" \
+  --user root \
   --network "$NETWORK" \
   --network-alias stalwart \
   -v "$VOLUME:/opt/stalwart/data" \
@@ -119,6 +124,7 @@ echo "[setup-stalwart] Phase 2: normal mode (serving)..."
 docker run -d \
   --name "$CONTAINER" \
   --restart unless-stopped \
+  --user root \
   --network "$NETWORK" \
   --network-alias stalwart \
   -v "$VOLUME:/opt/stalwart/data" \
