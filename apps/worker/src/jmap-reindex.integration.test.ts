@@ -414,11 +414,13 @@ describe('JMAP Reindex Integration Tests', () => {
     // Clean database state
     console.log('[JMAP Reindex] Cleaning database state...');
     await cleanDatabaseState();
-    
-    // Connect to JMAP server
-    console.log('[JMAP Reindex] Connecting to JMAP server...');
-    await target.connect();
-    
+
+    // NOTE: intentionally do NOT call target.connect() here. The production sync path
+    // (runShadowPass/runDomainSync) never calls it — the TargetWriter interface has no
+    // connect() — so the writer must self-connect lazily on first use. Exercising that path
+    // here is what actually covers the "Not connected to JMAP server" bug (an explicit
+    // connect() masked it, so the test passed while the real path was broken).
+
     // Seed fresh test data
     console.log('[JMAP Reindex] Seeding test data...');
     await seedReindex();
