@@ -38,11 +38,16 @@ services:
   # Secondary DAV target: files (WebDAV) + CalDAV/CardDAV. SQLite keeps dev light.
   nextcloud:
     image: nextcloud:34-apache            # official multi-arch (arm64); base: Debian 13 "Trixie" via php image
+    container_name: openmig-dev-nextcloud # fixed name so provisioning scripts can `docker exec` it deterministically
     environment:
       SQLITE_DATABASE: nextcloud
       NEXTCLOUD_ADMIN_USER: admin
       NEXTCLOUD_ADMIN_PASSWORD: admin_dev_pw
       NEXTCLOUD_TRUSTED_DOMAINS: "localhost nextcloud"
+    ports:
+      # Overridable, same pattern as postgres above — the e2e workflow picks a free
+      # port at runtime instead of assuming a fixed one is available on the runner.
+      - "${DEV_NEXTCLOUD_PORT:-8082}:80"
     networks: [dev-network]
 
 networks:

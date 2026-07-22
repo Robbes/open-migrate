@@ -14,5 +14,53 @@
     "baseUrl": "http://host.docker.internal:18080",
     "user": "target@dev.local",
     "auth": { "kind": "basic", "passwordFromEnv": "TARGET_JMAP_PASSWORD" }
+  },
+  "domains": {
+    "mail": {
+      "enabled": true,
+      "source": {
+        "type": "imap-oauth2",
+        "host": "host.docker.internal",
+        "port": 993,
+        "user": "source@dev.local",
+        "auth": { "kind": "login", "passwordFromEnv": "SOURCE_IMAP_PASSWORD" }
+      },
+      "target": {
+        "type": "jmap",
+        "baseUrl": "http://host.docker.internal:18080",
+        "user": "target@dev.local",
+        "auth": { "kind": "basic", "passwordFromEnv": "TARGET_JMAP_PASSWORD" }
+      }
+    },
+    "calendar": {
+      "enabled": true,
+      "source": {
+        "type": "caldav",
+        "url": "http://host.docker.internal:8082/remote.php/dav",
+        "user": "e2e-source",
+        "auth": { "kind": "login", "passwordFromEnv": "SOURCE_DAV_PASSWORD" }
+      },
+      "target": {
+        "type": "caldav",
+        "url": "http://host.docker.internal:8082/remote.php/dav",
+        "user": "e2e-target",
+        "auth": { "kind": "login", "passwordFromEnv": "TARGET_DAV_PASSWORD" }
+      }
+    },
+    "contacts": {
+      "enabled": true,
+      "source": {
+        "type": "carddav",
+        "url": "http://host.docker.internal:8082/remote.php/dav",
+        "user": "e2e-source",
+        "auth": { "kind": "login", "passwordFromEnv": "SOURCE_DAV_PASSWORD" }
+      },
+      "target": {
+        "type": "carddav",
+        "url": "http://host.docker.internal:8082/remote.php/dav",
+        "user": "e2e-target",
+        "auth": { "kind": "login", "passwordFromEnv": "TARGET_DAV_PASSWORD" }
+      }
+    }
   }
 }

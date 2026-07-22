@@ -3,7 +3,9 @@ name: E2E (self-hosted)
 # ==============================================================================
 # Intentionally SEPARATE from CI (ci.yml). Manual-trigger only: needs the
 # self-hosted Spark runner + Docker. Drives the workplan 0010 T5 acceptance gate
-# — the self-host appliance's restart-resume idempotency property — end to end:
+# — the self-host appliance's restart-resume idempotency property — end to end,
+# for THREE domains (issue #114 follow-up extended this from mail-only to also
+# cover calendar/contacts; WebDAV files remains a deferred follow-up):
 #
 #   1. Bring up Stalwart via deploy/selfhost/setup-stalwart.sh — the ONE canonical
 #      two-phase (recovery-mode provisioning, then normal-mode serving) bring-up
@@ -14,13 +16,20 @@ name: E2E (self-hosted)
 #      joins openmig_dev-network under the alias "stalwart" — so a sandboxed agent
 #      that joins that same network (see the doc's DooD section) can reach it by
 #      name instead, with no published ports involved at all.
+#   1b. Bring up Nextcloud (deploy/compose/dev.yml's `nextcloud` service) on the
+#      same openmig_dev-network, then provision TWO accounts on it — e2e-source and
+#      e2e-target (deploy/selfhost/setup-nextcloud-users.sh) — so calendar/contacts
+#      sync is proven ACROSS accounts, the real-world shape, not within one shared
+#      admin account like the source-only DAV integration tests use.
 #   2. SEED the source mailbox over IMAPS (the gate is only meaningful against a
 #      non-zero source; v0.16.10 doesn't bind plaintext IMAP in normal mode, so
-#      this — like the rest of the repo — uses TLS, not port 143).
+#      this — like the rest of the repo — uses TLS, not port 143) AND seed calendar
+#      events + contacts into the e2e-source Nextcloud account (test/e2e/seed-dav-source.mjs).
 #   3. Build + start the self-host appliance (deploy/selfhost/compose.yml) with
-#      a mapping generated from the fixture and the source/target passwords.
-#   4. Run the Restart-Resume Idempotency Gate e2e: first pass syncs N →
-#      `docker compose restart app` → second pass must NOT grow itemsSynced.
+#      a mapping generated from the fixture and the source/target passwords —
+#      mail, calendar, and contacts domains all enabled.
+#   4. Run the Restart-Resume Idempotency Gate e2e for each domain: first pass
+#      syncs N → `docker compose restart app` → second pass must NOT grow itemsSynced.
 #
 # Ports: this runner is shared with other work (other manual dispatches, agent
 # sessions, etc. on the same box), so every host port this workflow needs is
@@ -58,6 +67,15 @@ env:
   SOURCE_IMAP_PASSWORD: source_password
   TARGET_JMAP_PASSWORD: target_password
   POSTGRES_PASSWORD: selfhost_e2e_pw
+  # Nextcloud (calendar + contacts DAV target — deploy/compose/dev.yml's `nextcloud`
+  # service) — admin creds match that file's defaults; the two e2e accounts are
+  # provisioned fresh each run by deploy/selfhost/setup-nextcloud-users.sh.
+  NEXTCLOUD_ADMIN_USER: admin
+  NEXTCLOUD_ADMIN_PASSWORD: admin_dev_pw
+  NEXTCLOUD_SOURCE_USER: e2e-source
+  SOURCE_DAV_PASSWORD: e2e_source_pw
+  NEXTCLOUD_TARGET_USER: e2e-target
+  TARGET_DAV_PASSWORD: e2e_target_pw
   # The restart-resume test uses the selfhost stack, not Testcontainers — skip the
   # heavy DAV/mail containers the root e2e global-setup would otherwise boot.
   SKIP_STALWART: 'true'
@@ -88,6 +106,7 @@ jobs:
           docker compose -f "$SELFHOST_COMPOSE" down -v --remove-orphans 2>/dev/null || true
           docker rm -f openmig-dev-stalwart 2>/dev/null || true
           docker volume rm openmig-dev-stalwart-data 2>/dev/null || true
+          docker rm -f openmig-dev-nextcloud 2>/dev/null || true
 
       # Pick genuinely free host ports for everything this workflow publishes
       # (Stalwart JMAP/IMAPS, the selfhost appliance), instead of assuming
@@ -111,11 +130,12 @@ jobs:
               });
             }
             (async () => {
-              const [jmap, imaps, selfhost] = await Promise.all([freePort(), freePort(), freePort()]);
+              const [jmap, imaps, selfhost, nextcloud] = await Promise.all([freePort(), freePort(), freePort(), freePort()]);
               const lines = [
                 `STALWART_JMAP_PORT=${jmap}`,
                 `STALWART_IMAPS_PORT=${imaps}`,
                 `SELFHOST_PORT=${selfhost}`,
+                `DEV_NEXTCLOUD_PORT=${nextcloud}`,
               ];
               fs.appendFileSync(process.env.GITHUB_ENV, lines.join("\n") + "\n");
               console.log("Picked free ports:\n" + lines.join("\n"));
@@ -124,6 +144,16 @@ jobs:
 
       - name: Start Stalwart (source + target)
         run: ./deploy/selfhost/setup-stalwart.sh
+
+      - name: Start Nextcloud (calendar + contacts DAV target)
+        run: docker compose -f deploy/compose/dev.yml up -d nextcloud
+
+      - name: Provision Nextcloud DAV users (e2e-source, e2e-target)
+        env:
+          NEXTCLOUD_HOST_PORT: ${{ env.DEV_NEXTCLOUD_PORT }}
+          NEXTCLOUD_SOURCE_PASSWORD: ${{ env.SOURCE_DAV_PASSWORD }}
+          NEXTCLOUD_TARGET_PASSWORD: ${{ env.TARGET_DAV_PASSWORD }}
+        run: ./deploy/selfhost/setup-nextcloud-users.sh
 
       - name: Seed the source mailbox (N>0 messages, over IMAPS)
         env:
@@ -135,14 +165,23 @@ jobs:
           SEED_COUNT: ${{ github.event.inputs.seed_count || '5' }}
         run: node test/e2e/seed-imap-source.mjs
 
+      - name: Seed calendar events + contacts (N>0, over DAV)
+        env:
+          SEED_DAV_URL: http://127.0.0.1:${{ env.DEV_NEXTCLOUD_PORT }}
+          SEED_DAV_SOURCE_USER: ${{ env.NEXTCLOUD_SOURCE_USER }}
+          SEED_DAV_SOURCE_PASSWORD: ${{ env.SOURCE_DAV_PASSWORD }}
+          SEED_COUNT: ${{ github.event.inputs.seed_count || '5' }}
+        run: node test/e2e/seed-dav-source.mjs
+
       - name: Prepare appliance config + secrets
         run: |
           # Fixture mapping is git-ignored under the config dir on purpose; the
           # Dockerfile bakes deploy/selfhost/config into the image. The appliance
-          # reaches Stalwart over openmig_dev-network by container name (see
-          # deploy/selfhost/compose.dev.yml, applied below) — container-to-container
-          # traffic uses Stalwart's fixed internal ports (8080/993), not whatever
-          # dynamic host port it's published under, so no substitution needed there.
+          # reaches Stalwart/Nextcloud over openmig_dev-network by container name
+          # (see deploy/selfhost/compose.dev.yml, applied below) — container-to-
+          # container traffic uses each service's fixed internal port (Stalwart
+          # 8080/993, Nextcloud 80), not whatever dynamic host port it's published
+          # under, so no port substitution needed for either.
           node -e '
             const fs = require("node:fs");
             const cfg = JSON.parse(fs.readFileSync("test/e2e/fixtures/selfhost-restart-resume.mapping.json", "utf8"));
@@ -152,12 +191,22 @@ jobs:
             // (session) and /jmap (API) itself. Including the well-known path here would
             // double it and the session never loads ("Not connected to JMAP server").
             cfg.target.baseUrl = "http://stalwart:8080";
+            cfg.domains.mail.source.host = "stalwart";
+            cfg.domains.mail.source.port = 993;
+            cfg.domains.mail.target.baseUrl = "http://stalwart:8080";
+            const nextcloudDav = "http://nextcloud/remote.php/dav";
+            cfg.domains.calendar.source.url = nextcloudDav;
+            cfg.domains.calendar.target.url = nextcloudDav;
+            cfg.domains.contacts.source.url = nextcloudDav;
+            cfg.domains.contacts.target.url = nextcloudDav;
             fs.writeFileSync("deploy/selfhost/config/mapping.json", JSON.stringify(cfg, null, 2));
           '
           cat > deploy/selfhost/.env <<ENV
           POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
           SOURCE_IMAP_PASSWORD=${SOURCE_IMAP_PASSWORD}
           TARGET_JMAP_PASSWORD=${TARGET_JMAP_PASSWORD}
+          SOURCE_DAV_PASSWORD=${SOURCE_DAV_PASSWORD}
+          TARGET_DAV_PASSWORD=${TARGET_DAV_PASSWORD}
           ENV
 
       - name: Build + start the self-host appliance
@@ -186,12 +235,12 @@ jobs:
       - name: Run Restart-Resume Idempotency Gate (0010 T5)
         run: pnpm test:e2e -- --grep "Restart-Resume"
 
-      - name: Appliance + Stalwart diagnostics
+      - name: Appliance + Stalwart + Nextcloud diagnostics
         if: always()
         run: |
           # Runs whether the gate passed or failed (the test no longer tears the stack down, so
           # the container is still here). On an itemsSynced=0 / sync failure, the appliance's own
-          # "[Worker] email sync complete: scanned=.. created=.. skipped=.." line (or the error)
+          # "[Worker] <domain> sync complete: scanned=.. created=.. skipped=.." line (or the error)
           # is what tells us why. Tee everything to a file so it also uploads as an artifact
           # (the old `**/reports/` upload matched nothing — this test writes no report dir).
           mkdir -p diagnostics
@@ -202,6 +251,8 @@ jobs:
             docker compose -f "$SELFHOST_COMPOSE" -f deploy/selfhost/compose.dev.yml logs app --no-color --tail 400 || true
             echo "===== Stalwart logs (tail) ====="
             docker logs openmig-dev-stalwart --tail 150 2>&1 || true
+            echo "===== Nextcloud logs (tail) ====="
+            docker logs openmig-dev-nextcloud --tail 150 2>&1 || true
           } 2>&1 | tee diagnostics/e2e-diagnostics.txt
 
       - name: Upload diagnostics
@@ -221,4 +272,6 @@ jobs:
           docker compose -f "$SELFHOST_COMPOSE" -f deploy/selfhost/compose.dev.yml down -v --remove-orphans || true
           docker rm -f openmig-dev-stalwart || true
           docker volume rm openmig-dev-stalwart-data || true
+          docker compose -f deploy/compose/dev.yml down --remove-orphans || true
+          docker rm -f openmig-dev-nextcloud || true
           rm -f deploy/selfhost/.env deploy/selfhost/config/mapping.json || true
