@@ -5,12 +5,18 @@ name: E2E (self-hosted)
 # self-hosted Spark runner + Docker. Drives the workplan 0010 T5 acceptance gate
 # — the self-host appliance's restart-resume idempotency property — end to end:
 #
-#   1. Bring up Stalwart (the dev reference server; serves IMAP + JMAP and
-#      declaratively provisions source@dev.local / target@dev.local), publishing
-#      IMAP + JMAP on the host so the appliance can reach them via
-#      host.docker.internal (mapping.json is generated at runtime — see step 3).
-#   2. SEED the source mailbox with a known N>0 set of messages (the gate is only
-#      meaningful against a non-zero source).
+#   1. Bring up Stalwart via deploy/selfhost/setup-stalwart.sh — the ONE canonical
+#      two-phase (recovery-mode provisioning, then normal-mode serving) bring-up
+#      for this repo (see docs/stalwart-integration-fix.md; plain `docker compose
+#      up` cannot express Stalwart's two-phase requirement for one service, which
+#      is why this is a script, not a dev.yml service). Publishes JMAP + IMAPS on
+#      the host so the appliance can reach them via host.docker.internal, and also
+#      joins openmig_dev-network under the alias "stalwart" — so a sandboxed agent
+#      that joins that same network (see the doc's DooD section) can reach it by
+#      name instead, with no published ports involved at all.
+#   2. SEED the source mailbox over IMAPS (the gate is only meaningful against a
+#      non-zero source; v0.16.10 doesn't bind plaintext IMAP in normal mode, so
+#      this — like the rest of the repo — uses TLS, not port 143).
 #   3. Build + start the self-host appliance (deploy/selfhost/compose.yml) with
 #      a mapping generated from the fixture and the source/target passwords.
 #   4. Run the Restart-Resume Idempotency Gate e2e: first pass syncs N →
@@ -19,8 +25,11 @@ name: E2E (self-hosted)
 # Ports: this runner is shared with other work (other manual dispatches, agent
 # sessions, etc. on the same box), so every host port this workflow needs is
 # picked fresh at runtime (see "Pick free host ports" below) instead of assuming
-# 8080/143/993/8081 are free — see docs/stalwart-integration-fix.md "Running
-# from inside a sandboxed agent container" for the failure mode this avoids.
+# fixed numbers are free — see docs/stalwart-integration-fix.md "Running from
+# inside a sandboxed agent container" for the failure mode this avoids. Stalwart's
+# own container/volume/network names stay fixed (it's meant to be a shared,
+# reusable dev resource, same as deploy/compose/dev.yml's postgres/nextcloud) —
+# only the ports are dynamic.
 #
 # ⚠️ This workflow orchestrates Docker + a live mail seed and CANNOT be validated
 # off the runner. Treat the first dispatch as a shakedown run.
@@ -40,13 +49,12 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  DEV_COMPOSE: deploy/compose/dev.yml
   SELFHOST_COMPOSE: deploy/selfhost/compose.yml
   # SELFHOST_PORT is NOT fixed here — it's computed in "Pick free host ports"
   # below and exported to $GITHUB_ENV so it's free regardless of what else is
   # running on this box.
   SELFHOST_BIND: '127.0.0.1'
-  # Dev-stack credentials (match deploy/compose/stalwart-config.json provisioning).
+  # Dev-stack credentials (match deploy/selfhost/setup-stalwart.sh's provisioning plan).
   SOURCE_IMAP_PASSWORD: source_password
   TARGET_JMAP_PASSWORD: target_password
   POSTGRES_PASSWORD: selfhost_e2e_pw
@@ -67,13 +75,22 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
+      - name: Install stalwart-cli
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/stalwartlabs/cli/releases/latest/download/stalwart-cli-installer.sh | sh
+          export PATH="$HOME/.cargo/bin:$PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          which stalwart-cli
+          stalwart-cli --version
+
       - name: Clean up any previous stacks (fresh volumes)
         run: |
           docker compose -f "$SELFHOST_COMPOSE" down -v --remove-orphans 2>/dev/null || true
-          docker compose -f "$DEV_COMPOSE" down -v --remove-orphans 2>/dev/null || true
+          docker rm -f openmig-dev-stalwart 2>/dev/null || true
+          docker volume rm openmig-dev-stalwart-data 2>/dev/null || true
 
       # Pick genuinely free host ports for everything this workflow publishes
-      # (Stalwart JMAP/IMAP/IMAPS, the selfhost appliance), instead of assuming
+      # (Stalwart JMAP/IMAPS, the selfhost appliance), instead of assuming
       # fixed numbers are available. Each freePort() call binds to port 0 (the
       # OS hands back an unused ephemeral port), reads it back, then closes —
       # the same trick Testcontainers uses, which is why the Testcontainers-driven
@@ -94,11 +111,10 @@ jobs:
               });
             }
             (async () => {
-              const [jmap, imap, imaps, selfhost] = await Promise.all([freePort(), freePort(), freePort(), freePort()]);
+              const [jmap, imaps, selfhost] = await Promise.all([freePort(), freePort(), freePort()]);
               const lines = [
-                `DEV_STALWART_JMAP_PORT=${jmap}`,
-                `DEV_STALWART_IMAP_PORT=${imap}`,
-                `DEV_STALWART_IMAPS_PORT=${imaps}`,
+                `STALWART_JMAP_PORT=${jmap}`,
+                `STALWART_IMAPS_PORT=${imaps}`,
                 `SELFHOST_PORT=${selfhost}`,
               ];
               fs.appendFileSync(process.env.GITHUB_ENV, lines.join("\n") + "\n");
@@ -107,23 +123,13 @@ jobs:
           '
 
       - name: Start Stalwart (source + target)
-        run: |
-          docker compose -f "$DEV_COMPOSE" up -d --wait stalwart || \
-            docker compose -f "$DEV_COMPOSE" up -d stalwart
-          docker compose -f "$DEV_COMPOSE" ps
+        run: ./deploy/selfhost/setup-stalwart.sh
 
-      - name: Wait for Stalwart JMAP/IMAP readiness
-        run: |
-          for i in $(seq 1 90); do
-            if curl -sf "http://127.0.0.1:${DEV_STALWART_JMAP_PORT}/.well-known/jmap" >/dev/null 2>&1; then echo "Stalwart JMAP ready"; break; fi
-            [ "$i" -eq 90 ] && { echo "Stalwart not ready"; docker compose -f "$DEV_COMPOSE" logs stalwart; exit 1; }
-            sleep 2
-          done
-
-      - name: Seed the source mailbox (N>0 messages)
+      - name: Seed the source mailbox (N>0 messages, over IMAPS)
         env:
           SEED_IMAP_HOST: 127.0.0.1
-          SEED_IMAP_PORT: ${{ env.DEV_STALWART_IMAP_PORT }}
+          SEED_IMAP_PORT: ${{ env.STALWART_IMAPS_PORT }}
+          SEED_IMAP_TLS: 'true'
           SEED_IMAP_USER: source@dev.local
           SEED_IMAP_PASSWORD: ${{ env.SOURCE_IMAP_PASSWORD }}
           SEED_COUNT: ${{ github.event.inputs.seed_count || '5' }}
@@ -134,12 +140,12 @@ jobs:
           # Fixture mapping is git-ignored under the config dir on purpose; the
           # Dockerfile bakes deploy/selfhost/config into the image. Substitute
           # in the ports picked above rather than assuming the fixture's
-          # committed 143/8080 are free on this host right now.
+          # committed defaults are free on this host right now.
           node -e '
             const fs = require("node:fs");
             const cfg = JSON.parse(fs.readFileSync("test/e2e/fixtures/selfhost-restart-resume.mapping.json", "utf8"));
-            cfg.source.port = Number(process.env.DEV_STALWART_IMAP_PORT);
-            cfg.target.baseUrl = `http://host.docker.internal:${process.env.DEV_STALWART_JMAP_PORT}/.well-known/jmap`;
+            cfg.source.port = Number(process.env.STALWART_IMAPS_PORT);
+            cfg.target.baseUrl = `http://host.docker.internal:${process.env.STALWART_JMAP_PORT}/.well-known/jmap`;
             fs.writeFileSync("deploy/selfhost/config/mapping.json", JSON.stringify(cfg, null, 2));
           '
           cat > deploy/selfhost/.env <<ENV
@@ -176,5 +182,6 @@ jobs:
         if: always()
         run: |
           docker compose -f "$SELFHOST_COMPOSE" down -v --remove-orphans || true
-          docker compose -f "$DEV_COMPOSE" down -v --remove-orphans || true
+          docker rm -f openmig-dev-stalwart || true
+          docker volume rm openmig-dev-stalwart-data || true
           rm -f deploy/selfhost/.env deploy/selfhost/config/mapping.json || true

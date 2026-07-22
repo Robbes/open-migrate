@@ -35,8 +35,11 @@ volume cleanup. Stalwart binds **TLS listeners only** (IMAPS 993, HTTPS 443, SMT
 plus unencrypted management/JMAP HTTP on 8080; there is **no plaintext IMAP 143** — the IMAP
 client connects to 993 with `rejectUnauthorized: false` for the self-signed test certificate.
 
-The optional `deploy/compose/dev.yml` stack remains available for manual exploration, but the
-integration suite does not depend on it.
+The optional `deploy/compose/dev.yml` stack (Postgres + Nextcloud) remains available for manual
+exploration, but the integration suite does not depend on it. `dev.yml` does **not** include
+Stalwart — its two-phase startup can't be expressed as one `docker compose` service; bring it up
+with `deploy/selfhost/setup-stalwart.sh` instead (joins `dev.yml`'s `openmig_dev-network`, so it's
+reachable from anything else on that network too).
 
 ### E2E tests (manual, requires Docker and real O365 credentials)
 ```bash
@@ -345,12 +348,16 @@ Generally, **mailbox cleanup is preferred** unless you have a specific need for 
   exist.
 - `security-scan.yml` — pnpm audit + Trivy (SARIF) + CycloneDX SBOM; weekly + PR + push + manual;
   SBOM attached to release tags.
-- `e2e.yml` — manual only, on `[self-hosted, linux, arm64]` (the Spark); brings up
-  `deploy/compose/dev.yml`, attaches the runner to the network, applies Drizzle migrations to a
-  fresh DB, runs the slice incl. the idempotency property test, then tears down.
+- `e2e.yml` — manual only, on `[self-hosted, linux, arm64]` (the Spark); brings up Stalwart via
+  `deploy/selfhost/setup-stalwart.sh` (the two-phase recovery→normal bring-up — not a
+  `docker compose` service, since compose can't express that transition for one service), seeds
+  the source over IMAPS, builds + starts the self-host appliance, and runs the workplan 0010 T5
+  restart-resume idempotency gate, then tears down. Installs `stalwart-cli` itself (same install
+  step as `integration-tests`, see below) since it drives `setup-stalwart.sh`'s provisioning phase.
 - `no-committed-artifacts.yml` — PR guard against committed `node_modules/`, build outputs, local
   DBs, and `.env`.
 
 Runners: GitHub-hosted for lint/unit/build and multi-arch image builds; the self-hosted arm64
-Spark runner for integration/e2e. The Spark runner executes trusted workflows only. The
-integration job installs `stalwart-cli` as a host binary for the provisioning phase.
+Spark runner for integration/e2e. The Spark runner executes trusted workflows only. Both the
+`integration-tests` job and `e2e.yml` install `stalwart-cli` as a host binary for their respective
+provisioning phases.

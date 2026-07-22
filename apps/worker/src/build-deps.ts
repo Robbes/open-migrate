@@ -195,7 +195,7 @@ function buildImapSource(sourceConfig: MappingConfig['source'], throttleLimiter?
   const imapConfig = {
     host: sourceConfig.host,
     port: sourceConfig.port,
-    tls: true,
+    tls: sourceConfig.port === 993, // Use TLS for IMAPS (matches the target-side rule below)
     auth: {
       user: sourceConfig.user,
       accessToken: sourceConfig.auth.kind === 'xoauth2' 

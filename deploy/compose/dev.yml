@@ -1,10 +1,16 @@
 # Dev / e2e stack for the migration core.
 # Target-protocol strategy: JMAP FIRST, IMAP/CalDAV/CardDAV/WebDAV (DAV) second — both in MVP.
 #
-# Stalwart is the reference TARGET: it speaks JMAP *and* IMAP/SMTP/CalDAV/CardDAV/WebDAV,
-# so one server exercises both target families. The O365 SOURCE is separate and uses
-# IMAP+OAuth2/Graph (Microsoft has no JMAP), so it is not part of this local stack.
-# Nextcloud is a second, DAV-only target (files + CalDAV/CardDAV) for heterogeneity tests.
+# Stalwart (the reference TARGET: it speaks JMAP *and* IMAP/SMTP/CalDAV/CardDAV/WebDAV, so one
+# server exercises both target families) is intentionally NOT a service here. Stalwart requires
+# a two-phase startup (provisioning in recovery mode, then serving in normal mode — see
+# docs/stalwart-integration-fix.md) that plain `docker compose up` cannot express for one
+# service. Bring it up with `deploy/selfhost/setup-stalwart.sh` instead — it joins this file's
+# `openmig_dev-network` (see below), so anything on that network reaches it at `stalwart:8080`
+# (JMAP) / `stalwart:993` (IMAPS) regardless of whether Stalwart was started before or after
+# this stack. The O365 SOURCE is separate and uses IMAP+OAuth2/Graph (Microsoft has no JMAP),
+# so it is not part of this local stack either. Nextcloud is a second, DAV-only target (files +
+# CalDAV/CardDAV) for heterogeneity tests.
 #
 # Trigger.dev is NOT here (heavy; the in-process scheduler drives the first slice; added later
 # from github.com/triggerdotdev/docker). Images pinned and arm64-friendly (the Spark is arm64);
@@ -29,30 +35,6 @@ services:
       retries: 30
     networks: [dev-network]
 
-  # Reference target: JMAP + IMAP/SMTP + CalDAV/CardDAV/WebDAV (Rust; base debian:trixie-slim; multi-arch incl. arm64).
-  # Running in normal mode (NOT recovery mode) to enable JMAP/IMAP listeners.
-  # Stalwart 0.16 uses declarative JSON configuration - see stalwart-config.json.
-  # The image's built-in healthcheck targets TLS/443; disabled here for plain-HTTP dev — the
-  # e2e workflow polls readiness instead. JMAP session + DAV are served over the HTTP API (8080); IMAP on 143.
-  stalwart:
-    build:
-      context: .
-      dockerfile: Dockerfile.stalwart-config
-    image: stalwart-custom:config
-    # No STALWART_RECOVERY_MODE - run in normal operation mode with listeners enabled
-    tmpfs:
-      - /opt/stalwart/data:mode=777
-    ports:
-      # Overridable (DEV_STALWART_*_PORT) so CI/agents can pick free host ports
-      # instead of assuming these are available — see docs/stalwart-integration-fix.md
-      # "Running from inside a sandboxed agent container".
-      - "${DEV_STALWART_JMAP_PORT:-8180}:8080"   # JMAP/DAV HTTP API (host:container)
-      - "${DEV_STALWART_IMAP_PORT:-143}:143"     # IMAP (plain)
-      - "${DEV_STALWART_IMAPS_PORT:-993}:993"    # IMAPS (TLS)
-    healthcheck:
-      disable: true
-    networks: [dev-network]
-
   # Secondary DAV target: files (WebDAV) + CalDAV/CardDAV. SQLite keeps dev light.
   nextcloud:
     image: nextcloud:34-apache            # official multi-arch (arm64); base: Debian 13 "Trixie" via php image
@@ -62,9 +44,6 @@ services:
       NEXTCLOUD_ADMIN_PASSWORD: admin_dev_pw
       NEXTCLOUD_TRUSTED_DOMAINS: "localhost nextcloud"
     networks: [dev-network]
-
-volumes:
-  stalwart-data:
 
 networks:
   dev-network:
