@@ -183,6 +183,20 @@ jobs:
       - name: Run Restart-Resume Idempotency Gate (0010 T5)
         run: pnpm test:e2e -- --grep "Restart-Resume"
 
+      - name: Appliance + Stalwart diagnostics
+        if: always()
+        run: |
+          # Runs whether the gate passed or failed (the test no longer tears the stack down, so
+          # the container is still here). On an itemsSynced=0 / sync failure, the appliance's own
+          # "[Worker] email sync complete: scanned=.. created=.. skipped=.." line (or the error)
+          # is what tells us why — surface it rather than guessing.
+          echo "===== /status ====="
+          curl -s "http://127.0.0.1:${SELFHOST_PORT}/status" | (jq . 2>/dev/null || cat) || true
+          echo "===== appliance app logs ====="
+          docker compose -f "$SELFHOST_COMPOSE" -f deploy/selfhost/compose.dev.yml logs app --no-color --tail 300 || true
+          echo "===== Stalwart logs (tail) ====="
+          docker logs openmig-dev-stalwart --tail 100 2>&1 || true
+
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.0

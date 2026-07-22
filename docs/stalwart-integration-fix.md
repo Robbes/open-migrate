@@ -117,16 +117,15 @@ with the "localhost.local" error.
 
 ## Known Issues
 
-**Empty Folder List**: The integration test currently scans 0 folders instead of the expected
-messages. This appears to be a separate issue where Stalwart's IMAP server is not returning
-folders via the `LIST` command, or the node-imap library isn't parsing the response correctly.
-This issue is unrelated to the IMAP authentication fix and requires further investigation.
-
-**Debugging Steps**:
-1. Verify that the INBOX was created during message seeding
-2. Check Stalwart logs for IMAP LIST command handling
-3. Test with raw IMAP commands to isolate the issue
-4. Consider using a different IMAP client library or raw socket testing
+**Empty Folder List (RESOLVED — this note is historical).** An early session saw the shadow pass
+scan 0 folders. This is **no longer true**: `apps/worker/src/jmap-reindex.integration.test.ts` now
+seeds real messages into Stalwart's INBOX (`seedReindex`), runs `runShadowPass`, and asserts they
+sync (`entries.length >= 3`) — and it passes in the CI `integration-tests` job. So real IMAP→JMAP
+message sync from a real Stalwart INBOX works and is covered. **Do not treat an `itemsSynced == 0`
+in the self-host T5 e2e as "expected folder-list breakage"** — it's a real failure to diagnose from
+the appliance logs (either `state: failed` with a `lastError`, or `completed` with `scanned=0`
+pointing at a config/reachability difference specific to that run), not a standing connector
+limitation.
 
 ## Critical Lessons from Integration Testing
 
