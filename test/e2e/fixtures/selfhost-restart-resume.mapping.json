@@ -11,7 +11,7 @@
   },
   "target": {
     "type": "jmap",
-    "baseUrl": "http://host.docker.internal:8080/.well-known/jmap",
+    "baseUrl": "http://host.docker.internal:18080/.well-known/jmap",
     "user": "target@dev.local",
     "auth": { "kind": "basic", "passwordFromEnv": "TARGET_JMAP_PASSWORD" }
   }
