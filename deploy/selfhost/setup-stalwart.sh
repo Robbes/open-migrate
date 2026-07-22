@@ -58,6 +58,12 @@ CONFIG_FILE="$(mktemp)"
 PLAN_FILE="$(mktemp)"
 trap 'rm -f "$CONFIG_FILE" "$PLAN_FILE"' EXIT
 echo '{"@type":"RocksDb","path":"/opt/stalwart/data"}' > "$CONFIG_FILE"
+# mktemp creates the file mode 600 owned by the current user; it's bind-mounted read-only
+# into the container, where Stalwart runs as a DIFFERENT uid and would otherwise get
+# "Permission denied (os error 13)" reading it. This config carries no secret (just the
+# datastore path — accounts/domains/creds are provisioned via stalwart-cli into the
+# datastore, never here), so make it world-readable so the container user can read it.
+chmod 644 "$CONFIG_FILE"
 
 docker volume inspect "$VOLUME" >/dev/null 2>&1 || docker volume create "$VOLUME" >/dev/null
 docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NETWORK" >/dev/null
