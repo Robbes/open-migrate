@@ -49,7 +49,11 @@ function buildMessage(i) {
 async function main() {
   console.log(`[seed] connecting to imap://${user}@${host}:${port} (tls=${tls})`);
   const connection = await imaps.connect({
-    imap: { user, password, host, port, tls, authTimeout: 15000 },
+    // rejectUnauthorized: false — the dev/e2e Stalwart serves a self-signed cert, so accept it,
+    // exactly like the app's own ImapSource connector (packages/connectors/src/imap-source.ts)
+    // and docs/testing.md ("connects to 993 with rejectUnauthorized: false for the self-signed
+    // test certificate"). This is a throwaway test source, never a real credential path.
+    imap: { user, password, host, port, tls, tlsOptions: { rejectUnauthorized: false }, authTimeout: 15000 },
   });
 
   try {
