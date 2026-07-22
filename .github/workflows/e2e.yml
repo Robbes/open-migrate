@@ -148,7 +148,10 @@ jobs:
             const cfg = JSON.parse(fs.readFileSync("test/e2e/fixtures/selfhost-restart-resume.mapping.json", "utf8"));
             cfg.source.host = "stalwart";
             cfg.source.port = 993;
-            cfg.target.baseUrl = "http://stalwart:8080/.well-known/jmap";
+            // baseUrl is the JMAP ORIGIN only — the connector appends /.well-known/jmap
+            // (session) and /jmap (API) itself. Including the well-known path here would
+            // double it and the session never loads ("Not connected to JMAP server").
+            cfg.target.baseUrl = "http://stalwart:8080";
             fs.writeFileSync("deploy/selfhost/config/mapping.json", JSON.stringify(cfg, null, 2));
           '
           cat > deploy/selfhost/.env <<ENV
@@ -189,20 +192,27 @@ jobs:
           # Runs whether the gate passed or failed (the test no longer tears the stack down, so
           # the container is still here). On an itemsSynced=0 / sync failure, the appliance's own
           # "[Worker] email sync complete: scanned=.. created=.. skipped=.." line (or the error)
-          # is what tells us why — surface it rather than guessing.
-          echo "===== /status ====="
-          curl -s "http://127.0.0.1:${SELFHOST_PORT}/status" | (jq . 2>/dev/null || cat) || true
-          echo "===== appliance app logs ====="
-          docker compose -f "$SELFHOST_COMPOSE" -f deploy/selfhost/compose.dev.yml logs app --no-color --tail 300 || true
-          echo "===== Stalwart logs (tail) ====="
-          docker logs openmig-dev-stalwart --tail 100 2>&1 || true
+          # is what tells us why. Tee everything to a file so it also uploads as an artifact
+          # (the old `**/reports/` upload matched nothing — this test writes no report dir).
+          mkdir -p diagnostics
+          {
+            echo "===== /status ====="
+            curl -s "http://127.0.0.1:${SELFHOST_PORT}/status" | (jq . 2>/dev/null || cat) || true
+            echo "===== appliance app logs ====="
+            docker compose -f "$SELFHOST_COMPOSE" -f deploy/selfhost/compose.dev.yml logs app --no-color --tail 400 || true
+            echo "===== Stalwart logs (tail) ====="
+            docker logs openmig-dev-stalwart --tail 150 2>&1 || true
+          } 2>&1 | tee diagnostics/e2e-diagnostics.txt
 
-      - name: Upload reports
+      - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.0
         with:
-          name: selfhost-e2e-reports
-          path: '**/reports/'
+          name: selfhost-e2e-diagnostics
+          path: |
+            diagnostics/
+            test-logs/
+          if-no-files-found: ignore
           retention-days: 7
 
       - name: Cleanup
