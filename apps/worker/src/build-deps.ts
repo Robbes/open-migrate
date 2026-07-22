@@ -198,11 +198,18 @@ function buildImapSource(sourceConfig: MappingConfig['source'], throttleLimiter?
     tls: sourceConfig.port === 993, // Use TLS for IMAPS (matches the target-side rule below)
     auth: {
       user: sourceConfig.user,
-      accessToken: sourceConfig.auth.kind === 'xoauth2' 
-        ? process.env[sourceConfig.auth.tokenFromEnv] 
+      accessToken: sourceConfig.auth.kind === 'xoauth2'
+        ? process.env[sourceConfig.auth.tokenFromEnv]
+        : undefined,
+      password: sourceConfig.auth.kind === 'login'
+        ? process.env[sourceConfig.auth.passwordFromEnv]
         : undefined,
     },
-    authType: 'XOAUTH2' as const,
+    // authType must follow the configured auth kind — ImapSource.connect() branches on it
+    // to decide xoauth2 vs password auth; hardcoding XOAUTH2 here silently dropped LOGIN
+    // credentials (the password was never even read) and IMAP servers rejected the
+    // resulting empty XOAUTH2 attempt with "No supported authentication method(s)".
+    authType: sourceConfig.auth.kind === 'xoauth2' ? ('XOAUTH2' as const) : ('LOGIN' as const),
     tokenProvider: tokenProviderConfig ? createTokenProvider(tokenProviderConfig) : undefined,
     throttleLimiter, // Pass throttle limiter if available
   };

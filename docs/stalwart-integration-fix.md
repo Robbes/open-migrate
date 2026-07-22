@@ -317,3 +317,41 @@ so it isn't fighting `docker compose`'s single-service model. It also joins `dev
 `openmig_dev-network` under the alias `stalwart` — preserving the confirmed DooD fix above without
 needing a `stalwart` compose service to hang it off of. `e2e.yml`'s fixture and seed step moved to
 IMAPS 993, matching the Testcontainers path's already-proven doctrine instead of a second one.
+
+## Round 3: getting a real e2e.yml run past Stalwart, into the appliance itself
+
+Fixing Stalwart (above) surfaced two more issues on the next attempt — both real, both now fixed,
+neither Stalwart's fault:
+
+- **`deploy/selfhost/compose.yml` alone can't reach a dev Stalwart.** Two independent gaps: (1)
+  `host.docker.internal` doesn't resolve inside a Linux container without an explicit `extra_hosts`
+  entry — Docker Desktop adds this automatically, native Linux does not, and `compose.yml` didn't
+  declare one; (2) `deploy/selfhost/compose.yml` creates its own compose-project network, entirely
+  separate from `setup-stalwart.sh`'s `openmig_dev-network`, so addressing Stalwart by name
+  (`stalwart`) never resolved either. **Fix**: `deploy/selfhost/compose.dev.yml` — a new,
+  **dev/e2e-only** override (real self-host operators never reference it; `compose.yml` alone stays
+  the product) that adds the `extra_hosts` entry and attaches `app` to `openmig_dev-network` too:
+  `docker compose -f deploy/selfhost/compose.yml -f deploy/selfhost/compose.dev.yml up -d`.
+  `e2e.yml` uses it instead of generating a throwaway per-run override file, and the T5 fixture now
+  addresses Stalwart as `stalwart:8080`/`stalwart:993` (the shared network, fixed internal ports) —
+  a manual `docker network connect` for the *appliance* container is no longer needed at all. (A
+  sandboxed **agent's own** `docker network connect openmig_dev-network <agent-container>`, to poll
+  `/status` itself, is still a separate, still-necessary step — see the DooD section above.)
+- **`apps/worker/src/build-deps.ts`'s `buildImapSource()` hardcoded `authType: 'XOAUTH2'`**
+  regardless of the configured `auth.kind`, and never read a password for `auth.kind: 'login'` at
+  all — so any login-kind IMAP source (including the T5 fixture itself) always sent an empty
+  XOAUTH2 attempt, and IMAP servers correctly rejected it with `"No supported authentication
+  method(s) available"`. This one had **zero test coverage** before now — nothing exercised
+  `buildDeps`/`buildImapSource` with `auth.kind: 'login'`. Fixed to derive `authType` from
+  `auth.kind` and extract the password from `passwordFromEnv` when it's `'login'`, matching what
+  `ImapSource`'s connector (`packages/connectors/src/imap-source.ts`) already supported — the bug
+  was purely in the wiring, not the connector. Regression-tested in
+  `apps/worker/src/build-deps.unit.test.ts` (asserts both `login` and `xoauth2` wire through
+  correctly, by inspecting the built connector's internal config).
+
+**Pattern across all of round 2 and round 3**: every one of these five bugs (bootstrap mode,
+invalid config.json, hardcoded source TLS, missing compose networking, hardcoded source auth type)
+was **real and pre-existing**, not a Docker-in-Docker artifact — a sandboxed agent kept running into
+them because it's the first thing to actually attempt a full, real T5 run end-to-end, not because
+nested Docker caused any of them. Don't reflexively blame DooD for a new failure here; check
+whether it reproduces for any agent, nested or not, first.
