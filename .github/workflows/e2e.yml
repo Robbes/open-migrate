@@ -159,7 +159,11 @@ jobs:
 
       - name: Build + start the self-host appliance
         run: |
-          docker compose -f "$SELFHOST_COMPOSE" -f deploy/selfhost/compose.dev.yml up -d --build --wait || \
+          # --force-recreate: the app image ships TS source (runs under tsx), so a rebuilt
+          # image must actually replace the running container — belt-and-suspenders against
+          # a stale container surviving the rebuild. pgdata/appdata are named volumes and
+          # persist across the recreate, so this doesn't reset any state the T5 gate needs.
+          docker compose -f "$SELFHOST_COMPOSE" -f deploy/selfhost/compose.dev.yml up -d --build --force-recreate --wait || \
             { docker compose -f "$SELFHOST_COMPOSE" logs app; exit 1; }
           docker compose -f "$SELFHOST_COMPOSE" ps
 

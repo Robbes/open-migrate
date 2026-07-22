@@ -2,7 +2,14 @@
 # against deploy/selfhost/setup-stalwart.sh's Stalwart instead of a real source/target:
 #
 #   ./deploy/selfhost/setup-stalwart.sh
-#   docker compose -f deploy/selfhost/compose.yml -f deploy/selfhost/compose.dev.yml up -d
+#   docker compose -f deploy/selfhost/compose.yml -f deploy/selfhost/compose.dev.yml up -d --build --force-recreate
+#
+# ITERATING ON SOURCE: always pass `--build --force-recreate`. The app image ships the TS
+# source (it runs under tsx, no JS build step), so a source edit only reaches the running
+# container after a rebuild. `docker compose restart app` deliberately does NOT rebuild —
+# that's the operator upgrade model (pull a new image tag, §22.1), not a source-edit loop —
+# and a bare `up -d` may reuse the existing container/image. If your edit "isn't taking
+# effect", you almost certainly rebuilt without recreating, or restarted without rebuilding.
 #
 # NEVER used by real self-host operators — deploy/selfhost/compose.yml alone is the
 # product. This file exists only for workplan 0010 T5 and local dev against a Stalwart
