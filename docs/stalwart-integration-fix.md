@@ -375,6 +375,21 @@ because the file carries no secret — just `{"@type":"RocksDb","path":"/opt/sta
 accounts/domains/credentials are provisioned via `stalwart-cli` into the datastore, never in this
 file (per the header rules above).
 
+The **next** dispatch got one layer deeper — config now readable, but the data volume wasn't
+writable:
+
+```
+Failed to open database: Error { message: "IO error: While open a file for appending: /opt/stalwart/data/LOG: Permission denied" }
+```
+
+Named Docker volumes are created **root-owned**, and the Stalwart image runs as a **non-root user**,
+so it can't write to `/opt/stalwart/data`. **Fix**: run both phases with `--user root`, mirroring
+`packages/testing/src/testcontainers-setup.ts`, which uses `.withUser('root')` on both its Stalwart
+containers for exactly this reason (its comment: "sidesteps any UID/permission issues"). With
+`--user root` the process owns the write path; this also makes the earlier `chmod 644` redundant for
+the container's own reads, but that stays as defense-in-depth and to keep the config readable to any
+tooling.
+
 **Note on bind-mount vs copy for config delivery.** This repo's Testcontainers path uses
 `withCopyContentToContainer` and this doc's header says "NEVER a bind mount". `setup-stalwart.sh`
 deliberately uses a bind mount instead, which is fine **on a bare host** (the file exists locally
