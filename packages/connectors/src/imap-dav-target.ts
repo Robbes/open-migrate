@@ -77,9 +77,29 @@ const KEYWORD_TO_FLAG: Record<MailKeyword, string> = {
 export class ImapDavMailTarget implements TargetWriter, TargetReindexer {
   private readonly config: ImapDavTargetConfig;
   private conn: ImapSimple | null = null;
+  private connectPromise: Promise<void> | null = null;
 
   constructor(config: ImapDavTargetConfig) {
     this.config = config;
+  }
+
+  /**
+   * Lazily establish the IMAP connection on first use (single-flight). The `TargetWriter`
+   * interface has no `connect()`, and the sync path (`runShadowPass`/`runDomainSync`) never
+   * calls the concrete `connect()` — so, like `ImapSource` which self-connects on every op,
+   * this writer must self-connect. Without it every write threw "Not connected to IMAP server"
+   * in the real (non-test) path. Concurrent callers share one in-flight connect; a failed
+   * connect is not cached, so the next call retries. (Mirrors the JmapTargetWriter fix.)
+   */
+  private async ensureConnected(): Promise<void> {
+    if (this.conn) return;
+    if (!this.connectPromise) {
+      this.connectPromise = this.connect().catch((err) => {
+        this.connectPromise = null;
+        throw err;
+      });
+    }
+    await this.connectPromise;
   }
 
   /**
@@ -113,6 +133,7 @@ export class ImapDavMailTarget implements TargetWriter, TargetReindexer {
     if (this.conn) {
       this.conn.end();
       this.conn = null;
+      this.connectPromise = null;
       console.log('[DEBUG IMAP] Disconnected');
     }
   }
@@ -121,6 +142,7 @@ export class ImapDavMailTarget implements TargetWriter, TargetReindexer {
    * Ensure a mailbox exists for the given folder/role; return its name (IMAP uses names as IDs).
    */
   async ensureMailbox(folder: MailFolder): Promise<string> {
+    await this.ensureConnected();
     if (!this.conn) {
       throw new Error('Not connected to IMAP server');
     }
@@ -185,6 +207,7 @@ export class ImapDavMailTarget implements TargetWriter, TargetReindexer {
    * Returns the UID if found, or undefined.
    */
   async findByNaturalKey(mailboxId: string, naturalKey: string): Promise<string | undefined> {
+    await this.ensureConnected();
     if (!this.conn) {
       throw new Error('Not connected to IMAP server');
     }
@@ -278,6 +301,7 @@ export class ImapDavMailTarget implements TargetWriter, TargetReindexer {
     raw: RawMessage,
     keywords: ReadonlyArray<MailKeyword>,
   ): Promise<UpsertResult> {
+    await this.ensureConnected();
     if (!this.conn) {
       throw new Error('Not connected to IMAP server');
     }
@@ -398,6 +422,7 @@ export class ImapDavMailTarget implements TargetWriter, TargetReindexer {
    * Streams entries from all mailboxes.
    */
   async *listEntries(mailboxId?: string): AsyncIterable<TargetEntry> {
+    await this.ensureConnected();
     if (!this.conn) {
       throw new Error('Not connected to IMAP server');
     }
