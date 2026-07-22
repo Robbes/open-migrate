@@ -16,7 +16,9 @@ Before any Stalwart or integration-test work: read `docs/stalwart-integration-fi
 ## Commands
 - Install: `pnpm install` · Lint: `pnpm lint` · Typecheck: `pnpm typecheck`
 - Unit: `pnpm test` · Integration: `pnpm test:integration` (self-manages its stack via Testcontainers) · E2E: `pnpm test:e2e`
-- Optional dev stack: `docker compose -f deploy/compose/dev.yml up -d`
+- Optional dev stack: `docker compose -f deploy/compose/dev.yml up -d` (Postgres + Nextcloud).
+  Stalwart isn't part of it — its two-phase startup can't be expressed as one compose service —
+  bring it up with `deploy/selfhost/setup-stalwart.sh` instead.
 
 ## What we are building
 Sovereign migration/sync: families and SMBs move off US cloud (O365/Google/Dropbox) to EU targets. **JMAP is the primary target protocol** (Stalwart reference; mosa.cloud / La Suite / MijnBureau); **IMAP/CalDAV/CardDAV/WebDAV is the parallel second family** (Soverin, openDesk,

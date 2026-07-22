@@ -219,11 +219,12 @@ what actually resolves the problem vs. what merely works around it:
    and address it by Docker DNS name instead of a published host port at all.** Confirmed working
    on the DGX Spark box this repo's e2e work happens on:
    `deploy/compose/dev.yml` declares a **fixed-name** network, `openmig_dev-network`
-   (`networks: dev-network: name: openmig_dev-network`), and its `stalwart` service joins it. Once
-   that stack is up (`docker compose -f deploy/compose/dev.yml up -d stalwart`), run
+   (`networks: dev-network: name: openmig_dev-network`), and `deploy/selfhost/setup-stalwart.sh`
+   joins it under the alias `stalwart` (creating the network first if `dev.yml` hasn't been brought
+   up yet). Once Stalwart is up (`./deploy/selfhost/setup-stalwart.sh`), run
    `docker network connect openmig_dev-network <agent-container-name>` once from the host (or
    wherever has access to the host daemon) — after that the agent can reach Stalwart at
-   `stalwart:8080` / `stalwart:143` directly, no `host.docker.internal`, no published port, no
+   `stalwart:8080` / `stalwart:993` directly, no `host.docker.internal`, no published port, no
    collision with whatever else is squatting on a host port. This sidesteps the whole
    localhost-namespace problem in item "Root cause" above rather than working around it.
    **Caveat**: this only stays this simple because `dev.yml`'s network has a *fixed* name. The
@@ -255,14 +256,13 @@ what actually resolves the problem vs. what merely works around it:
    functional (see the bootstrap-mode trap below).
 4. Don't assume fixed host ports are free — and not just from other agent sessions. **Observed on
    the Spark box**: port 8080 is permanently held by an unrelated `searxng` service, nothing to do
-   with this repo or Docker-in-Docker at all. `deploy/compose/dev.yml`'s Postgres/Stalwart ports and
-   `e2e.yml`'s selfhost-appliance port are all overridable via env vars
-   (`DEV_POSTGRES_PORT`, `DEV_STALWART_JMAP_PORT`, `DEV_STALWART_IMAP_PORT`,
-   `DEV_STALWART_IMAPS_PORT`, `SELFHOST_PORT`) precisely so a shared box doesn't collide on
-   5433/8180/143/993/8081. `e2e.yml`'s "Pick free host ports" step is the reference implementation:
-   bind to port 0, read back the OS-assigned free port, close, use that. Do the same in the agent
-   rather than hardcoding a port — or, better, use item 0 and skip host ports for this purpose
-   entirely.
+   with this repo or Docker-in-Docker at all. `deploy/compose/dev.yml`'s Postgres port,
+   `deploy/selfhost/setup-stalwart.sh`'s JMAP/IMAPS ports (`STALWART_JMAP_PORT`/
+   `STALWART_IMAPS_PORT` env overrides), and `e2e.yml`'s selfhost-appliance port (`SELFHOST_PORT`)
+   are all overridable precisely so a shared box doesn't collide on 5433/18080/1993/8081.
+   `e2e.yml`'s "Pick free host ports" step is the reference implementation: bind to port 0, read
+   back the OS-assigned free port, close, use that. Do the same in the agent rather than
+   hardcoding a port — or, better, use item 0 and skip host ports for this purpose entirely.
 5. If the agent drives the Testcontainers integration suite directly (not just `e2e.yml`'s compose
    flow), it also needs `stalwart-cli` on its own `PATH` (or `STALWART_CLI_PATH` set) — a real
    host-level binary dependency in `testcontainers-setup.ts`'s provisioning phase, separate from the
@@ -273,30 +273,47 @@ repo's test setup, check whether it reproduces in a plain (non-nested) Docker en
 if it only fails when Docker is reached via a mounted socket, it's almost certainly one of the
 items above, not a regression here.
 
-## Known bugs found while investigating the above (Spark box forensics)
+## Bugs found via Spark box forensics, and how they were actually fixed
 
-Two **independent, already-committed bugs** surfaced while diagnosing a stranded agent session —
-neither is a Docker-in-Docker artifact, both would bite any environment:
+Three **independent, already-committed bugs** surfaced while diagnosing a stranded agent session,
+across two rounds of investigation. All three are now fixed — this section is the historical record
++ the reasoning, not an open item.
 
-- **`deploy/selfhost/stalwart-compose.yml` never delivers a config.json to the container.** No
-  `command: --config ...`, no mounted/copied file. Without one, Stalwart ignores
-  `STALWART_RECOVERY_MODE=1` and falls back to **bootstrap mode** (first-run setup wizard — only
-  port 8080's *initial-setup* UI is up, no mail listeners, no accounts). Evidence: container logs
-  read `WARN Server started in bootstrap mode ... "No configuration file was found."` after 9 hours
+- **`deploy/selfhost/stalwart-compose.yml` never delivered a config.json to the container.** No
+  `command: --config ...`, no mounted/copied file. Without one, Stalwart ignored
+  `STALWART_RECOVERY_MODE=1` and fell back to **bootstrap mode** (first-run setup wizard — only
+  port 8080's *initial-setup* UI up, no mail listeners, no accounts). Evidence: container logs read
+  `WARN Server started in bootstrap mode ... "No configuration file was found."` after 9 hours
   "healthy" (the healthcheck just curls `/.well-known/jmap`, which responds in bootstrap mode too —
-  a passing healthcheck here does **not** mean Stalwart is usable). Needs the same minimal
-  `{"@type":"RocksDb","path":"/opt/stalwart/data"}` config delivery this file's phase-1/phase-2
-  pattern in `testcontainers-setup.ts` already uses correctly.
+  a passing healthcheck there does **not** mean Stalwart is usable).
 - **`deploy/compose/stalwart-config.json`** (baked into `dev.yml`'s custom-built image via
-  `Dockerfile.stalwart-config`) is in the legacy multi-section format (`http`/`imap`/`accounts`/
-  `domains` inline) — the exact pattern this doc's own header rule forbids ("DO NOT put
-  accounts/domains/listeners in config.json"). **Unlike** the `stalwart-compose.yml` bug above,
-  this one is load-bearing as-is: `dev.yml`'s stalwart is the one Stalwart instance in this repo
-  that serves **plaintext IMAP on 143** (v0.16.10 doesn't bind 143 in normal mode without an
-  explicit listener — see "Plaintext ports NOT bound by default" above), and `e2e.yml`'s fixture
-  mapping depends on exactly that. Minimizing this file to match the Testcontainers pattern would
-  silently break `e2e.yml` until whatever depends on plaintext 143 is migrated to IMAPS 993 instead
-  — **that migration is the actual fix, not just editing this file.** Treat as an open decision, not
-  a one-line fix: standardizing everything on IMAPS 993 (matching the doctrine already proven by the
-  Testcontainers path) collapses three currently-disagreeing Stalwart configurations in this repo
-  down to one.
+  `Dockerfile.stalwart-config`) was in the legacy multi-section format — but a more careful look
+  (prompted by a *second* agent's investigation of an `e2e.yml` failure) found it wasn't just
+  "legacy," it was **structurally invalid**: `credentials` as an array instead of the required map,
+  missing `@type`/`name`/`roles`/`permissions`/`encryptionAtRest` on the account objects. A clean
+  rebuild surfaced Stalwart's real parse error: `missing field @type at line 63`. **This file had
+  probably never once successfully started Stalwart in this repo's history** — the earlier framing
+  in this doc ("load-bearing, treat as an open decision") assumed the file worked and was worth
+  protecting; it didn't, so there was nothing to protect. It also confirmed there was never a
+  legitimate exception to the header rule ("DO NOT put accounts/domains/listeners in config.json")
+  hiding here — just an invalid file nobody had cleanly rebuilt against until then.
+- **`apps/worker/src/build-deps.ts` hardcoded `tls: true`** for the IMAP *source* connector
+  regardless of the configured port, while the IMAP/DAV *target* connector correctly derived it
+  (`tls: targetConfig.port === 993`). Found while tracing why seeding would still fail even after
+  Stalwart itself was fixed: the self-host appliance's real sync path would keep attempting a TLS
+  handshake against whatever port was configured, independent of whether that port actually spoke
+  TLS. Fixed to match the target side's own pattern.
+
+**The actual fix, not a per-file patch:** all three collapse into one change — stop trying to make
+a second, parallel Stalwart configuration (accounts in a static file, plaintext 143) coexist with
+the proven two-phase pattern. `deploy/compose/Dockerfile.stalwart-config` and
+`deploy/compose/stalwart-config.json` are deleted; `dev.yml` no longer has a `stalwart` service at
+all (compose can't express a two-phase startup for one service anyway). `deploy/selfhost/
+stalwart-compose.yml` is deleted too — superseded, not fixed in place. In their place,
+**`deploy/selfhost/setup-stalwart.sh`** is the one canonical way to stand up Stalwart for local dev
+and `e2e.yml`: the exact two-phase dance from this doc (minimal config.json, recovery-mode
+`stalwart-cli apply`, then a normal-mode restart), official image only, run via plain `docker run`
+so it isn't fighting `docker compose`'s single-service model. It also joins `dev.yml`'s
+`openmig_dev-network` under the alias `stalwart` — preserving the confirmed DooD fix above without
+needing a `stalwart` compose service to hang it off of. `e2e.yml`'s fixture and seed step moved to
+IMAPS 993, matching the Testcontainers path's already-proven doctrine instead of a second one.

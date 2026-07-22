@@ -5,13 +5,13 @@
   "source": {
     "type": "imap-oauth2",
     "host": "host.docker.internal",
-    "port": 143,
+    "port": 993,
     "user": "source@dev.local",
     "auth": { "kind": "login", "passwordFromEnv": "SOURCE_IMAP_PASSWORD" }
   },
   "target": {
     "type": "jmap",
-    "baseUrl": "http://host.docker.internal:8080/.well-known/jmap",
+    "baseUrl": "http://host.docker.internal:18080/.well-known/jmap",
     "user": "target@dev.local",
     "auth": { "kind": "basic", "passwordFromEnv": "TARGET_JMAP_PASSWORD" }
   }
