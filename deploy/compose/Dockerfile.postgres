@@ -1,0 +1,7 @@
+FROM postgres:18-alpine
+
+# Copy migration scripts
+COPY packages/ledger/migrations/*.sql /docker-entrypoint-initdb.d/
+
+# Ensure proper permissions
+RUN chmod 644 /docker-entrypoint-initdb.d/*.sql

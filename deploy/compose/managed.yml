@@ -150,31 +150,28 @@ services:
     networks:
       - open-migrate-network
 
-  # Open Migration Worker
-  worker:
-    build:
-      context: ../..
-      dockerfile: apps/worker/Dockerfile
-    container_name: open-migrate-worker
-    environment:
-      NODE_ENV: ${NODE_ENV:-development}
-      # See the api service above: owner URL for migrations, app_user URL for the
-      # RLS-enforced tenant data path.
-      DATABASE_URL: postgresql://${POSTGRES_USER:-openmigrate}:${POSTGRES_PASSWORD:-openmigrate_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
-      APP_DATABASE_URL: postgresql://${APP_DB_USER:-app_user}:${APP_DB_PASSWORD:-app_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
-      # Same key as the API — the worker decrypts connection credentials.
-      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:?set a 32-byte key in .env}
-      TRIGGER_API_URL: http://trigger-api:3000
-      TRIGGER_API_KEY: ${TRIGGER_API_KEY:-dev-api-key}
-      IMAP_TIMEOUT: ${IMAP_TIMEOUT:-300}
-      JMAP_TIMEOUT: ${JMAP_TIMEOUT:-300}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      trigger-api:
-        condition: service_started
-    networks:
-      - open-migrate-network
+  # Open Migration Worker (disabled in v4 - tasks deploy directly to Trigger.dev)
+  # worker:
+  #   build:
+  #     context: ../..
+  #     dockerfile: apps/worker/Dockerfile
+  #   container_name: open-migrate-worker
+  #   environment:
+  #     NODE_ENV: ${NODE_ENV:-development}
+  #     DATABASE_URL: postgresql://${POSTGRES_USER:-openmigrate}:${POSTGRES_PASSWORD:-openmigrate_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
+  #     APP_DATABASE_URL: postgresql://${APP_DB_USER:-app_user}:${APP_DB_PASSWORD:-app_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
+  #     SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:?set a 32-byte key in .env}
+  #     TRIGGER_API_URL: http://trigger-api:3000
+  #     TRIGGER_API_KEY: ${TRIGGER_API_KEY:-dev-api-key}
+  #     IMAP_TIMEOUT: ${IMAP_TIMEOUT:-300}
+  #     JMAP_TIMEOUT: ${JMAP_TIMEOUT:-300}
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     trigger-api:
+  #       condition: service_started
+  #   networks:
+  #     - open-migrate-network
 
   # Web Application
   web:
