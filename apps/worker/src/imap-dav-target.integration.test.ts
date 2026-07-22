@@ -420,7 +420,8 @@ describe('IMAP/DAV Target Writer Integration', () => {
         rejectUnauthorized: false,
       });
 
-      await target.connect();
+      // No explicit connect() — the target self-connects lazily on first use, which is what
+      // the production sync path relies on (see ImapDavMailTarget.ensureConnected).
       
       const mailboxId = await target.ensureMailbox({
         path: 'INBOX',
@@ -443,7 +444,8 @@ describe('IMAP/DAV Target Writer Integration', () => {
         rejectUnauthorized: false,
       });
 
-      await target.connect();
+      // No explicit connect() — the target self-connects lazily on first use, which is what
+      // the production sync path relies on (see ImapDavMailTarget.ensureConnected).
       
       const mailboxId = await target.ensureMailbox({
         path: 'INBOX',
@@ -500,7 +502,8 @@ This is an idempotency test message.
         rejectUnauthorized: false,
       });
 
-      await target.connect();
+      // No explicit connect() — the target self-connects lazily on first use, which is what
+      // the production sync path relies on (see ImapDavMailTarget.ensureConnected).
       
       const mailboxId = await target.ensureMailbox({
         path: 'INBOX',
@@ -554,7 +557,8 @@ Test message for natural key lookup.
         rejectUnauthorized: false,
       });
 
-      await target.connect();
+      // No explicit connect() — the target self-connects lazily on first use, which is what
+      // the production sync path relies on (see ImapDavMailTarget.ensureConnected).
       
       const mailboxId = await target.ensureMailbox({
         path: 'INBOX',
@@ -639,7 +643,8 @@ Test message for reindex.
         rejectUnauthorized: false,
       });
 
-      await target.connect();
+      // No explicit connect() — the target self-connects lazily on first use, which is what
+      // the production sync path relies on (see ImapDavMailTarget.ensureConnected).
       
       // Ensure INBOX exists
       await target.ensureMailbox({ path: 'INBOX', name: 'INBOX', specialUse: 'inbox' });
@@ -693,7 +698,8 @@ Test message for reindex.
         rejectUnauthorized: false,
       });
 
-      await target.connect();
+      // No explicit connect() — the target self-connects lazily on first use, which is what
+      // the production sync path relies on (see ImapDavMailTarget.ensureConnected).
       await target.ensureMailbox({ path: 'INBOX', name: 'INBOX', specialUse: 'inbox' });
 
       // First run - create initial messages
