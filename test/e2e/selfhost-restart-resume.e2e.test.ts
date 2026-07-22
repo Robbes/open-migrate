@@ -5,14 +5,19 @@
 // restart the app, run again, and assert the ledger item count did NOT grow
 // (zero duplicates) — the §5 "intermittently-on host resumes cleanly" property.
 //
-// PREREQUISITES (this test does NOT bring the stack up or seed the source):
+// PREREQUISITES (this test does NOT bring the stack up, seed the source, or activate):
 //   1. Seed the source (Stalwart) with a KNOWN, NON-ZERO set of items — the
 //      assertion is only meaningful when the first pass actually creates items.
 //   2. Place a mapping in the (git-ignored) config dir and bring the stack up:
 //        cp test/e2e/fixtures/selfhost-restart-resume.mapping.json \
 //           deploy/selfhost/config/mapping.json
 //        docker compose -f deploy/selfhost/compose.yml up -d
-//   3. Run this test (manual e2e; NOT part of automated CI).
+//   3. GREEN-LIGHT the mapping. Since workplan 0013 T7 the appliance loads every
+//      mapping PAUSED and only schedules it after an explicit start, so it never
+//      syncs on its own:
+//        curl -X POST http://127.0.0.1:${SELFHOST_PORT}/mappings/<mappingId>/start
+//   4. Run this test (manual e2e; NOT part of automated CI). The e2e.yml workflow
+//      does steps 1–3 for you before invoking this.
 //
 // Idempotency signal: `/status` exposes `itemsSynced` (DERIVED from the item
 // ledger). After the first pass it is N; after the restart + second pass it must

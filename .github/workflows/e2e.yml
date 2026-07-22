@@ -167,6 +167,19 @@ jobs:
             { docker compose -f "$SELFHOST_COMPOSE" logs app; exit 1; }
           docker compose -f "$SELFHOST_COMPOSE" ps
 
+      - name: Green-light the mapping (0013 T7 — mappings load paused until confirmed)
+        run: |
+          # Since workplan 0013 T7 the appliance loads every mapping PAUSED and only schedules
+          # it after an explicit POST /mappings/:id/start (the "Start migration" green light).
+          # The restart-resume gate expects the mapping to actually run, so activate it here —
+          # this also exercises the real activation endpoint. The id is the config mappingId.
+          MAPPING_ID="$(node -e 'console.log(JSON.parse(require("node:fs").readFileSync("deploy/selfhost/config/mapping.json","utf8")).mappingId)')"
+          echo "Activating mapping ${MAPPING_ID} on http://127.0.0.1:${SELFHOST_PORT}"
+          code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:${SELFHOST_PORT}/mappings/${MAPPING_ID}/start")"
+          echo "POST /start -> ${code}"
+          # 303 = activated (redirect to /), 409 = already active/cutover — both fine; anything else fails.
+          case "$code" in 200|303|409) ;; *) echo "unexpected activation status"; docker compose -f "$SELFHOST_COMPOSE" logs app; exit 1;; esac
+
       - name: Run Restart-Resume Idempotency Gate (0010 T5)
         run: pnpm test:e2e -- --grep "Restart-Resume"
 
