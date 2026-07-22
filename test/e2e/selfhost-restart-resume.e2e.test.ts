@@ -23,7 +23,7 @@
 // ledger). After the first pass it is N; after the restart + second pass it must
 // still be N — a second pass that created duplicates would grow it.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { execSync } from 'node:child_process';
 import { setTimeout } from 'node:timers/promises';
 
@@ -80,13 +80,10 @@ describe('Restart-Resume Idempotency Gate (T5)', () => {
     await waitForHealth();
   }, 60000);
 
-  afterAll(() => {
-    try {
-      execSync(`docker compose -f ${COMPOSE_FILE} down`, { stdio: 'inherit' });
-    } catch {
-      // best-effort cleanup
-    }
-  });
+  // NOTE: this test does NOT tear the stack down (it never brought it up — see the
+  // PREREQUISITES header). Whoever owns the stack owns teardown: the e2e.yml workflow's
+  // Cleanup step, or a by-hand runner. A previous `afterAll` here ran `docker compose down`,
+  // which removed the app container before failure diagnostics (its logs) could be captured.
 
   it('first pass syncs the seeded items', async () => {
     // Wait for a completed pass that actually synced something.
