@@ -152,9 +152,29 @@ export class JmapTargetWriter implements TargetWriter, TargetReindexer {
   private accountId: string | null = null;
   private apiUrl: string | null = null;
   private authHeader: string | null = null;
+  private connectPromise: Promise<void> | null = null;
 
   constructor(config: JmapTargetConfig) {
     this.config = config;
+  }
+
+  /**
+   * Lazily establish the JMAP session on first use (single-flight). The `TargetWriter`
+   * interface has no `connect()`, and the sync path (`runShadowPass`/`runDomainSync`) never
+   * calls the concrete `connect()` — so, like `ImapSource` which self-connects on every
+   * `listFolders`/`listSince`, this writer must self-connect. Without it every write threw
+   * "Not connected to JMAP server" in the real (non-test) path. Concurrent callers share one
+   * in-flight connect; a failed connect is not cached, so the next call retries.
+   */
+  private async ensureConnected(): Promise<void> {
+    if (this.accountId && this.client && this.apiUrl && this.authHeader) return;
+    if (!this.connectPromise) {
+      this.connectPromise = this.connect().catch((err) => {
+        this.connectPromise = null;
+        throw err;
+      });
+    }
+    await this.connectPromise;
   }
 
   /**
@@ -327,9 +347,7 @@ export class JmapTargetWriter implements TargetWriter, TargetReindexer {
    * Returns the mailbox ID.
    */
   async ensureMailbox(folder: MailFolder): Promise<string> {
-    if (!this.apiUrl || !this.authHeader || !this.accountId) {
-      throw new Error("Not connected to JMAP server");
-    }
+    await this.ensureConnected();
 
     console.log('[DEBUG JMAP] ensureMailbox called with folder:', JSON.stringify(folder));
     
@@ -440,9 +458,7 @@ export class JmapTargetWriter implements TargetWriter, TargetReindexer {
     mailboxId: string,
     naturalKey: string,
   ): Promise<string | undefined> {
-    if (!this.accountId) {
-      throw new Error("Not connected to JMAP server");
-    }
+    await this.ensureConnected();
 
     try {
       // Query emails by Message-ID header
@@ -482,9 +498,7 @@ export class JmapTargetWriter implements TargetWriter, TargetReindexer {
    * @returns Async iterable of TargetEntry objects
    */
   async *listEntries(mailboxId?: string): AsyncIterable<TargetEntry> {
-    if (!this.accountId) {
-      throw new Error("Not connected to JMAP server");
-    }
+    await this.ensureConnected();
 
     const LIMIT = 100; // Number of emails to fetch per page
     let position = 0;
@@ -608,9 +622,7 @@ export class JmapTargetWriter implements TargetWriter, TargetReindexer {
     raw: RawMessage,
     keywords: ReadonlyArray<MailKeyword>,
   ): Promise<UpsertResult> {
-    if (!this.client || !this.accountId) {
-      throw new Error("Not connected to JMAP server");
-    }
+    await this.ensureConnected();
 
     // Extract Message-ID from raw RFC822
     const messageId = this.extractMessageIdFromRfc822(raw.rfc822);
