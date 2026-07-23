@@ -150,28 +150,41 @@ services:
     networks:
       - open-migrate-network
 
-  # Open Migration Worker (disabled in v4 - tasks deploy directly to Trigger.dev)
-  # worker:
-  #   build:
-  #     context: ../..
-  #     dockerfile: apps/worker/Dockerfile
-  #   container_name: open-migrate-worker
-  #   environment:
-  #     NODE_ENV: ${NODE_ENV:-development}
-  #     DATABASE_URL: postgresql://${POSTGRES_USER:-openmigrate}:${POSTGRES_PASSWORD:-openmigrate_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
-  #     APP_DATABASE_URL: postgresql://${APP_DB_USER:-app_user}:${APP_DB_PASSWORD:-app_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
-  #     SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:?set a 32-byte key in .env}
-  #     TRIGGER_API_URL: http://trigger-api:3000
-  #     TRIGGER_API_KEY: ${TRIGGER_API_KEY:-dev-api-key}
-  #     IMAP_TIMEOUT: ${IMAP_TIMEOUT:-300}
-  #     JMAP_TIMEOUT: ${JMAP_TIMEOUT:-300}
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     trigger-api:
-  #       condition: service_started
-  #   networks:
-  #     - open-migrate-network
+  # Open Migration Worker — runs apps/worker/src/managed-scheduler.ts, a
+  # DB-polling scheduler for active mailbox_mapping rows across all tenants.
+  # This is an interim path, not the real Trigger.dev v4 task model: the
+  # tasks under apps/worker/src/jobs/* still need a trigger.config.ts + a
+  # `trigger deploy` step against trigger-api before they're reachable (see
+  # managed-scheduler.ts's header). Until then, this container is what
+  # actually runs syncs in the managed edition.
+  worker:
+    build:
+      context: ../..
+      dockerfile: apps/worker/Dockerfile
+    container_name: open-migrate-worker
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 8082
+      DATABASE_URL: postgresql://${POSTGRES_USER:-openmigrate}:${POSTGRES_PASSWORD:-openmigrate_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
+      APP_DATABASE_URL: postgresql://${APP_DB_USER:-app_user}:${APP_DB_PASSWORD:-app_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:?set a 32-byte key in .env}
+      TRIGGER_API_URL: http://trigger-api:3000
+      TRIGGER_API_KEY: ${TRIGGER_API_KEY:-dev-api-key}
+      IMAP_TIMEOUT: ${IMAP_TIMEOUT:-300}
+      JMAP_TIMEOUT: ${JMAP_TIMEOUT:-300}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8082/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    depends_on:
+      postgres:
+        condition: service_healthy
+      trigger-api:
+        condition: service_started
+    networks:
+      - open-migrate-network
 
   # Web Application
   web:
