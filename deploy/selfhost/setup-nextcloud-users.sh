@@ -62,16 +62,47 @@ docker exec "$CONTAINER" php occ config:system:set trusted_domains 2 --value="12
 sleep 2
 echo "[setup-nextcloud-users] Trusted domains registered"
 
+# Wait for Nextcloud's own install/migration to finish via `occ status` (docker exec,
+# no HTTP, no auth) BEFORE sending any Basic-Auth DAV request. Polling PROPFIND with
+# real credentials while the app is still installing can hit its auth stack before the
+# user backend is ready, drawing repeated 401s — Nextcloud's built-in brute-force
+# protection (enabled by default) then throttles the IP, escalating to 429 for the rest
+# of the run. `occ status` sidesteps that risk entirely: it never touches the web/auth
+# stack, so it can't trigger the protection it's meant to check readiness for.
+echo "[setup-nextcloud-users] Waiting for install to finish (occ status)..."
+installed=false
+for _ in $(seq 1 60); do
+  status_json="$(docker exec "$CONTAINER" php occ status --output=json 2>/dev/null || echo '{}')"
+  if echo "$status_json" | grep -q '"installed":true'; then
+    installed=true
+    break
+  fi
+  sleep 2
+done
+if [ "$installed" != "true" ]; then
+  echo "[setup-nextcloud-users] Nextcloud did not finish installing" >&2
+  exit 1
+fi
+echo "[setup-nextcloud-users] Install complete"
+
 echo "[setup-nextcloud-users] Verifying external DAV readiness (PROPFIND)..."
 propfind_ready=false
-for _ in $(seq 1 30); do
+code=""
+for i in $(seq 1 10); do
   code="$(curl -s -o /dev/null -w '%{http_code}' -X PROPFIND -H 'Depth: 0' \
     -u "${ADMIN_USER}:${ADMIN_PASSWORD}" "${BASE_URL}/remote.php/dav/" || echo 000)"
   if [ "$code" = "207" ]; then
     propfind_ready=true
     break
   fi
-  sleep 2
+  # A 429 means the brute-force guard is already engaged (e.g. from a previous run's
+  # leftover state) — back off much longer than the steady 2s cadence instead of
+  # hammering it further and making the block last longer.
+  if [ "$code" = "429" ]; then
+    sleep 15
+  else
+    sleep 2
+  fi
 done
 if [ "$propfind_ready" != "true" ]; then
   echo "[setup-nextcloud-users] External DAV did not become ready (last PROPFIND status: ${code:-unknown})" >&2
