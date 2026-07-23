@@ -16,6 +16,7 @@ import type {
   MappingId,
 } from '@openmig/shared';
 import { calendarNaturalKeyHash, calendarContentHash } from '@openmig/shared';
+import { collectionSlug } from './dav-collection-path';
 
 /**
  * Configuration for CalDAV target writer
@@ -66,8 +67,16 @@ export class CalDAVTargetWriter implements CalendarTargetWriter {
    * Returns the calendar ID (href) for use in subsequent operations.
    */
   async ensureCalendar(folder: CalendarFolder): Promise<string> {
-    const calendarPath = this.normalizeCalendarPath(folder.path ?? folder.name ?? 'calendar');
-    
+    // The collection MUST live under THIS writer's own account, not wherever the
+    // source folder came from. In a real cross-account/cross-server migration the
+    // folder handed to us by the domain-sync loop is the SOURCE collection (e.g.
+    // /remote.php/dav/calendars/<source-user>/personal/); using its path verbatim
+    // would target the wrong user (or double the DAV prefix). We therefore derive a
+    // stable slug from the folder and re-home it under calendars/<target-user>/.
+    const calendarPath = this.normalizeCalendarPath(
+      `calendars/${this.config.username}/${collectionSlug(folder.name, folder.path, 'calendar')}`,
+    );
+
     // Check if calendar already exists via PROPFIND
     const exists = await this.calendarExists(calendarPath);
     if (exists) {

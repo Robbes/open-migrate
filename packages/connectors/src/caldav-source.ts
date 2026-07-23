@@ -464,7 +464,15 @@ export class CalDAVSource implements CalendarSource {
    * Decode XML entities in iCalendar data.
    */
   private decodeXmlEntities(text: string): string {
+    // Numeric character references (&#13; / &#x0D;) too, not just the five named entities —
+    // see the identical fix + rationale in carddav-source.ts's decodeXmlEntities. Not yet
+    // observed to bite here (Nextcloud's calendar-data responses haven't needed it in
+    // practice), but the underlying XML-serialization behavior is server-side, not
+    // domain-specific, so the same corruption is possible for any control character in an
+    // event field.
     return text
+      .replace(/&#x([0-9A-Fa-f]+);/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/&#(\d+);/g, (_, dec: string) => String.fromCharCode(parseInt(dec, 10)))
       .replace(/&lt;/g, '<')
       .replace(/&gt;/g, '>')
       .replace(/&amp;/g, '&')

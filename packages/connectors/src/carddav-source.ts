@@ -281,11 +281,55 @@ export class CarddavSource implements ContactSource {
       },
     });
 
-    if (response.status !== 207) {
-      throw new Error(`REPORT failed with status ${response.status}: ${response.body}`);
+    if (response.status === 207) {
+      return this.parseSyncCollectionResponse(response.body);
     }
 
-    return this.parseSyncCollectionResponse(response.body);
+    // Some CardDAV address books — observed on a freshly-provisioned Nextcloud account
+    // outside the primary admin user — reject {DAV:}sync-collection entirely (e.g.
+    // Sabre\DAV\Exception\ReportNotSupported), even though the identical sync-collection
+    // REPORT works fine against a CalDAV calendar on the same account. Fall back to a full
+    // addressbook-query listing (RFC 6352 §8.6, universally supported) instead of failing
+    // the whole domain. This class-level fallback is what this method's own docstring
+    // already promised ("falls back to CTag if sync-token not supported") but never
+    // actually implemented. No incremental cursor from this path (every pass re-lists
+    // everything), but correctness still holds: ADR-0020 treats cursors as
+    // non-authoritative — a lost/absent cursor just forces a full, still-idempotent
+    // re-scan via the ledger's natural-key fast-path.
+    const { objects } = await this.addressbookQueryAll(collectionPath);
+    return { objects, syncToken: undefined, ctag: undefined };
+  }
+
+  /**
+   * Full listing fallback for CardDAV servers/collections that reject sync-collection.
+   * RFC 6352 §8.6 addressbook-query with an empty (match-all) filter.
+   */
+  private async addressbookQueryAll(collectionPath: string): Promise<{ objects: CardDAVContactObject[] }> {
+    const query = `<?xml version="1.0" encoding="utf-8"?>
+      <A:addressbook-query xmlns:D="DAV:" xmlns:A="urn:ietf:params:xml:ns:carddav">
+        <D:prop>
+          <D:getetag/>
+          <A:address-data/>
+        </D:prop>
+      </A:addressbook-query>`;
+
+    const response = await this.httpClient.request({
+      method: 'REPORT',
+      url: this.resolveHref(collectionPath),
+      body: query,
+      headers: {
+        'Content-Type': 'application/xml',
+        Depth: '1',
+        Authorization: this.getAuthorizationHeader(),
+      },
+    });
+
+    if (response.status !== 207) {
+      throw new Error(`addressbook-query REPORT failed with status ${response.status}: ${response.body}`);
+    }
+
+    const { objects } = this.parseSyncCollectionResponse(response.body);
+    return { objects };
   }
 
   /**
@@ -728,9 +772,21 @@ export class CarddavSource implements ContactSource {
 
   /**
    * Decode XML entities.
+   *
+   * MUST include numeric character references (&#13; / &#x0D;), not just the five named
+   * entities — SabreDAV (Nextcloud's CardDAV backend) serializes control characters like the
+   * vCard CRLF line terminator's \r as &#13; inside <address-data> text content (valid XML;
+   * a literal \r byte in text content SHOULD be escaped). Without decoding it back, the raw
+   * string "&#13;" ends up embedded in the vCard — corrupting the extracted UID (and every
+   * PUT filename built from it: SabreDAV then rejects the resulting resource as "not a valid
+   * vCard" with 415 Unsupported Media Type, since the payload contains that literal text
+   * instead of a real line break). Decode numeric refs before the named entities so a
+   * (hypothetical) literal "&amp;#13;" in real content isn't double-decoded into a CR.
    */
   private decodeXmlEntities(str: string): string {
     return str
+      .replace(/&#x([0-9A-Fa-f]+);/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/&#(\d+);/g, (_, dec: string) => String.fromCharCode(parseInt(dec, 10)))
       .replace(/&lt;/gi, '<')
       .replace(/&gt;/gi, '>')
       .replace(/&amp;/gi, '&')

@@ -48,6 +48,21 @@ reachable from anything else on that network too).
 # See docs/deployment.md for full setup
 ```
 
+### Self-host restart-resume e2e (`.github/workflows/e2e.yml`, manual dispatch, self-hosted runner only)
+
+Black-box gate against a real running appliance (`deploy/selfhost/compose.yml`): seed real
+sources, start the appliance, run a pass, `docker compose restart app`, run again, assert the
+per-domain ledger item count did **not** grow (zero duplicates). Originally mail-only (workplan
+0010 T5); extended by the issue #114 follow-up to also cover **calendar** and **contacts**
+against a real cross-account Nextcloud pair (`e2e-source` → `e2e-target`, provisioned by
+`deploy/selfhost/setup-nextcloud-users.sh`, seeded by `test/e2e/seed-dav-source.mjs`) — proving
+the restart-resume property for the DAV domains, not just that they *can* write (that's
+`packages/core/src/dav-sync.integration.test.ts`, proven in CI). **WebDAV files remains
+deferred** (not yet in this gate). `test/e2e/selfhost-restart-resume.e2e.test.ts` iterates over
+whatever domains are enabled in `test/e2e/fixtures/selfhost-restart-resume.mapping.json`
+(`E2E_DOMAINS` env overrides the list), so adding files later is a fixture + seed-script change,
+not a test rewrite.
+
 ## Testcontainers invariants (enforced by the setup; see stalwart-integration-fix.md for rationale)
 - Exactly **one Stalwart container per data volume at any moment** (RocksDB exclusive lock);
   phase 1 is fully stopped and confirmed gone before phase 2 starts.

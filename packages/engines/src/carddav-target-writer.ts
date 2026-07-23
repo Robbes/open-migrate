@@ -16,6 +16,7 @@ import type {
   MappingId,
 } from '@openmig/shared';
 import { contactNaturalKeyHash, contactContentHash } from '@openmig/shared';
+import { collectionSlug } from './dav-collection-path';
 
 /**
  * Configuration for CardDAV target writer
@@ -64,8 +65,14 @@ export class CardDAVTargetWriter implements ContactTargetWriter {
    * Returns the address book ID (href) for use in subsequent operations.
    */
   async ensureContactFolder(folder: ContactFolder): Promise<string> {
-    const addressBookPath = this.normalizeAddressBookPath(folder.path ?? folder.name ?? 'addressbook');
-    
+    // Re-home the address book under THIS writer's own account (see collectionSlug):
+    // the folder handed to us by the domain-sync loop is the SOURCE collection, which
+    // in a cross-account migration belongs to a different user/server. Nextcloud/SabreDAV
+    // serve a user's address books under addressbooks/users/<user>/.
+    const addressBookPath = this.normalizeAddressBookPath(
+      `addressbooks/users/${this.config.username}/${collectionSlug(folder.name, folder.path, 'contacts')}`,
+    );
+
     // Check if address book already exists via PROPFIND
     const exists = await this.addressBookExists(addressBookPath);
     if (exists) {
