@@ -146,7 +146,10 @@ jobs:
         run: ./deploy/selfhost/setup-stalwart.sh
 
       - name: Start Nextcloud (calendar + contacts DAV target)
-        run: docker compose -f deploy/compose/dev.yml up -d nextcloud
+        # dev.ci.yml: setup-stalwart.sh already created openmig_dev-network via a raw
+        # `docker network create` (no compose label) — dev.yml alone refuses to attach
+        # to it without this override marking it external. See dev.ci.yml's header.
+        run: docker compose -f deploy/compose/dev.yml -f deploy/compose/dev.ci.yml up -d nextcloud
 
       - name: Provision Nextcloud DAV users (e2e-source, e2e-target)
         env:
@@ -272,6 +275,6 @@ jobs:
           docker compose -f "$SELFHOST_COMPOSE" -f deploy/selfhost/compose.dev.yml down -v --remove-orphans || true
           docker rm -f openmig-dev-stalwart || true
           docker volume rm openmig-dev-stalwart-data || true
-          docker compose -f deploy/compose/dev.yml down --remove-orphans || true
+          docker compose -f deploy/compose/dev.yml -f deploy/compose/dev.ci.yml down --remove-orphans || true
           docker rm -f openmig-dev-nextcloud || true
           rm -f deploy/selfhost/.env deploy/selfhost/config/mapping.json || true
