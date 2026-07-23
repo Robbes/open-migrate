@@ -9,17 +9,38 @@
  * stack. It also mints a demo JWT per tenant owner (signed with JWT_SECRET),
  * because there is no password-login endpoint yet (auth is bearer-token only).
  *
- * Idempotent: fixed UUIDs + `ON CONFLICT DO NOTHING`, so re-running is a no-op.
+ * The demo tenants point at REAL backends so a shadow pass can actually
+ * complete (not just fail at "no credentials"), provisioned by
+ * `deploy/compose/setup-managed-demo.sh` before running this seed:
+ *   - Tenant A: mail only, against the demo Stalwart (IMAP source, JMAP
+ *     target) — the same fixed `source`/`target` accounts
+ *     `deploy/selfhost/setup-stalwart.sh` always provisions.
+ *   - Tenant B: calendar/contact/file only, against the demo Nextcloud
+ *     (CalDAV/CardDAV/WebDAV) — two accounts setup-managed-demo.sh creates.
+ * They're split this way (not all four domains on both tenants) because the
+ * `connection` table has exactly one source + one target row per tenant,
+ * shared by every domain — there's no way for one tenant's single
+ * source/target pair to point at two unrelated backends (Stalwart AND
+ * Nextcloud) at once with today's schema. Real tenants configure their own
+ * connections through the API; this split is a demo-seed constraint only.
+ *
+ * Idempotent: fixed UUIDs + `ON CONFLICT DO NOTHING`, so re-running is a no-op
+ * for everything except credentials — re-run after rotating a demo password
+ * and the old encrypted secretRef sticks (ON CONFLICT DO NOTHING won't update
+ * it); drop the connection row first if you need to rotate.
  * All writes go through `withTenant()` (transaction-scoped `app.current_tenant`),
  * so the script is correct whether it connects as the DB owner or as `app_user`.
  *
- * Usage (from repo root, with the managed stack up and Postgres port exposed):
+ * Usage (from repo root, with the managed stack + demo backend up — see
+ * deploy/compose/setup-managed-demo.sh — and Postgres port exposed):
  *   DATABASE_URL=postgres://openmigrate:...@localhost:5432/openmigrate \
  *   JWT_SECRET=change-this-in-production \
+ *   SECRET_ENCRYPTION_KEY=<32-byte key, same as the api/worker containers> \
  *   pnpm --filter @openmig/api seed:managed
  *
- * SECURITY: this is a *demo* seed. The printed JWTs are for local evaluation
- * only; never run it against a production database.
+ * SECURITY: this is a *demo* seed against a throwaway local backend. The
+ * printed JWTs and the hardcoded demo passwords below are for local
+ * evaluation only; never run it against a production database.
  */
 
 import jwt from 'jsonwebtoken';
@@ -33,6 +54,7 @@ import {
   mailboxMapping,
   scopeSelection,
 } from '@openmig/ledger';
+import { SecretStore } from '@openmig/core/secret-store';
 
 /** One demo tenant's fixed identifiers (deterministic → idempotent re-runs). */
 interface DemoTenant {
@@ -44,7 +66,21 @@ interface DemoTenant {
   readonly sourceMailboxId: string;
   readonly targetMailboxId: string;
   readonly mappingId: string;
+  /** Domains this tenant's single source/target pair can actually serve (see file header). */
+  readonly domains: readonly ('email' | 'calendar' | 'contact' | 'file')[];
+  readonly source: { readonly kind: 'imap' | 'nextcloud'; readonly config: Record<string, unknown>; readonly credentials: Record<string, string> };
+  readonly target: { readonly kind: 'jmap' | 'nextcloud'; readonly config: Record<string, unknown>; readonly credentials: Record<string, string> };
 }
+
+// Demo Stalwart accounts (deploy/selfhost/setup-stalwart.sh always provisions these four,
+// fixed, regardless of caller — see that script's PLAN_FILE). Reached by the compose
+// network alias "stalwart" that setup-managed-demo.sh joins it to.
+const STALWART_MAIL = { host: 'stalwart', imapsPort: 993, jmapBaseUrl: 'http://stalwart:8080' };
+
+// Demo Nextcloud accounts (provisioned by setup-managed-demo.sh via the canonical
+// deploy/selfhost/setup-nextcloud-users.sh, run once per tenant with tenant-specific
+// usernames). Reached by the compose service name "nextcloud".
+const NEXTCLOUD_DAV_BASE_URL = 'http://nextcloud/';
 
 const DEMO_TENANTS: readonly DemoTenant[] = [
   {
@@ -56,6 +92,17 @@ const DEMO_TENANTS: readonly DemoTenant[] = [
     sourceMailboxId: 'a0000000-0000-4000-8000-0000000000b1',
     targetMailboxId: 'a0000000-0000-4000-8000-0000000000b2',
     mappingId: 'a0000000-0000-4000-8000-0000000000d1',
+    domains: ['email'],
+    source: {
+      kind: 'imap',
+      config: { type: 'imap-oauth2', host: STALWART_MAIL.host, port: STALWART_MAIL.imapsPort, user: 'source@dev.local' },
+      credentials: { password: 'source_password' },
+    },
+    target: {
+      kind: 'jmap',
+      config: { type: 'jmap', baseUrl: STALWART_MAIL.jmapBaseUrl, user: 'target@dev.local' },
+      credentials: { password: 'target_password' },
+    },
   },
   {
     tenantId: 'b0000000-0000-4000-8000-000000000002',
@@ -66,6 +113,17 @@ const DEMO_TENANTS: readonly DemoTenant[] = [
     sourceMailboxId: 'b0000000-0000-4000-8000-0000000000b1',
     targetMailboxId: 'b0000000-0000-4000-8000-0000000000b2',
     mappingId: 'b0000000-0000-4000-8000-0000000000d1',
+    domains: ['calendar', 'contact', 'file'],
+    source: {
+      kind: 'nextcloud',
+      config: { baseUrl: NEXTCLOUD_DAV_BASE_URL },
+      credentials: { username: 'tenant-b-source', password: 'tenant_b_source_pw' },
+    },
+    target: {
+      kind: 'nextcloud',
+      config: { baseUrl: NEXTCLOUD_DAV_BASE_URL },
+      credentials: { username: 'tenant-b-target', password: 'tenant_b_target_pw' },
+    },
   },
 ];
 
@@ -92,8 +150,10 @@ async function seedTenant(
         })
         .onConflictDoNothing();
 
-      // Source (O365) + target (Nextcloud) connections. Config is illustrative;
-      // real credentials are supplied out-of-band (never seeded).
+      // Source + target connections against the real demo backend (see file header for
+      // why each tenant only points at one). Credentials are encrypted with the same
+      // SECRET_ENCRYPTION_KEY the api/worker containers use, exactly like the real
+      // create-mapping API route (apps/api/src/routes/migrations/index.ts).
       await tx
         .insert(connection)
         .values([
@@ -101,17 +161,19 @@ async function seedTenant(
             id: t.sourceConnectionId,
             tenantId: t.tenantId,
             role: 'source',
-            kind: 'o365',
-            displayName: 'O365 (demo source)',
-            config: { host: 'outlook.office365.com', port: 993 },
+            kind: t.source.kind,
+            displayName: `${t.source.kind} (demo source)`,
+            config: t.source.config,
+            secretRef: JSON.stringify(SecretStore.encryptCredentials(t.source.credentials).encrypted),
           },
           {
             id: t.targetConnectionId,
             tenantId: t.tenantId,
             role: 'target',
-            kind: 'nextcloud',
-            displayName: 'Nextcloud (demo target)',
-            config: { baseUrl: 'https://nextcloud.demo.openmigrate.test' },
+            kind: t.target.kind,
+            displayName: `${t.target.kind} (demo target)`,
+            config: t.target.config,
+            secretRef: JSON.stringify(SecretStore.encryptCredentials(t.target.credentials).encrypted),
           },
         ])
         .onConflictDoNothing();
@@ -152,16 +214,19 @@ async function seedTenant(
         })
         .onConflictDoNothing();
 
-      // Scope selection: enable all four domains for the demo tenants so the
-      // managed-scheduler has work to do (email, calendar, contact, file).
+      // Scope selection: only the domains this tenant's backend can actually serve
+      // (see the DemoTenant.domains comment) so managed-scheduler.ts has real work to do.
       await tx
         .insert(scopeSelection)
-        .values([
-          { mappingId: t.mappingId, tenantId: t.tenantId, domain: 'email', included: true, filters: {} },
-          { mappingId: t.mappingId, tenantId: t.tenantId, domain: 'calendar', included: true, filters: {} },
-          { mappingId: t.mappingId, tenantId: t.tenantId, domain: 'contact', included: true, filters: {} },
-          { mappingId: t.mappingId, tenantId: t.tenantId, domain: 'file', included: true, filters: {} },
-        ])
+        .values(
+          t.domains.map((domain) => ({
+            mappingId: t.mappingId,
+            tenantId: t.tenantId,
+            domain,
+            included: true,
+            filters: {},
+          })),
+        )
         .onConflictDoNothing();
     });
   } finally {
@@ -186,6 +251,9 @@ async function main(): Promise<void> {
   if (!jwtSecret) {
     throw new Error('JWT_SECRET is required to mint demo tokens (must match the API)');
   }
+  // Fails fast with a clear message via SecretStore.validate() -> validateSecretKey()
+  // if SECRET_ENCRYPTION_KEY is missing/malformed, before any connection is encrypted.
+  SecretStore.validate();
 
   const tokens: Array<{ tenant: string; email: string; token: string }> = [];
   for (const t of DEMO_TENANTS) {
