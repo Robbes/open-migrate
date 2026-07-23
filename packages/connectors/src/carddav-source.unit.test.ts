@@ -477,6 +477,33 @@ END:VCARD`;
 
       expect(decoded).toBe('Test <description> & more');
     });
+
+    it('should decode numeric character references (SabreDAV escapes \\r as &#13;)', () => {
+      const source = new CarddavSource({
+        url: 'https://carddav.example.com/',
+        username: 'test',
+        passwordEnv: 'TEST_PASSWORD',
+      });
+
+      // Reproduces the real failure: a vCard's CRLF line terminators serialized inside
+      // <address-data> text content as &#13;&#10; (valid XML for embedded control chars).
+      // Undecoded, the literal string "&#13;" ends up in the UID, and SabreDAV rejects the
+      // resulting PUT as invalid vCard data (415 Unsupported Media Type).
+      const encoded = 'UID:contact1@example.com&#13;&#10;FN:Test';
+      const decoded = (source as any).decodeXmlEntities(encoded);
+
+      expect(decoded).toBe('UID:contact1@example.com\r\nFN:Test');
+    });
+
+    it('should decode hex numeric character references', () => {
+      const source = new CarddavSource({
+        url: 'https://carddav.example.com/',
+        username: 'test',
+        passwordEnv: 'TEST_PASSWORD',
+      });
+
+      expect((source as any).decodeXmlEntities('a&#x0D;&#x0A;b')).toBe('a\r\nb');
+    });
   });
 
   describe('Line unfolding', () => {

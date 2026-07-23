@@ -772,9 +772,21 @@ export class CarddavSource implements ContactSource {
 
   /**
    * Decode XML entities.
+   *
+   * MUST include numeric character references (&#13; / &#x0D;), not just the five named
+   * entities — SabreDAV (Nextcloud's CardDAV backend) serializes control characters like the
+   * vCard CRLF line terminator's \r as &#13; inside <address-data> text content (valid XML;
+   * a literal \r byte in text content SHOULD be escaped). Without decoding it back, the raw
+   * string "&#13;" ends up embedded in the vCard — corrupting the extracted UID (and every
+   * PUT filename built from it: SabreDAV then rejects the resulting resource as "not a valid
+   * vCard" with 415 Unsupported Media Type, since the payload contains that literal text
+   * instead of a real line break). Decode numeric refs before the named entities so a
+   * (hypothetical) literal "&amp;#13;" in real content isn't double-decoded into a CR.
    */
   private decodeXmlEntities(str: string): string {
     return str
+      .replace(/&#x([0-9A-Fa-f]+);/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/&#(\d+);/g, (_, dec: string) => String.fromCharCode(parseInt(dec, 10)))
       .replace(/&lt;/gi, '<')
       .replace(/&gt;/gi, '>')
       .replace(/&amp;/gi, '&')

@@ -492,6 +492,17 @@ END:VCALENDAR`;
 
       expect(decoded).toBe('Test <description> & more');
     });
+
+    it('should decode numeric character references (&#13; / &#x0D;)', () => {
+      const source = new CalDAVSource({
+        url: 'https://caldav.example.com/',
+        username: 'test',
+        passwordEnv: 'TEST_PASSWORD',
+      });
+
+      expect((source as any).decodeXmlEntities('a&#13;&#10;b')).toBe('a\r\nb');
+      expect((source as any).decodeXmlEntities('a&#x0D;&#x0A;b')).toBe('a\r\nb');
+    });
   });
 
   describe('Line unfolding', () => {
