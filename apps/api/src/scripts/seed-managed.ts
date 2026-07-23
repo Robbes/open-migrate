@@ -24,10 +24,14 @@
  * Nextcloud) at once with today's schema. Real tenants configure their own
  * connections through the API; this split is a demo-seed constraint only.
  *
- * Idempotent: fixed UUIDs + `ON CONFLICT DO NOTHING`, so re-running is a no-op
- * for everything except credentials — re-run after rotating a demo password
- * and the old encrypted secretRef sticks (ON CONFLICT DO NOTHING won't update
- * it); drop the connection row first if you need to rotate.
+ * Idempotent: fixed UUIDs. Most tables use `ON CONFLICT DO NOTHING` (re-running
+ * is a no-op). The `connection` rows are the one exception — they UPSERT
+ * (`ON CONFLICT DO UPDATE`) so config/credentials always reflect what this
+ * script currently defines, even against a Postgres volume left over from an
+ * older version of this script (e.g. from before demo credentials existed —
+ * DO NOTHING would otherwise silently keep serving the stale, credential-less
+ * config forever, which is exactly the trap that produced a false "no
+ * credentials configured" read on a stale volume during T7 verification).
  * All writes go through `withTenant()` (transaction-scoped `app.current_tenant`),
  * so the script is correct whether it connects as the DB owner or as `app_user`.
  *
@@ -44,6 +48,7 @@
  */
 
 import jwt from 'jsonwebtoken';
+import { sql } from 'drizzle-orm';
 import {
   createPgDb,
   withTenant,
@@ -154,29 +159,42 @@ async function seedTenant(
       // why each tenant only points at one). Credentials are encrypted with the same
       // SECRET_ENCRYPTION_KEY the api/worker containers use, exactly like the real
       // create-mapping API route (apps/api/src/routes/migrations/index.ts).
+      //
+      // UPSERT, not onConflictDoNothing: this row's id is a fixed UUID, so on a Postgres
+      // volume that already has a connection row from an older run of this script (e.g. an
+      // earlier session, before credentials were added), DO NOTHING would silently keep
+      // the stale config/secretRef forever — every re-run must actually reflect the demo
+      // backend/credentials this script currently defines.
+      const sourceConn = {
+        id: t.sourceConnectionId,
+        tenantId: t.tenantId,
+        role: 'source' as const,
+        kind: t.source.kind,
+        displayName: `${t.source.kind} (demo source)`,
+        config: t.source.config,
+        secretRef: JSON.stringify(SecretStore.encryptCredentials(t.source.credentials).encrypted),
+      };
+      const targetConn = {
+        id: t.targetConnectionId,
+        tenantId: t.tenantId,
+        role: 'target' as const,
+        kind: t.target.kind,
+        displayName: `${t.target.kind} (demo target)`,
+        config: t.target.config,
+        secretRef: JSON.stringify(SecretStore.encryptCredentials(t.target.credentials).encrypted),
+      };
       await tx
         .insert(connection)
-        .values([
-          {
-            id: t.sourceConnectionId,
-            tenantId: t.tenantId,
-            role: 'source',
-            kind: t.source.kind,
-            displayName: `${t.source.kind} (demo source)`,
-            config: t.source.config,
-            secretRef: JSON.stringify(SecretStore.encryptCredentials(t.source.credentials).encrypted),
+        .values([sourceConn, targetConn])
+        .onConflictDoUpdate({
+          target: connection.id,
+          set: {
+            kind: sql`excluded.kind`,
+            displayName: sql`excluded.display_name`,
+            config: sql`excluded.config`,
+            secretRef: sql`excluded.secret_ref`,
           },
-          {
-            id: t.targetConnectionId,
-            tenantId: t.tenantId,
-            role: 'target',
-            kind: t.target.kind,
-            displayName: `${t.target.kind} (demo target)`,
-            config: t.target.config,
-            secretRef: JSON.stringify(SecretStore.encryptCredentials(t.target.credentials).encrypted),
-          },
-        ])
-        .onConflictDoNothing();
+        });
 
       await tx
         .insert(mailbox)

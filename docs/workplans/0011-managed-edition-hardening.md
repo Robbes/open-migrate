@@ -50,6 +50,18 @@
 > someone with Docker access needs to run the sequence in `docs/operator-runbook.md`'s "Seed a
 > demo" section and paste the actual `/status` output (or the actual failure, if something is
 > still wrong) into this block — no further status changes here without that evidence.
+>
+> **Follow-up fix (2026-07-23, same day):** a Docker-host run reported the worker/scheduler healthy
+> but syncs still failing with "no credentials" and 8 `scope_selection` rows — that's the *old*
+> seed shape (before the credentials rewrite above), not this branch's current one (4 rows, real
+> `secretRef`s). Root cause: `connection` rows use fixed UUIDs and the seed used
+> `ON CONFLICT DO NOTHING`, so a Postgres volume already carrying connection rows from an older
+> run of this script (pre-credentials) silently kept serving the stale, credential-less config on
+> every re-seed — the new code never actually took effect against that volume. Fixed by changing
+> the `connection` upsert to `ON CONFLICT DO UPDATE` (`seed-managed.ts`) so re-running the seed
+> always reflects whatever this script currently defines, regardless of what a stale volume already
+> has. Still not verified against a live Docker host for the same reason as above — this closes a
+> real bug, not the acceptance criterion itself.
 
 | Task | Status | Evidence |
 |---|---|---|
