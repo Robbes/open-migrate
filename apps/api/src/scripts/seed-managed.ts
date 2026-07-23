@@ -31,6 +31,7 @@ import {
   connection,
   mailbox,
   mailboxMapping,
+  scopeSelection,
 } from '@openmig/ledger';
 
 /** One demo tenant's fixed identifiers (deterministic → idempotent re-runs). */
@@ -149,6 +150,18 @@ async function seedTenant(
           mode: 'mirror',
           status: 'active',
         })
+        .onConflictDoNothing();
+
+      // Scope selection: enable all four domains for the demo tenants so the
+      // managed-scheduler has work to do (email, calendar, contact, file).
+      await tx
+        .insert(scopeSelection)
+        .values([
+          { mappingId: t.mappingId, tenantId: t.tenantId, domain: 'email', included: true, filters: {} },
+          { mappingId: t.mappingId, tenantId: t.tenantId, domain: 'calendar', included: true, filters: {} },
+          { mappingId: t.mappingId, tenantId: t.tenantId, domain: 'contact', included: true, filters: {} },
+          { mappingId: t.mappingId, tenantId: t.tenantId, domain: 'file', included: true, filters: {} },
+        ])
         .onConflictDoNothing();
     });
   } finally {
