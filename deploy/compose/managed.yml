@@ -29,7 +29,7 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
-      - ./packages/ledger/migrations:/docker-entrypoint-initdb.d
+      - ../../packages/ledger/migrations:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-openmigrate}"]
       interval: 10s
