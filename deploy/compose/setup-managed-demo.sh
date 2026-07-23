@@ -27,9 +27,10 @@ set -euo pipefail
 #   NEXTCLOUD_CONTAINER       (default open-migrate-nextcloud, matches managed.yml)
 #   NEXTCLOUD_HOST_PORT       host port nextcloud's :80 is published on
 #                             (default 8083, matches managed.yml's NEXTCLOUD_PORT default)
-#   STALWART_CONTAINER/VOLUME/JMAP_PORT/IMAPS_PORT — forwarded to setup-stalwart.sh with
-#     managed-specific defaults so this never collides with the dev/e2e Stalwart instance
-#     (deploy/compose/dev.yml + setup-stalwart.sh's own defaults) if both run on one host.
+#   STALWART_CONTAINER/VOLUME/CONFIG_VOLUME/JMAP_PORT/IMAPS_PORT — forwarded to
+#     setup-stalwart.sh with managed-specific defaults so this never collides with the
+#     dev/e2e Stalwart instance (deploy/compose/dev.yml + setup-stalwart.sh's own
+#     defaults) if both run on one host.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -41,6 +42,7 @@ NEXTCLOUD_HOST_PORT="${NEXTCLOUD_HOST_PORT:-8083}"
 echo "[setup-managed-demo] Provisioning demo Stalwart (mail source+target)..."
 STALWART_CONTAINER="${STALWART_CONTAINER:-open-migrate-stalwart}" \
 STALWART_VOLUME="${STALWART_VOLUME:-open-migrate-stalwart-data}" \
+STALWART_CONFIG_VOLUME="${STALWART_CONFIG_VOLUME:-open-migrate-stalwart-config}" \
 STALWART_NETWORK="${MANAGED_NETWORK}" \
 STALWART_JMAP_PORT="${STALWART_JMAP_PORT:-18081}" \
 STALWART_IMAPS_PORT="${STALWART_IMAPS_PORT:-1994}" \
