@@ -3,12 +3,13 @@
 # DRAFT (workplan 0011 T7) — NOT YET VERIFIED on a Docker host. See
 # docs/design/0011-t7-dockerfiles-handoff.md.
 #
-# Runs the managed worker. NOTE: the Trigger.dev v4 task model deploys tasks to
-# the Trigger.dev instance rather than running a long-lived process; whether this
-# image should run `trigger deploy`, a dev worker, or the plain entrypoint is an
-# open question for the agent to settle against a real trigger.dev self-host.
-# For now it runs the worker entrypoint under tsx (same source-ships-TS reason as
-# the API).
+# Runs the managed scheduler (apps/worker/src/managed-scheduler.ts), a
+# long-running, multi-tenant process that polls mailbox_mapping for active
+# rows and runs their scheduled syncs — see that file's header for why this
+# exists instead of `src/index.ts` (single-mapping, file-config CLI — the
+# self-host shape) or the Trigger.dev jobs under src/jobs/* (real long-term
+# path, but unreachable until a trigger.config.ts + `trigger deploy` step
+# exist). Runs under tsx (same source-ships-TS reason as the API).
 
 FROM node:24-slim AS base
 ENV PNPM_HOME=/pnpm
@@ -25,5 +26,6 @@ ENV NODE_ENV=production
 COPY --from=build /app /app
 RUN useradd --system --uid 10001 --home-dir /app appuser && chown -R appuser:appuser /app
 USER appuser
+EXPOSE 8082
 # DATABASE_URL / APP_DATABASE_URL / SECRET_ENCRYPTION_KEY / TRIGGER_* from compose env.
-CMD ["pnpm", "--filter", "@openmig/worker", "exec", "tsx", "src/index.ts"]
+CMD ["pnpm", "--filter", "@openmig/worker", "exec", "tsx", "src/managed-scheduler.ts"]

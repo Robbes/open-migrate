@@ -4,13 +4,13 @@ Operational procedures for whoever runs the **managed** control plane (the multi
 as distinct from a self-host owner running the single-tenant appliance (see the future
 `selfhost-quickstart.md`). Stack definition: [`deploy/compose/managed.yml`](../deploy/compose/managed.yml).
 
-> **Scope & honesty note (workplan 0011 T7).** The Postgres + Trigger.dev + Redis services in the
-> compose file start from public images today. The **`api`, `worker`, and `web` services still need
-> Dockerfiles that are not yet in the repo** — until those land, run those three from source against
-> the compose Postgres (see [Interim: run apps from source](#interim-run-apps-from-source)). The
-> full clean-`up` → DoD-journey run is therefore **not yet verified end-to-end**; this runbook
-> documents the intended operation and the parts that already work. Update this note when the
-> images land.
+> **Scope & honesty note (workplan 0011 T7, updated 2026-07-23).** `apps/{api,worker,web}/Dockerfile`
+> exist and `managed.yml` builds all three from them (no more "run from source" workaround needed).
+> `worker` runs `apps/worker/src/managed-scheduler.ts`, a DB-polling scheduler — not the real
+> Trigger.dev v4 task model yet (that still needs a `trigger.config.ts` + `trigger deploy` step).
+> **Not yet verified end-to-end against a live Docker host** — see the 0011 workplan T7 Status block
+> for exactly what has and hasn't been run. Update this note once someone with Docker access confirms
+> the full clean-`up` → DoD-journey run and pastes the evidence into that Status block.
 
 ## What the operator can and cannot see
 
@@ -58,16 +58,16 @@ rotate it in the DB (`ALTER ROLE app_user PASSWORD …`) to match.
 ```bash
 cd deploy/compose
 
-# Start the infrastructure services (these work today).
-docker compose -f managed.yml up -d postgres trigger-db trigger-redis trigger-api trigger-worker
+# Start the infrastructure services.
+docker compose -f managed.yml up -d postgres trigger-db trigger-redis trigger-api
 
 # Migrations: applied automatically on first Postgres init from
 # packages/ledger/migrations (mounted at /docker-entrypoint-initdb.d). This runs
 # ONLY on an empty data volume. For an existing volume, apply new migrations with
 # the migration runner / your migration step before starting the app (§22.1).
 
-# Bring up the app tier (once the api/worker/web Dockerfiles exist):
-docker compose -f managed.yml up -d api worker web
+# Bring up the app tier (builds apps/{api,worker,web}/Dockerfile):
+docker compose -f managed.yml up -d --build api worker web
 
 # Status / logs (status only — no content is ever logged):
 docker compose -f managed.yml ps
@@ -81,10 +81,10 @@ docker compose -f managed.yml down
 docker compose -f managed.yml down -v
 ```
 
-### Interim: run apps from source
+### Alternative: run apps from source (no image build)
 
-Until the app Dockerfiles land, run the three app services from source against the compose Postgres
-(the DB port is published on `POSTGRES_PORT`, default 5432):
+To iterate without rebuilding images, run the three app services from source against the compose
+Postgres (the DB port is published on `POSTGRES_PORT`, default 5432):
 
 ```bash
 export DATABASE_URL="postgres://openmigrate:<POSTGRES_PASSWORD>@localhost:5432/openmigrate"
@@ -99,13 +99,34 @@ pnpm --filter @openmig/worker dev    # Worker
 
 Seeds two demo tenants — each with an owner, a source/target connection, mailboxes, and a mapping —
 and prints a **demo owner JWT** for each (there is no password-login endpoint yet; auth is
-bearer-token only). Idempotent: safe to re-run.
+bearer-token only). Idempotent: safe to re-run (see the script's header for the one exception —
+credential rotation).
+
+The demo tenants point at a **real backend** (not fake config) so a shadow pass can actually
+complete instead of failing at "no credentials configured": Tenant A syncs mail against a demo
+Stalwart, Tenant B syncs calendar/contact/file against a demo Nextcloud. Provision that backend
+first:
 
 ```bash
-# Runs as the DB owner (bypasses RLS to create tenants); JWT_SECRET must match the API.
+# 1. Bring up Postgres + the demo Nextcloud (part of managed.yml):
+docker compose -f managed.yml up -d postgres nextcloud
+
+# 2. Provision the demo mail (Stalwart) + DAV (Nextcloud) accounts. Requires stalwart-cli
+#    on PATH (see deploy/selfhost/setup-stalwart.sh's header for the install command).
+./setup-managed-demo.sh
+
+# 3. Seed the two demo tenants, pointed at the accounts setup-managed-demo.sh just created.
+#    Runs as the DB owner (bypasses RLS to create tenants); JWT_SECRET and
+#    SECRET_ENCRYPTION_KEY must match the API/worker's .env values.
 DATABASE_URL="postgres://openmigrate:<POSTGRES_PASSWORD>@localhost:5432/openmigrate" \
 JWT_SECRET="<same value as in .env>" \
+SECRET_ENCRYPTION_KEY="<same value as in .env>" \
 pnpm --filter @openmig/api seed:managed
+
+# 4. Bring up the rest of the stack — the worker's managed-scheduler.ts polls
+#    mailbox_mapping and starts running the seeded mappings' sync passes within
+#    its poll interval (60s default):
+docker compose -f managed.yml up -d --build api worker web
 ```
 
 Use each printed token as `Authorization: Bearer <token>` against the API, or drop it into the web

@@ -322,7 +322,10 @@ export async function buildDomainDepsFromMapping(
 
 /**
  * Build source connector from config and decrypted credentials.
- * Currently only supports imap-oauth2 for mail sync.
+ * Currently only supports imap-oauth2 (the only mail source type SourceConfig
+ * defines) for mail sync — but that type's own auth carries EITHER an OAuth2
+ * token (O365) OR a plain password (any other IMAP server, e.g. a self-hosted
+ * Stalwart), see SourceAuth in @openmig/shared. Both are handled below.
  */
 function buildSourceConnectorFromCredentials(
   sourceConfig: SourceConfig,
@@ -337,7 +340,8 @@ function buildSourceConnectorFromCredentials(
 }
 
 /**
- * Build IMAP OAuth2 source from credentials.
+ * Build an IMAP source from credentials — OAuth2 access token or plain
+ * password, whichever the decrypted credentials actually carry.
  */
 function buildImapSourceFromCredentials(
   sourceConfig: SourceConfig,
@@ -349,19 +353,26 @@ function buildImapSourceFromCredentials(
   }
 
   const accessToken = credentials.accessToken || credentials.oauth2_token;
-  if (!accessToken) {
-    throw new Error('OAuth2 access token not found in credentials');
+  const password = credentials.password;
+  if (!accessToken && !password) {
+    throw new Error('IMAP source credentials must include either an OAuth2 access token or a password');
   }
 
   const imapConfig = {
     host: sourceConfig.host,
     port: sourceConfig.port,
-    tls: true,
+    tls: sourceConfig.port === 993,
     auth: {
       user: sourceConfig.user,
       accessToken,
+      password,
     },
-    authType: 'XOAUTH2' as const,
+    // authType must follow which credential is actually present — hardcoding
+    // XOAUTH2 here silently drops a configured password and IMAP servers
+    // reject the resulting empty XOAUTH2 attempt with "No supported
+    // authentication method(s)" (same bug class build-deps.ts's buildImapSource
+    // already fixed for the self-host path; see its comment).
+    authType: accessToken ? ('XOAUTH2' as const) : ('LOGIN' as const),
     throttleLimiter,
   };
 

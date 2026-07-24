@@ -32,6 +32,7 @@ set -euo pipefail
 # Env overrides (all optional):
 #   STALWART_CONTAINER          container name (default openmig-dev-stalwart)
 #   STALWART_VOLUME             data volume name (default openmig-dev-stalwart-data)
+#   STALWART_CONFIG_VOLUME      config volume name (default openmig-dev-stalwart-config)
 #   STALWART_NETWORK            shared network to join (default openmig_dev-network)
 #   STALWART_JMAP_PORT          host port for JMAP/management (default 18080)
 #   STALWART_IMAPS_PORT         host port for IMAPS (default 1993)
@@ -40,6 +41,7 @@ set -euo pipefail
 IMAGE="stalwartlabs/stalwart:v0.16.10"
 CONTAINER="${STALWART_CONTAINER:-openmig-dev-stalwart}"
 VOLUME="${STALWART_VOLUME:-openmig-dev-stalwart-data}"
+CONFIG_VOLUME="${STALWART_CONFIG_VOLUME:-openmig-dev-stalwart-config}"
 NETWORK="${STALWART_NETWORK:-openmig_dev-network}"
 JMAP_PORT="${STALWART_JMAP_PORT:-18080}"
 IMAPS_PORT="${STALWART_IMAPS_PORT:-1993}"
@@ -51,22 +53,32 @@ command -v "$STALWART_CLI" >/dev/null 2>&1 || {
   exit 1
 }
 
+PLAN_FILE="$(mktemp)"
+trap 'rm -f "$PLAN_FILE"' EXIT
+
+docker volume inspect "$VOLUME" >/dev/null 2>&1 || docker volume create "$VOLUME" >/dev/null
+docker volume inspect "$CONFIG_VOLUME" >/dev/null 2>&1 || docker volume create "$CONFIG_VOLUME" >/dev/null
+docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NETWORK" >/dev/null
+
 # The ENTIRE config.json, both phases, nothing else (docs/stalwart-integration-fix.md).
 # Accounts/domains/listeners NEVER go in this file — they're provisioned via stalwart-cli
 # below, into the datastore, not declared statically.
-CONFIG_FILE="$(mktemp)"
-PLAN_FILE="$(mktemp)"
-trap 'rm -f "$CONFIG_FILE" "$PLAN_FILE"' EXIT
-echo '{"@type":"RocksDb","path":"/opt/stalwart/data"}' > "$CONFIG_FILE"
-# mktemp creates the file mode 600 owned by the current user; it's bind-mounted read-only
-# into the container, where Stalwart runs as a DIFFERENT uid and would otherwise get
-# "Permission denied (os error 13)" reading it. This config carries no secret (just the
-# datastore path — accounts/domains/creds are provisioned via stalwart-cli into the
-# datastore, never here), so make it world-readable so the container user can read it.
-chmod 644 "$CONFIG_FILE"
-
-docker volume inspect "$VOLUME" >/dev/null 2>&1 || docker volume create "$VOLUME" >/dev/null
-docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NETWORK" >/dev/null
+#
+# Delivered via a named volume, seeded by a throwaway --rm container that writes the file
+# directly with shell redirection (foreground, not detached — a detached container's stdin
+# is never attached, so piping into `docker run -d` silently lands an empty config, see
+# docs/stalwart-integration-fix.md's "Note on bind-mount vs copy for config delivery").
+# NOT a bind mount: a host path bind-mounted from inside a Docker-outside-of-Docker sandbox
+# (an agent that only reaches Docker via a mounted docker.sock) resolves against the HOST's
+# filesystem, not the sandbox's — the path doesn't exist there, so Docker silently creates an
+# empty DIRECTORY at the mount point instead of mounting the file, and Stalwart fails with
+# "Is a directory (os error 21)". A named volume has no such host-path ambiguity and works
+# identically on a bare runner and inside a sandbox, so it replaces the bind mount everywhere
+# rather than being a DinD-only special case.
+docker run --rm --entrypoint /bin/sh --user root \
+  -v "$CONFIG_VOLUME:/etc/stalwart" \
+  "$IMAGE" \
+  -c 'echo "{\"@type\":\"RocksDb\",\"path\":\"/opt/stalwart/data\"}" > /etc/stalwart/config.json && chmod 644 /etc/stalwart/config.json' >/dev/null
 
 wait_for_jmap() {
   local label="$1"
@@ -93,7 +105,7 @@ docker run -d \
   --network "$NETWORK" \
   --network-alias stalwart \
   -v "$VOLUME:/opt/stalwart/data" \
-  -v "$CONFIG_FILE:/etc/stalwart/config.json:ro" \
+  -v "$CONFIG_VOLUME:/etc/stalwart:ro" \
   -e STALWART_HOSTNAME=0.0.0.0 \
   -e STALWART_RECOVERY_MODE=1 \
   -e STALWART_RECOVERY_ADMIN="admin:${RECOVERY_PASSWORD}" \
@@ -128,7 +140,7 @@ docker run -d \
   --network "$NETWORK" \
   --network-alias stalwart \
   -v "$VOLUME:/opt/stalwart/data" \
-  -v "$CONFIG_FILE:/etc/stalwart/config.json:ro" \
+  -v "$CONFIG_VOLUME:/etc/stalwart:ro" \
   -e STALWART_HOSTNAME=0.0.0.0 \
   -p "${JMAP_PORT}:8080" \
   -p "${IMAPS_PORT}:993" \

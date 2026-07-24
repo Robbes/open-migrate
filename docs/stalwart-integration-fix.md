@@ -272,6 +272,53 @@ repo's test setup, check whether it reproduces in a plain (non-nested) Docker en
 if it only fails when Docker is reached via a mounted socket, it's almost certainly one of the
 items above, not a regression here.
 
+### Update (2026-07-23): the bind-mount trap is now FIXED in `setup-stalwart.sh`, not just documented
+
+An agent hit exactly the predicted "Is a directory" failure (see "Note on bind-mount vs copy for
+config delivery" below) while trying to provision Stalwart from inside a DooD sandbox for the
+managed-edition T7 demo backend, and worked out a fix independently: deliver `config.json` via a
+named Docker volume, seeded by a throwaway `--rm` container that writes the file with shell
+redirection (`echo ... > /etc/stalwart/config.json`), instead of a bind-mounted host path. This is
+exactly the "named-volume stage" this doc already prescribed as the fix — it's now applied directly
+in `setup-stalwart.sh` (both phases mount `$CONFIG_VOLUME:/etc/stalwart:ro`), so it works
+identically on a bare runner and inside a sandbox. The old advice below ("switch config delivery ...
+if it ever needs to run inside a DooD sandbox") is done, not still-open — don't re-derive it.
+
+### Open, NOT YET RESOLVED: recovery-mode listener sometimes doesn't appear to bind
+
+While debugging the above, the same agent — after fixing config delivery so `config.json` was
+confirmed present and non-empty in the volume — still saw phase 1 (recovery mode) fail: the
+container logged `Network listener started ... localPort = 8080` and reported `healthy`, but
+`curl http://127.0.0.1:<published-port>/.well-known/jmap` timed out/refused, AND (this is the part
+that rules out simple host/sandbox-loopback confusion) `docker exec <container> cat /proc/net/tcp`
+showed no `LISTEN` (state `0A`) entry for port 8080 (`0x1F90`) at all, only unrelated
+`CLOSE_WAIT` sockets. This was investigated for a long time (IPv6 checks, `/proc/net/tcp`
+forensics, browsing stalwartlabs' docs site and GitHub — several of those URLs 404'd) without
+reaching a confirmed root cause. **This is a real open question, not resolved by this doc update.**
+
+Before repeating that investigation, rule these out first, cheaply:
+1. **Confirm you're actually re-testing after the config-delivery fix above**, not against a
+   container started before it (`docker rm -f` the container and volume, don't just re-run against
+   stale state — see the "Docker debris"/stale-volume items elsewhere in this doc and in the 0011
+   workplan's T7 status for how often stale state has produced misleading failures here).
+2. **Separate "can't reach it from my sandbox's own loopback" from "genuinely not listening."** The
+   agent's `curl 127.0.0.1:<port>` test is exactly the DooD localhost-confusion trap in item 0 above
+   — if the agent's own container isn't on the same network as the target and isn't using
+   `docker exec`, a refused/timed-out curl from its own `127.0.0.1` proves nothing either way. The
+   `docker exec ... /proc/net/tcp` check is the one piece of evidence in that session that isn't
+   explained by the loopback trap (it inspects the target container's own namespace directly) — if
+   you reproduce this, lead with that check specifically, and try `docker exec <container> curl
+   127.0.0.1:8080/.well-known/jmap` (from inside the container itself) as a second, even more direct
+   confirmation before concluding anything about the published port or the sandbox's network.
+3. **Try a bare (non-nested) Docker host if you have one available.** Per the "Rule" above this
+   section: if a failure only reproduces inside a DooD sandbox, it's more likely something about that
+   environment than a Stalwart/script bug — `setup-stalwart.sh` (pre-this-fix, bind-mount and all)
+   is proven working on the bare Spark runner per "Round 4" below.
+4. If it reproduces even via `docker exec` on a bare host, that's a genuine, novel finding worth its
+   own investigation (image bug, `STALWART_RECOVERY_MODE` regression in v0.16.10, resource limits
+   inside the sandbox preventing the listener thread from starting, etc.) — but confirm 1–3 first
+   before spending hours on it again.
+
 ## Bugs found via Spark box forensics, and how they were actually fixed
 
 Three **independent, already-committed bugs** surfaced while diagnosing a stranded agent session,

@@ -6,6 +6,16 @@
 # - Trigger.dev (managed orchestration platform)
 # - Open Migration API & Worker
 # - Web application
+# - Nextcloud (demo CalDAV/CardDAV/WebDAV backend for the T7 DoD demo — see
+#   deploy/compose/setup-managed-demo.sh)
+#
+# Deliberately NOT here: a demo mail (IMAP/JMAP) backend. Stalwart requires a
+# two-phase startup (provisioning in recovery mode, then serving in normal
+# mode) that plain `docker compose up` cannot express for one service — same
+# reason deploy/compose/dev.yml excludes it. Bring it up with
+# deploy/selfhost/setup-stalwart.sh instead (the ONE canonical way; see that
+# script's header) — deploy/compose/setup-managed-demo.sh does this for you,
+# joined to this stack's network so the worker reaches it by name.
 services:
   # PostgreSQL Database
   postgres:
@@ -19,7 +29,7 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
-      - ./packages/ledger/migrations:/docker-entrypoint-initdb.d
+      - ../../packages/ledger/migrations:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-openmigrate}"]
       interval: 10s
@@ -150,7 +160,13 @@ services:
     networks:
       - open-migrate-network
 
-  # Open Migration Worker
+  # Open Migration Worker — runs apps/worker/src/managed-scheduler.ts, a
+  # DB-polling scheduler for active mailbox_mapping rows across all tenants.
+  # This is an interim path, not the real Trigger.dev v4 task model: the
+  # tasks under apps/worker/src/jobs/* still need a trigger.config.ts + a
+  # `trigger deploy` step against trigger-api before they're reachable (see
+  # managed-scheduler.ts's header). Until then, this container is what
+  # actually runs syncs in the managed edition.
   worker:
     build:
       context: ../..
@@ -158,16 +174,20 @@ services:
     container_name: open-migrate-worker
     environment:
       NODE_ENV: ${NODE_ENV:-development}
-      # See the api service above: owner URL for migrations, app_user URL for the
-      # RLS-enforced tenant data path.
+      PORT: 8082
       DATABASE_URL: postgresql://${POSTGRES_USER:-openmigrate}:${POSTGRES_PASSWORD:-openmigrate_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
       APP_DATABASE_URL: postgresql://${APP_DB_USER:-app_user}:${APP_DB_PASSWORD:-app_password}@postgres:5432/${POSTGRES_DB:-openmigrate}
-      # Same key as the API — the worker decrypts connection credentials.
       SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:?set a 32-byte key in .env}
       TRIGGER_API_URL: http://trigger-api:3000
       TRIGGER_API_KEY: ${TRIGGER_API_KEY:-dev-api-key}
       IMAP_TIMEOUT: ${IMAP_TIMEOUT:-300}
       JMAP_TIMEOUT: ${JMAP_TIMEOUT:-300}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8082/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
     depends_on:
       postgres:
         condition: service_healthy
@@ -189,6 +209,23 @@ services:
       - "${WEB_PORT:-3123}:80"
     depends_on:
       - api
+    networks:
+      - open-migrate-network
+
+  # Demo CalDAV/CardDAV/WebDAV backend (T7 DoD demo). Two accounts per demo
+  # tenant get provisioned on it by setup-managed-demo.sh; the worker reaches
+  # it at http://nextcloud/ via this network. Not needed for a production
+  # deployment — operators bring their own calendar/contacts/file targets.
+  nextcloud:
+    image: nextcloud:34-apache
+    container_name: open-migrate-nextcloud
+    environment:
+      SQLITE_DATABASE: nextcloud
+      NEXTCLOUD_ADMIN_USER: admin
+      NEXTCLOUD_ADMIN_PASSWORD: ${NEXTCLOUD_ADMIN_PASSWORD:-admin_managed_pw}
+      NEXTCLOUD_TRUSTED_DOMAINS: "localhost nextcloud"
+    ports:
+      - "${NEXTCLOUD_PORT:-8083}:80"
     networks:
       - open-migrate-network
 
