@@ -584,6 +584,37 @@ services:
   # tenant get provisioned on it by setup-managed-demo.sh; the worker reaches
   # it at http://nextcloud/ via this network. Not needed for a production
   # deployment — operators bring their own calendar/contacts/file targets.
+  # The status page (workplan 0094). Its configuration is deploy/compose/gatus.yaml,
+  # in git and reviewed — read the header of that file for what this page can and
+  # cannot tell you, and why it lives here rather than on its own machine.
+  gatus:
+    image: ghcr.io/twin/gatus:v5.36.0
+    container_name: ownpace-status
+    restart: unless-stopped
+    environment:
+      # The address a BROWSER uses, not an internal service name: probing
+      # http://api:3001 would prove the container talks to itself and say
+      # nothing about the path a customer actually takes — through the reverse
+      # proxy, the certificate and the same-origin /api proxy.
+      STATUS_WEB_URL: ${WEB_URL:?set WEB_URL in .env}
+      GATUS_CONFIG_PATH: /config/config.yaml
+    volumes:
+      - ./gatus.yaml:/config/config.yaml:ro
+      # History lives here and NOT in the Postgres this page watches, so an
+      # outage is still readable afterwards.
+      - gatus_data:/data
+    ports:
+      - "${STATUS_PORT:-3124}:8080"
+    networks:
+      - ownpace-network
+    # No `depends_on`. A status page that will not start until the thing it is
+    # watching is healthy is a status page that is never there when it matters.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
   nextcloud:
     image: nextcloud:34-apache
     container_name: ownpace-nextcloud
@@ -617,6 +648,7 @@ networks:
     driver: bridge
 
 volumes:
+  gatus_data:
   # The identity provider's first-init provisioning token (ADR-0042).
   zitadel_machinekey:
   postgres_data:

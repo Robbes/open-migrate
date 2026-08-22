@@ -33,6 +33,7 @@ import setupRoutes from './routes/setup.ts';
 import connectionRoutes from './routes/connections.ts';
 import accessRequestRoutes from './routes/access-requests.ts';
 import meRoutes from './routes/me.ts';
+import readyRoutes from './routes/ready.ts';
 import { assertProductionAuthConfig } from './middleware/auth.ts';
 import { assertProductionUrlConfig } from './config-guards.ts';
 import { serverFault } from './server-fault.ts';
@@ -92,6 +93,12 @@ const version = (req: Request, res: Response) => {
 };
 app.get('/version', version);
 app.get('/api/version', version);
+
+// Readiness, which unlike /health can answer NO (workplan 0094 T1). Mounted at
+// both paths for the same reason /health is: the web image's same-origin proxy
+// forwards only /api/*, and the status page reaches it through that proxy.
+app.use('/ready', readyRoutes);
+app.use('/api/ready', readyRoutes);
 
 /**
  * Prometheus metrics (0026 T3 row 19, owner decision 2026-08-05: option A).

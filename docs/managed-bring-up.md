@@ -505,6 +505,27 @@ first time they sign in, provided the identity provider asserts
 nothing. Neither can be undone by deleting the row: nobody has DELETE on that
 table, so a decision stays on the record.
 
+### 8d. The status page *(optional, comes up with the stack)*
+
+`gatus` is in `managed.yml` and starts with everything else (workplan 0094). It
+listens on `STATUS_PORT` (default `3124`); put it behind the reverse proxy at
+`status.<your domain>` alongside the app.
+
+```bash
+docker compose -f deploy/compose/managed.yml up -d gatus
+curl -fsS "http://localhost:${STATUS_PORT:-3124}/health"
+```
+
+**Read [`status-page.md`](./status-page.md) before you trust a green light.**
+This page runs INSIDE the stack it watches, so it cannot tell you the stack is
+down — when the box is off, the page is off. It answers three narrower questions
+honestly: is a provider down (the usual cause of a stalled migration), is part
+of Ownpace unwell while the rest serves, and was there an outage recently. The
+page says this itself, in the button beside its heading.
+
+What it watches is `deploy/compose/gatus.yaml` — in git, reviewed, and edited
+with a restart rather than through a web console.
+
 ### 9. `tasks` — the task environment, then the deploy
 
 ```bash
@@ -887,4 +908,5 @@ then `up -d`. Every service reads them, so nothing in `managed.yml` is edited.
 - [`operator-runbook.md`](./operator-runbook.md) — running it once it is up
 - [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md) — symptoms across both editions
 - [`rls-guide.md`](./rls-guide.md) — why the app connects as `app_user`
+- [`status-page.md`](./status-page.md) — what the status page can and cannot tell you
 - [`performance.md`](./performance.md) — the pooler, the rate budget, the tick

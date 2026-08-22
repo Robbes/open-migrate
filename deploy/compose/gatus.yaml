@@ -1,0 +1,142 @@
+# Ownpace status page (workplan 0094).
+#
+# ## Read this before trusting a green light
+#
+# THIS PAGE RUNS INSIDE THE STACK IT WATCHES. When the box is off, the network
+# is gone, or Docker itself has fallen over, this page is off too — so it cannot
+# answer "is Ownpace down". It answers three narrower questions honestly:
+#
+#   - is a DEPENDENCY down (Microsoft, Google) — the usual cause of a stalled
+#     migration, and nothing to do with our stack being up;
+#   - is a PART of Ownpace down while the rest serves (the database, sign-in);
+#   - WAS there an outage recently — history survives restarts, see `storage`.
+#
+# That limit is deliberate, not an oversight (owner decision 2026-08-22): before
+# there are customers, an honest page inside the stack beats a second machine to
+# patch. The `ui.buttons` entry below says so to visitors, because a status page
+# that quietly overstates what it knows is worse than no status page.
+#
+# Moving it out later is a deploy change and not a rewrite: this file and the
+# endpoints it names stay exactly as they are, pointed at public URLs from a
+# machine that is not this one.
+#
+# ## Why Gatus and not the alternatives
+#
+# Its configuration is THIS FILE, in git, reviewed like everything else — the
+# same reason `setup-zitadel.sh` exists rather than a page of console clicks.
+# Uptime Kuma is the popular choice and keeps its monitors in a SQLite blob
+# edited through a web UI, which cannot be reviewed, diffed or reproduced.
+# Cachet does not probe at all; you feed it.
+
+storage:
+  # SQLite on a volume, NOT the Postgres this page is watching. History that
+  # lived in the database would vanish at exactly the moment somebody wanted to
+  # look at it, which is the whole failure this page exists to record.
+  type: sqlite
+  path: /data/status.db
+
+ui:
+  title: "Ownpace status"
+  header: "Ownpace status"
+  description: "Live status of the Ownpace service and the providers it migrates between."
+  buttons:
+    - name: "What this page cannot tell you"
+      link: "https://github.com/Robbes/Ownpace/blob/main/docs/status-page.md"
+
+client:
+  timeout: 10s
+
+endpoints:
+  # ------------------------------------------------------------- Ownpace --
+  # `/api/health` is a liveness answer — the process is running. `/api/ready`
+  # is the one that can say no, and each component below reads one field of it
+  # so the page shows WHICH part is unwell rather than a single red light for
+  # the lot (workplan 0094 T1).
+  - name: Web app
+    group: Ownpace
+    url: "${STATUS_WEB_URL}/"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+
+  - name: API
+    group: Ownpace
+    url: "${STATUS_WEB_URL}/api/health"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == ok"
+
+  - name: Database
+    group: Ownpace
+    url: "${STATUS_WEB_URL}/api/ready"
+    interval: 60s
+    conditions:
+      # Not `[STATUS] == 200`: readiness answers 200 while DEGRADED, on purpose,
+      # so this reads the field rather than the code.
+      - "[BODY].database == up"
+
+  - name: Sign-in
+    group: Ownpace
+    url: "${STATUS_WEB_URL}/api/ready"
+    interval: 60s
+    conditions:
+      - "[BODY].signIn == up"
+
+  # ------------------------------------------------------ Sources (from) --
+  # Where mail and files are migrated FROM. These are other people's services:
+  # when one is down, migrations out of it stall and there is nothing wrong with
+  # Ownpace — which is exactly the confusion this group exists to settle.
+  #
+  # Unauthenticated discovery documents, deliberately. They are stable, public,
+  # rate-limit-free, and need no credential — a status check that has to hold a
+  # customer's token is a status check that fails for the wrong reasons.
+  - name: Microsoft 365
+    group: Sources
+    url: "https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration"
+    interval: 5m
+    conditions:
+      - "[STATUS] == 200"
+
+  - name: Google Workspace
+    group: Sources
+    url: "https://accounts.google.com/.well-known/openid-configuration"
+    interval: 5m
+    conditions:
+      - "[STATUS] == 200"
+
+  - name: Gmail API
+    group: Sources
+    url: "https://gmail.googleapis.com/$discovery/rest?version=v1"
+    interval: 5m
+    conditions:
+      - "[STATUS] == 200"
+
+  # -------------------------------------------------------- Targets (to) --
+  # Where it goes. ADR-0011 recommends managed EU/CH platforms and permits
+  # self-hosted ones — and is explicit that a self-hosted target is the
+  # customer's to operate. So only the RECOMMENDED targets are listed: a red
+  # light here means the destination we suggested is unwell, which is ours to
+  # say. Somebody's own Stalwart is not, and putting it on a public page would
+  # be reporting on infrastructure we do not run.
+  - name: Soverin
+    group: Targets
+    url: "https://soverin.net"
+    interval: 5m
+    conditions:
+      - "[STATUS] == 200"
+      - "[CERTIFICATE_EXPIRATION] > 168h"
+
+  - name: Mailfence
+    group: Targets
+    url: "https://mailfence.com"
+    interval: 5m
+    conditions:
+      - "[STATUS] == 200"
+
+  - name: Infomaniak
+    group: Targets
+    url: "https://www.infomaniak.com"
+    interval: 5m
+    conditions:
+      - "[STATUS] == 200"
